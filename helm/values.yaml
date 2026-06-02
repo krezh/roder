@@ -1,0 +1,90 @@
+# roder is a single-user, in-cluster GUI. It keeps a per-pod informer cache, so
+# each replica opens its own set of watches against the API server. Running ONE
+# replica keeps exactly one watch per active resource type on etcd — raising this
+# duplicates those watches and is rarely what you want for a personal tool.
+replicaCount: 1
+
+image:
+  repository: ghcr.io/krezh/roder
+  pullPolicy: IfNotPresent
+  # Defaults to the chart appVersion when empty.
+  tag: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Public base URL roder is served on (used to build the OIDC redirect URL
+# <baseUrl>/auth/callback). Typically https://<your httpRoute hostname>.
+baseUrl: ""
+
+# OIDC config. roder verifies your login here (like kauth) and then talks to the
+# API server using your passed-through ID token, so the ServiceAccount above stays
+# low-privilege. The client secret should come from an ExternalSecret, not here.
+oidc:
+  issuerUrl: ""
+  clientId: ""
+  # Restrict who may use roder (empty = allow any authenticated OIDC user).
+  allowedGroups: []
+
+# Name of the Secret (managed by ExternalSecrets) holding OIDC_CLIENT_SECRET.
+# Sessions are opaque + server-side, so no signing/encryption keys are needed.
+existingSecret: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+
+service:
+  type: ClusterIP
+  port: 8080
+
+# Gateway API HTTPRoute (matches the dextek/kauth pattern). Disabled by default.
+httpRoute:
+  enabled: false
+  parentRefs:
+    - name: gateway
+      namespace: gateway-system
+  hostnames:
+    - roder.example.com
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+
+resources:
+  limits:
+    memory: 256Mi
+  requests:
+    cpu: 50m
+    memory: 128Mi
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 3
+  periodSeconds: 10
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 1
+  periodSeconds: 5
+
+nodeSelector: {}
+affinity: {}
+tolerations: []

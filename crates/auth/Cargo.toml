@@ -1,0 +1,23 @@
+[package]
+name = "roder-auth"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Server-only: OIDC auth-code flow + token verification/refresh. Mirrors kauth's
+# oauth package (scopes openid/email/profile/groups/offline_access, PKCE+state,
+# ID-token verifier, refresh via the token endpoint).
+
+[dependencies]
+openidconnect = { version = "4", features = ["reqwest"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+base64 = "0.22"
+time = "0.3"
+
+[dev-dependencies]
+tokio = { workspace = true }

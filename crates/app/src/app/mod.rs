@@ -1,0 +1,216 @@
+use leptos::ev;
+use leptos::prelude::*;
+use leptos_meta::{provide_meta_context, MetaTags, Title};
+use leptos_router::components::{Route, Router, Routes};
+use leptos_router::StaticSegment;
+use roder_core::ResourceKind;
+
+use crate::data;
+
+mod components;
+mod detail;
+mod events;
+mod hooks;
+mod logs;
+mod overlays;
+mod state;
+mod util;
+mod views;
+
+pub use state::DetailTarget;
+
+use components::sidebar::Sidebar;
+use components::tooltip::TooltipLayer;
+use components::topbar::Topbar;
+use detail::pods::PodModal;
+use detail::DetailDrawer;
+use detail::Tab;
+use logs::LogSidebar;
+use overlays::confirm::{Confirm, ConfirmDialog};
+use overlays::context_menu::ContextMenu;
+use overlays::palette::CommandPalette;
+use overlays::shortcuts::ShortcutsHelp;
+use state::{
+    Catalog, CtxMenu, LogPods, LogTarget, NavOpen, OnlyProblems, PaletteOpen, PodModalTarget,
+    ResourceFilter, ShortcutsOpen, Tick,
+};
+use views::resource::ResourceView;
+use views::search::SearchResultsView;
+
+/// The HTML document shell rendered on the server.
+pub fn shell(options: LeptosOptions) -> impl IntoView {
+    view! {
+        <!DOCTYPE html>
+        <html lang="en">
+            <head>
+                <meta charset="utf-8" />
+                <meta name="viewport" content="width=device-width, initial-scale=1" />
+                <meta name="color-scheme" content="dark light" />
+                <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+                <AutoReload options=options.clone() />
+                <HydrationScripts options=options.clone() />
+                <leptos_meta::HashedStylesheet options id="leptos" />
+                <MetaTags />
+            </head>
+            <body>
+                <App />
+            </body>
+        </html>
+    }
+}
+
+#[component]
+pub fn App() -> impl IntoView {
+    provide_meta_context();
+
+    let selected_kind = RwSignal::new(None::<ResourceKind>);
+    let selected_ns = RwSignal::new(None::<String>);
+    let detail = RwSignal::new(None::<DetailTarget>);
+    let nav_open = RwSignal::new(false);
+    let palette_open = RwSignal::new(false);
+    let catalog = RwSignal::new(Vec::<ResourceKind>::new());
+    let ctx_menu = RwSignal::new(None::<CtxMenu>);
+    let requested_tab = RwSignal::new(None::<Tab>);
+    let tick = RwSignal::new(0u32);
+    let only_problems = RwSignal::new(false);
+    let confirm = RwSignal::new(None::<Confirm>);
+    let pod_modal = RwSignal::new(None::<DetailTarget>);
+    provide_context(PodModalTarget(pod_modal));
+    let shortcuts_open = RwSignal::new(false);
+    provide_context(ShortcutsOpen(shortcuts_open));
+    let resource_filter = RwSignal::new(String::new());
+    provide_context(ResourceFilter(resource_filter));
+    let log_pods = RwSignal::new(Vec::<LogTarget>::new());
+    provide_context(LogPods(log_pods));
+    provide_context(Tick(tick));
+    provide_context(OnlyProblems(only_problems));
+    provide_context(confirm);
+    provide_context(selected_kind);
+    provide_context(selected_ns);
+    provide_context(detail);
+    provide_context(NavOpen(nav_open));
+    provide_context(PaletteOpen(palette_open));
+    provide_context(Catalog(catalog));
+    provide_context(ctx_menu);
+    provide_context(requested_tab);
+
+    // Restore UI state from a previous session so a page reload stays put.
+    let saved = data::storage_get("roder.nav")
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
+    if let Some(ns) = saved
+        .as_ref()
+        .and_then(|v| v.get("ns").and_then(|x| x.as_str()))
+    {
+        selected_ns.set(Some(ns.to_string()));
+    }
+    let saved_kind = saved
+        .as_ref()
+        .and_then(|v| v.get("kind").and_then(|x| x.as_str()).map(String::from));
+    let saved_detail = saved.as_ref().and_then(|v| v.get("detail").cloned());
+    let restored = RwSignal::new(false);
+
+    // Load the resource catalog once; restore the selected kind/detail once it loads.
+    let cat_res = LocalResource::new(|| async {
+        data::fetch_json::<Vec<ResourceKind>>("/api/resources").await
+    });
+    Effect::new(move |_| {
+        if let Some(Ok(list)) = cat_res.get() {
+            if !restored.get_untracked() {
+                if let Some(k) = saved_kind.as_ref() {
+                    if let Some(kind) = list.iter().find(|x| &x.key == k).cloned() {
+                        selected_kind.set(Some(kind));
+                    }
+                }
+                if let Some(dv) = saved_detail.as_ref() {
+                    if let (Some(key), Some(name)) = (
+                        dv.get("key").and_then(|x| x.as_str()),
+                        dv.get("name").and_then(|x| x.as_str()),
+                    ) {
+                        detail.set(Some(DetailTarget {
+                            key: key.to_string(),
+                            namespace: dv.get("ns").and_then(|x| x.as_str()).map(String::from),
+                            name: name.to_string(),
+                        }));
+                    }
+                }
+                restored.set(true);
+            }
+            catalog.set(list);
+        }
+    });
+
+    // Persist UI state on change (only after restore, so we don't clobber it).
+    Effect::new(move |_| {
+        let kind = selected_kind.get();
+        let ns = selected_ns.get();
+        let det = detail.get();
+        if !restored.get() {
+            return;
+        }
+        let blob = serde_json::json!({
+            "kind": kind.map(|k| k.key),
+            "ns": ns,
+            "detail": det.map(|t| serde_json::json!({ "key": t.key, "ns": t.namespace, "name": t.name })),
+        });
+        data::storage_set("roder.nav", &blob.to_string());
+    });
+
+    // Global keyboard: ⌘/Ctrl-K toggles the palette, Esc closes overlays.
+    Effect::new(move |_| {
+        let handle = window_event_listener(ev::keydown, move |e| {
+            let key = e.key();
+            if (e.meta_key() || e.ctrl_key()) && key.eq_ignore_ascii_case("k") {
+                e.prevent_default();
+                palette_open.update(|o| *o = !*o);
+            } else if e.ctrl_key()
+                && key.eq_ignore_ascii_case("z")
+                && !data::is_text_input_focused()
+            {
+                // k9s-style quick filter: only problem rows.
+                e.prevent_default();
+                only_problems.update(|o| *o = !*o);
+            } else if key == "?" && !data::is_text_input_focused() {
+                shortcuts_open.update(|o| *o = !*o);
+            } else if key == "Escape" {
+                palette_open.set(false);
+                shortcuts_open.set(false);
+                detail.set(None);
+            }
+        });
+        on_cleanup(move || handle.remove());
+    });
+
+    // Tick once a second so the Age column updates live.
+    Effect::new(move |_| {
+        set_interval(
+            move || tick.update(|t| *t = t.wrapping_add(1)),
+            std::time::Duration::from_secs(1),
+        );
+    });
+
+    view! {
+        <Title text="Roder" />
+        <Router>
+            <div class="app" class:nav-open=move || nav_open.get()>
+                <Topbar />
+                <div class="body">
+                    <Sidebar />
+                    <main class="main">
+                        <Routes fallback=|| view! { <p class="empty">"Not found."</p> }>
+                            <Route path=StaticSegment("") view=ResourceView />
+                            <Route path=StaticSegment("search") view=SearchResultsView />
+                        </Routes>
+                    </main>
+                </div>
+                <CommandPalette />
+                <ContextMenu />
+                <ConfirmDialog />
+                <PodModal />
+                <DetailDrawer />
+                <LogSidebar />
+                <ShortcutsHelp />
+                <TooltipLayer />
+            </div>
+        </Router>
+    }
+}

@@ -1,0 +1,13 @@
+/target
+/crates/app/target
+.direnv
+.devenv
+.envrc.local
+result
+result-*
+
+# cargo-leptos build output
+/crates/app/pkg
+node_modules
+
+.certs

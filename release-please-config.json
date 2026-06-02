@@ -1,0 +1,21 @@
+{
+  "release-type": "rust",
+  "package-name": "roder",
+  "bump-minor-pre-major": true,
+  "bump-patch-for-minor-pre-major": true,
+  "always-update": true,
+  "draft-pull-request": true,
+  "include-v-in-tag": false,
+  "extra-files": [
+    {
+      "type": "json",
+      "path": "helm/Chart.yaml",
+      "jsonpath": "$.version"
+    },
+    {
+      "type": "json",
+      "path": "helm/Chart.yaml",
+      "jsonpath": "$.appVersion"
+    }
+  ]
+}

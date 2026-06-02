@@ -1,0 +1,53 @@
+# VCS / local state
+.jj
+.git
+.gitignore
+.idea
+.vscode
+
+# Editor / OS debris
+*.swp
+*.swo
+*.swn
+*.tmp
+.DS_Store
+Thumbs.db
+
+# Nix / devenv / direnv
+flake.nix
+flake.lock
+.devenv
+.direnv
+.envrc
+.envrc.local
+
+# opencode session state
+.opencode
+
+# CI / release tooling
+.github
+.release-please-manifest.json
+release-please-config.json
+.renovaterc.json5
+
+# Just / docs at root
+justfile
+*.md
+LICENSE
+LICENSE-*
+
+# Helm chart (not used by the Rust build)
+helm
+
+# Local dev TLS material (contains the private key)
+.certs
+
+# Build artifacts
+target
+crates/*/target
+result
+result-*
+
+# cargo-leptos intermediate
+crates/app/pkg
+node_modules

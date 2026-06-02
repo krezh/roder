@@ -1,0 +1,50 @@
+name: Test
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cargo-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+          # Needed for the hydrate-feature clippy run.
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: cargo check
+        run: cargo check --workspace --features ssr
+
+      - name: cargo test
+        run: cargo test --workspace --features ssr
+
+      - name: cargo clippy (ssr)
+        run: cargo clippy --workspace --features ssr -- -D warnings
+
+      # Hydrate (wasm) side has its own feature set; the project requires both
+      # to be clean under `-D warnings`. The wasm32 target was installed above.
+      - name: cargo clippy (hydrate)
+        run: cargo clippy -p roder --no-default-features --features hydrate -- -D warnings

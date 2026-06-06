@@ -48,7 +48,7 @@ web-sys = { version = "0.3", features = [
 # ssr (server) only
 roder-k8s = { workspace = true, optional = true }
 roder-auth = { workspace = true, optional = true }
-rand = { version = "0.8", optional = true }
+rand = { version = "0.10", optional = true }
 tokio-stream = { version = "0.1", features = ["sync"], optional = true }
 futures = { version = "0.3", optional = true }
 leptos_axum = { workspace = true, optional = true }

@@ -26,6 +26,11 @@
           "type": "yaml",
           "path": "helm/Chart.yaml",
           "jsonpath": "$.appVersion"
+        },
+        {
+          "type": "toml",
+          "path": "Cargo.toml",
+          "jsonpath": "$.workspace.package.version"
         }
       ],
       "changelog-sections": [

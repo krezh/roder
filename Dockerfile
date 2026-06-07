@@ -13,7 +13,7 @@ WORKDIR /app
 COPY . .
 
 # Builds the SSR server binary + hashed site assets into target/site.
-RUN cd crates/app && cargo leptos build --release
+RUN cargo leptos build --release
 
 # ---- runtime --------------------------------------------------------------
 FROM debian:bookworm-slim AS runtime

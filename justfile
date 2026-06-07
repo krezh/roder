@@ -1,8 +1,5 @@
 # roder task runner. Run `just` to list recipes.
-# The Leptos package lives in crates/app (where cargo-leptos metadata is), so the
-# leptos recipes run from there; cargo recipes run from the workspace root.
-
-app_dir := "crates/app"
+# The Leptos package is the workspace root, so cargo-leptos recipes run from here.
 
 # Primary LAN IP — the default host the HTTPS proxy serves on.
 lan_ip := `ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[\d.]+' | head -1`
@@ -14,11 +11,11 @@ _default:
 # RODER_DEV_MODE bypasses OIDC and uses your current kubeconfig (e.g. `just kind-up`),
 # so local testing needs no IdP. Use `just dev-oidc` to exercise the real login flow.
 dev:
-    cd {{ app_dir }} && RODER_DEV_MODE=1 cargo leptos watch
+    RODER_DEV_MODE=1 cargo leptos watch
 
 # Like `dev`, but with real OIDC (reads OIDC_* / BASE_URL from the environment).
 dev-oidc:
-    cd {{ app_dir }} && cargo leptos watch
+    cargo leptos watch
 
 # Dev server + HTTPS proxy together, for phones/remote devices that block
 # WebAssembly on insecure (http://LAN-IP) origins. Open https://<lan-ip>:8443.
@@ -33,7 +30,7 @@ dev-https host=lan_ip:
     echo "roder over HTTPS:  https://{{ host }}:8443"
     trap 'kill 0' EXIT
     caddy run --adapter caddyfile --config .certs/Caddyfile &
-    cd {{ app_dir }} && RODER_DEV_MODE=1 cargo leptos watch
+    RODER_DEV_MODE=1 cargo leptos watch
 
 # Generate an mkcert cert for `dev-https`; install the printed rootCA on the device.
 dev-certs host=lan_ip:
@@ -48,7 +45,7 @@ dev-certs host=lan_ip:
 fonts:
     #!/usr/bin/env bash
     set -eu
-    dst="{{ app_dir }}/public/fonts"
+    dst="public/fonts"
     mkdir -p "$dst"
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT
@@ -69,7 +66,7 @@ fonts:
 
 # Production build: server binary + hashed wasm/site assets
 build:
-    cd {{ app_dir }} && cargo leptos build --release
+    cargo leptos build --release
 
 # Type-check the whole workspace (server feature set)
 check:

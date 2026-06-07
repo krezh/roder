@@ -48,6 +48,6 @@ crates/*/target
 result
 result-*
 
-# cargo-leptos intermediate
-crates/app/pkg
+# cargo-leptos intermediate (output lives under target/site, already covered
+# by the `target` rule above — this is a no-op safety net).
 node_modules

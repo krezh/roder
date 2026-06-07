@@ -15,22 +15,37 @@ serviceAccount:
   annotations: {}
   name: ""
 
-# Public base URL roder is served on (used to build the OIDC redirect URL
-# <baseUrl>/auth/callback). Typically https://<your httpRoute hostname>.
-baseUrl: ""
-
-# OIDC config. roder verifies your login here and then talks to the
-# API server using your passed-through ID token, so the ServiceAccount above stays
-# low-privilege. The client secret should come from a Secret, not from values.
-oidc:
-  issuerUrl: ""
-  clientId: ""
-  # Restrict who may use roder (empty = allow any authenticated OIDC user).
-  allowedGroups: []
-
 # Name of the Secret holding OIDC_CLIENT_SECRET.
+# Backward-compatible shortcut: prepended to `envFrom` as a `secretRef`.
+# For additional sources (configMap refs, multiple secrets), use `envFrom` below.
 # Sessions are opaque + server-side, so no signing/encryption keys are needed.
 existingSecret: ""
+
+# Environment variables from Secrets and/or ConfigMaps. Each entry is one of:
+#   - secretRef:     { name: <secret> }
+#   - configMapRef:  { name: <configmap> }
+# Multiple sources are supported. `existingSecret` (if set) is prepended as a
+# `secretRef`. Use this for sensitive values (OIDC_CLIENT_SECRET, etc.).
+# Example:
+#   envFrom:
+#     - configMapRef:
+#         name: roder-config
+envFrom: []
+
+# Additional, non-sensitive environment variables. Each entry is a
+# `{name, value}` pair. The roder app reads its own env — at minimum set
+# BASE_URL, OIDC_ISSUER_URL, OIDC_CLIENT_ID, and (optionally) OIDC_ALLOWED_GROUPS.
+# Example:
+#   env:
+#     - name: BASE_URL
+#       value: "https://roder.example.com"
+#     - name: OIDC_ISSUER_URL
+#       value: "https://accounts.google.com"
+#     - name: OIDC_CLIENT_ID
+#       value: "abc.apps.googleusercontent.com"
+#     - name: OIDC_ALLOWED_GROUPS
+#       value: "admins,developers"   # Comma-separated; empty = any authenticated user
+env: []
 
 podAnnotations: {}
 podLabels: {}

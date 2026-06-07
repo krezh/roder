@@ -39,26 +39,16 @@ spec:
           env:
             - name: LEPTOS_SITE_ADDR
               value: "0.0.0.0:8080"
-            {{- with .Values.baseUrl }}
-            - name: BASE_URL
-              value: {{ . | quote }}
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
-            {{- with .Values.oidc.issuerUrl }}
-            - name: OIDC_ISSUER_URL
-              value: {{ . | quote }}
-            {{- end }}
-            {{- with .Values.oidc.clientId }}
-            - name: OIDC_CLIENT_ID
-              value: {{ . | quote }}
-            {{- end }}
-            {{- with .Values.oidc.allowedGroups }}
-            - name: OIDC_ALLOWED_GROUPS
-              value: {{ join "," . | quote }}
-            {{- end }}
+          {{- $sources := .Values.envFrom }}
           {{- if .Values.existingSecret }}
+          {{-   $sources = prepend $sources (dict "secretRef" (dict "name" .Values.existingSecret)) }}
+          {{- end }}
+          {{- with $sources }}
           envFrom:
-            - secretRef:
-                name: {{ .Values.existingSecret }}
+            {{- toYaml . | nindent 12 }}
           {{- end }}
           livenessProbe:
             {{- toYaml .Values.livenessProbe | nindent 12 }}

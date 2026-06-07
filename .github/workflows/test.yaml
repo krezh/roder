@@ -15,6 +15,7 @@ concurrency:
 jobs:
   cargo-test:
     runs-on: ubuntu-latest
+    environment: prod
     permissions:
       contents: read
 

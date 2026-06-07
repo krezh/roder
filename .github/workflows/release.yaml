@@ -12,6 +12,7 @@ jobs:
   docker:
     name: Build & push container image
     runs-on: ubuntu-latest
+    environment: prod
     permissions:
       contents: read
       packages: write
@@ -57,6 +58,7 @@ jobs:
   helm:
     name: Publish Helm chart
     runs-on: ubuntu-latest
+    environment: prod
     permissions:
       contents: read
       packages: write
@@ -88,6 +90,7 @@ jobs:
   release-notes:
     name: Append install instructions to release
     runs-on: ubuntu-latest
+    environment: prod
     permissions:
       contents: write
     steps:

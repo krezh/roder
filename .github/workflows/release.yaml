@@ -94,30 +94,21 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Append install instructions
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.event.release.tag_name }}
-          OWNER: ${{ github.repository_owner }}
-        run: |
-          set -euo pipefail
+      - name: Update Release with Helm Chart Info
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          append_body: true
+          body: |
 
-          existing=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body -q .body)
+            ## Helm Chart
 
-          read -r -d '' append <<EOF
+            ```bash
+            helm install roder oci://ghcr.io/${{ github.repository_owner }}/charts/roder --version ${{ github.event.release.tag_name }}
+            ```
 
-          ## Helm Chart
+            ## Container Image
 
-          \`\`\`bash
-          helm install roder oci://ghcr.io/\${OWNER}/charts/roder --version \${TAG}
-          \`\`\`
-
-          ## Container Image
-
-          \`\`\`bash
-          docker pull ghcr.io/\${OWNER}/roder:\${TAG}
-          \`\`\`
-          EOF
-
-          printf '%s\n%s' "$existing" "$append" \
-            | gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes -
+            ```bash
+            docker pull ghcr.io/${{ github.repository_owner }}/roder:${{ github.event.release.tag_name }}
+            ```

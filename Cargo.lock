@@ -2926,7 +2926,7 @@ dependencies = [
 
 [[package]]
 name = "roder"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -2958,7 +2958,7 @@ dependencies = [
 
 [[package]]
 name = "roder-auth"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "base64 0.22.1",
  "openidconnect",
@@ -2973,7 +2973,7 @@ dependencies = [
 
 [[package]]
 name = "roder-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -2981,7 +2981,7 @@ dependencies = [
 
 [[package]]
 name = "roder-k8s"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "arc-swap",
  "futures",

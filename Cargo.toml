@@ -2,11 +2,10 @@
 resolver = "2"
 members = ["crates/core", "crates/k8s", "crates/auth"]
 
-# Version inherited by the workspace member crates (roder-core, roder-k8s,
-# roder-auth). The roder package below has its own inline `version` so
-# release-please can update it directly.
+# Shared by the workspace member crates (roder-core, roder-k8s, roder-auth).
+# Each member inlines its own `version` so release-please can rewrite it
+# directly; the roder root package also has its own inline `version` below.
 [workspace.package]
-version = "0.1.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/krezh/roder"

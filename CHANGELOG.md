@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.1.9](https://github.com/krezh/roder/compare/0.1.8...0.1.9) (2026-06-08)
+
+
+### Bug Fixes
+
+* **cargo:** update rust crate http (1.4.1 ➔ 1.4.2) ([#27](https://github.com/krezh/roder/issues/27)) ([3a326d2](https://github.com/krezh/roder/commit/3a326d22e5a37a4530fa206364e78da68c4c3968))
+* **cargo:** update wasm-bindgen (0.2.121 ➔ 0.2.122) ([#29](https://github.com/krezh/roder/issues/29)) ([a832919](https://github.com/krezh/roder/commit/a832919b13bbe88ca04086abb1b626665338b03b))
+* **columns:** drop empty status column for CRDs without printer columns ([89666f8](https://github.com/krezh/roder/commit/89666f85905c0d6304928be3786f7d8462f74cca))
+
+
+### Performance Improvements
+
+* **table:** consolidate per-cell flash Effects into one per-row bitmask ([ae1452f](https://github.com/krezh/roder/commit/ae1452f32777393a627d0a84bbcf6168930f4412))
+
+
+### Miscellaneous Chores
+
+* **helm:** increase memory limit and request to 400Mi ([894f8f2](https://github.com/krezh/roder/commit/894f8f2209df25678a9ea98f9cb001bb1ecc245a))
+
 ## [0.1.8](https://github.com/krezh/roder/compare/0.1.7...0.1.8) (2026-06-08)
 
 

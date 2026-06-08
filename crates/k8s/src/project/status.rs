@@ -50,14 +50,6 @@ pub(crate) fn ready_reason(data: &Value) -> String {
 
 /// A status reason to show for an otherwise-uncolumned resource: the Ready/Available
 /// condition's reason, else `status.reason`, else `status.phase`.
-pub(crate) fn generic_reason(data: &Value) -> String {
-    condition_reason(data, "Ready")
-        .or_else(|| condition_reason(data, "Available"))
-        .or_else(|| str_at(data, &["status", "reason"]))
-        .or_else(|| str_at(data, &["status", "phase"]))
-        .unwrap_or_default()
-}
-
 pub(crate) fn cond_to_status(s: Option<&str>) -> RowStatus {
     match s {
         Some("True") => RowStatus::Ok,

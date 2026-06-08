@@ -65,7 +65,7 @@ enum Project {
 /// The generic fallback view for a kind with no hand-written projector and no CRD
 /// printer columns: just a best-effort status reason.
 const GENERIC_VIEW: KindView = KindView {
-    headers: &["Status"],
+    headers: &[],
     project: Project::Plain(generic_cells),
 };
 

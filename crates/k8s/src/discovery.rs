@@ -66,6 +66,9 @@ pub async fn build_catalog(
             .category
             .order()
             .cmp(&b.kind.category.order())
+            // Within dynamic categories, sort by the group label (domain) so each
+            // operator's kinds are grouped contiguously.
+            .then_with(|| a.kind.category.label().cmp(&b.kind.category.label()))
             .then_with(|| a.kind.kind.cmp(&b.kind.kind))
     });
     Ok(out)
@@ -117,5 +120,17 @@ fn classify(group: &str, kind: &str) -> Category {
         };
     }
 
-    Category::Custom
+    Category::Custom(group_base_domain(group))
+}
+
+/// Derive a short, human-readable label from a CRD API group by keeping only
+/// the registrable domain (last two dot-separated components).
+///
+/// Examples: `monitoring.coreos.com` → `coreos.com`, `kyverno.io` → `kyverno.io`
+fn group_base_domain(group: &str) -> String {
+    let parts: Vec<&str> = group.split('.').collect();
+    match parts.len() {
+        0 | 1 => group.to_string(),
+        n => format!("{}.{}", parts[n - 2], parts[n - 1]),
+    }
 }

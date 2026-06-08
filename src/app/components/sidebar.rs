@@ -27,7 +27,7 @@ pub(crate) fn Sidebar() -> impl IntoView {
         for k in catalog.get() {
             match groups.last_mut() {
                 Some((c, v)) if *c == k.category => v.push(k),
-                _ => groups.push((k.category, vec![k])),
+                _ => groups.push((k.category.clone(), vec![k])),
             }
         }
         groups
@@ -40,8 +40,18 @@ pub(crate) fn Sidebar() -> impl IntoView {
                 if gs.is_empty() {
                     return view! { <div class="muted pad">"Loading…"</div> }.into_any();
                 }
-                gs.into_iter().map(|(cat, kinds)| {
+                let mut out: Vec<AnyView> = Vec::with_capacity(gs.len() + 1);
+                let mut sep_done = false;
+                for (cat, kinds) in gs {
+                    // Insert a separator before the first dynamic (CRD) category.
+                    if cat.is_dynamic() && !sep_done {
+                        sep_done = true;
+                        out.push(view! { <hr class="sidebar-sep" /> }.into_any());
+                    }
                     let n = kinds.len();
+                    let label = cat.label();
+                    let cat_open = cat.clone();
+                    let cat_click = cat.clone();
                     let items = kinds.into_iter().map(|k| {
                         let k2 = k.clone();
                         let active = move || selected_kind.get().as_ref().map(|s| s.key == k2.key).unwrap_or(false);
@@ -51,19 +61,22 @@ pub(crate) fn Sidebar() -> impl IntoView {
                         };
                         view! { <li class="kind" class:active=active on:click=on_click>{k.kind.clone()}</li> }
                     }).collect_view();
-                    let is_open = move || open_cats.get().contains(&cat);
-                    view! {
+                    let is_open = move || open_cats.get().contains(&cat_open);
+                    out.push(view! {
                         <div class="cat" class:open=is_open>
-                            <div class="cat-label" on:click=move |_| open_cats.update(|s| { if !s.remove(&cat) { s.insert(cat); } })>
+                            <div class="cat-label" on:click=move |_| open_cats.update(|s| {
+                                if !s.remove(&cat_click) { s.insert(cat_click.clone()); }
+                            })>
                                 <span class="cat-caret"></span>
-                                {cat.label()}
+                                {label}
                             </div>
                             <div class="cat-items" style=format!("--list-h: calc(var(--item-h) * {n})")>
                                 <ul>{items}</ul>
                             </div>
                         </div>
-                    }
-                }).collect_view().into_any()
+                    }.into_any());
+                }
+                out.into_any()
             }}
         </nav>
     }

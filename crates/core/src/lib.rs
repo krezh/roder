@@ -28,7 +28,11 @@ impl Health {
 }
 
 /// Navigation grouping for a resource kind in the sidebar.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
+///
+/// Fixed variants map to well-known k8s API groups. `Custom(String)` carries
+/// the base domain of the CRD's API group (e.g. `"coreos.com"`) so that each
+/// third-party operator gets its own collapsible section.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub enum Category {
     Workloads,
@@ -40,22 +44,22 @@ pub enum Category {
     ExternalSecrets,
     CertManager,
     Cluster,
-    Custom,
+    Custom(String),
 }
 
 impl Category {
-    pub fn label(&self) -> &'static str {
+    pub fn label(&self) -> String {
         match self {
-            Category::Workloads => "Workloads",
-            Category::Config => "Config",
-            Category::Network => "Network",
-            Category::Storage => "Storage",
-            Category::Rbac => "RBAC",
-            Category::Flux => "Flux",
-            Category::ExternalSecrets => "External Secrets",
-            Category::CertManager => "cert-manager",
-            Category::Cluster => "Cluster",
-            Category::Custom => "Custom Resources",
+            Category::Workloads => "Workloads".into(),
+            Category::Config => "Config".into(),
+            Category::Network => "Network".into(),
+            Category::Storage => "Storage".into(),
+            Category::Rbac => "RBAC".into(),
+            Category::Flux => "Flux".into(),
+            Category::ExternalSecrets => "External Secrets".into(),
+            Category::CertManager => "cert-manager".into(),
+            Category::Cluster => "Cluster".into(),
+            Category::Custom(name) => name.clone(),
         }
     }
 
@@ -71,8 +75,13 @@ impl Category {
             Category::Flux => 6,
             Category::ExternalSecrets => 7,
             Category::CertManager => 8,
-            Category::Custom => 9,
+            Category::Custom(_) => 9,
         }
+    }
+
+    /// True for dynamically-derived categories (third-party CRD groups).
+    pub fn is_dynamic(&self) -> bool {
+        matches!(self, Category::Custom(_))
     }
 }
 

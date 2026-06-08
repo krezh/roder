@@ -208,6 +208,24 @@ fn render_scalar(v: &Value) -> String {
         Value::String(s) => s.clone(),
         Value::Bool(b) => b.to_string(),
         Value::Number(n) => n.to_string(),
+        // An array at the end of a path: join scalar elements (consistent with
+        // [*] expansion), or return the element count if they're objects.
+        Value::Array(a) => {
+            let scalars: Vec<String> = a
+                .iter()
+                .filter_map(|e| match e {
+                    Value::String(s) => Some(s.clone()),
+                    Value::Number(n) => Some(n.to_string()),
+                    Value::Bool(b) => Some(b.to_string()),
+                    _ => None,
+                })
+                .collect();
+            if scalars.len() == a.len() {
+                scalars.join(",")
+            } else {
+                a.len().to_string()
+            }
+        }
         _ => String::new(),
     }
 }
@@ -243,6 +261,26 @@ mod tests {
             eval(r#".status.conditions[?(@.type=="Missing")].status"#, &o),
             ""
         );
+    }
+
+    #[test]
+    fn array_fallback() {
+        let o = json!({
+            "status": {
+                "projects": [
+                    {"name": "foo", "status": "completed"},
+                    {"name": "bar", "status": "completed"},
+                    {"name": "baz", "status": "failed"},
+                ]
+            }
+        });
+        // Path ending at an array of objects → count
+        assert_eq!(eval(".status.projects", &o), "3");
+        // Path ending at an array of scalars → joined
+        assert_eq!(eval(".status.projects[*].status", &o), "completed,completed,failed");
+        // Mixed array with scalars only → joined
+        let o2 = json!({"items": ["a", "b", "c"]});
+        assert_eq!(eval(".items", &o2), "a,b,c");
     }
 
     #[test]

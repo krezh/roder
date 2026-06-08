@@ -186,6 +186,11 @@ body {
       color: #fff;
     }
   }
+  .sidebar-sep {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 0.4rem 0.9rem;
+  }
 }
 
 .main {

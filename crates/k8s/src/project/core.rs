@@ -8,7 +8,7 @@ use crate::metrics::PvcUsage;
 
 use super::accessors::{data_count, int_at, intstr_at, str_at};
 use super::format::{endpoints_summary, hpa_targets, human_bytes, short_access_mode};
-use super::status::{cond_to_status, condition_status, generic_reason, generic_status};
+use super::status::{cond_to_status, condition_status, generic_status};
 
 pub(crate) fn namespace_cells(data: &Value) -> (Vec<String>, RowStatus) {
     let phase = str_at(data, &["status", "phase"]).unwrap_or_default();
@@ -81,7 +81,7 @@ pub(crate) fn endpoints_cells(data: &Value) -> (Vec<String>, RowStatus) {
 }
 
 pub(crate) fn generic_cells(data: &Value) -> (Vec<String>, RowStatus) {
-    (vec![generic_reason(data)], generic_status(data))
+    (vec![], generic_status(data))
 }
 
 pub(crate) fn service_cells(data: &Value) -> (Vec<String>, RowStatus) {

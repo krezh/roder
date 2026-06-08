@@ -26,12 +26,19 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     WB=$(awk '/^name = "wasm-bindgen"$/{f=1} f && /^version/{gsub(/"/, "", $3); print $3; exit}' Cargo.lock) \
     && cargo install -f wasm-bindgen-cli --version "$WB"
 
+# RELEASE=true  → optimised release binary (CI/production, slow to link)
+# RELEASE=false → debug binary (local dev, no LTO, fast incremental builds)
+ARG RELEASE=true
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/app/target,sharing=locked \
-    LEPTOS_ENV=PROD \
-    LEPTOS_SITE_ROOT=/app/site-out \
-    cargo leptos build --release \
- && cp /app/target/release/roder /app/roder-bin
+    export LEPTOS_ENV=PROD LEPTOS_SITE_ROOT=/app/site-out && \
+    if [ "$RELEASE" = "true" ]; then \
+        cargo leptos build --release \
+        && cp /app/target/release/roder /app/roder-bin; \
+    else \
+        cargo leptos build \
+        && cp /app/target/debug/roder /app/roder-bin; \
+    fi
 
 # ---- runtime --------------------------------------------------------------
 FROM debian:bookworm-slim AS runtime

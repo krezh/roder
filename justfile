@@ -18,12 +18,27 @@ lint:
 test:
     cargo test --workspace --features ssr
 
-# Build the production container image.
+# Run a local dev server with hot-reload for browser testing (requires cargo-leptos).
+# Bypasses OIDC and uses the host kubeconfig. Open http://127.0.0.1:8080.
+dev kubeconfig="${KUBECONFIG:-$HOME/.kube/config}":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export PATH="$HOME/.cargo/bin:$PATH"
+    export RODER_DEV_MODE=1
+    export RUST_LOG=info
+    export KUBECONFIG="{{ kubeconfig }}"
+    exec cargo leptos watch
+
+# Build a fast debug image for local testing (no LTO, incremental-friendly).
 docker tag="roder:dev":
+    docker build --build-arg RELEASE=false -t {{ tag }} .
+
+# Build an optimised release image (used by CI / Helm deploys).
+docker-release tag="roder:release":
     docker build -t {{ tag }} .
 
-# Build the production image and run it locally in dev mode (bypasses OIDC,
-# uses the host kubeconfig). Open http://127.0.0.1:8080.
+# Build the dev image and run it locally (bypasses OIDC, uses the host kubeconfig).
+# Open http://127.0.0.1:8080.
 docker-run kubeconfig="${KUBECONFIG:-$HOME/.kube/config}" tag="roder:dev": (docker tag)
     #!/usr/bin/env bash
     set -euo pipefail

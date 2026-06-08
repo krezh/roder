@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/krezh/roder/compare/0.1.4...0.1.5) (2026-06-08)
+
+
+### Bug Fixes
+
+* **wasm:** fix wasm version mismatch ([7c96480](https://github.com/krezh/roder/commit/7c96480f9e49b22a04c796c6b9f2bccea9e414fd))
+
 ## [0.1.4](https://github.com/krezh/roder/compare/0.1.3...0.1.4) (2026-06-08)
 
 

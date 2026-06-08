@@ -4,7 +4,8 @@
 FROM rust:1-bookworm AS build
 
 # cargo-leptos + the wasm target + wasm-opt (binaryen) for the hydrate bundle.
-RUN rustup target add wasm32-unknown-unknown \
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    rustup target add wasm32-unknown-unknown \
     && cargo install cargo-leptos --locked \
     && apt-get update && apt-get install -y --no-install-recommends binaryen \
     && rm -rf /var/lib/apt/lists/*
@@ -12,8 +13,9 @@ RUN rustup target add wasm32-unknown-unknown \
 WORKDIR /app
 COPY . .
 
-# Builds the SSR server binary + hashed site assets into target/site.
-RUN cargo leptos build --release
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/app/target,sharing=locked \
+    cargo leptos build --release
 
 # ---- runtime --------------------------------------------------------------
 FROM debian:bookworm-slim AS runtime

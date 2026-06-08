@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.8](https://github.com/krezh/roder/compare/0.1.7...0.1.8) (2026-06-08)
+
+
+### Bug Fixes
+
+* **lint:** resolve clippy warnings in CI ([fb84a58](https://github.com/krezh/roder/commit/fb84a587ef36ef981eda4897bc88f9f2969ca6b7))
+* **wasm:** fix scroll cleanup compile error and search improvements ([f338d78](https://github.com/krezh/roder/commit/f338d78cf9748ba44395ba0970c861952e93577b))
+
 ## [0.1.7](https://github.com/krezh/roder/compare/0.1.6...0.1.7) (2026-06-08)
 
 

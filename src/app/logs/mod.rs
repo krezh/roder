@@ -195,14 +195,13 @@ pub(crate) fn LogsView(
                     // Extract timestamp if present (ISO 8601 format at start of line)
                     let (timestamp, content) = extract_timestamp(&msg);
                     let msg_html = ansi_to_html(&content);
-                    let show_ts = show_timestamps.get();
                     view! {
                         <div class="log-line">
                             {pod.map(|p| {
                                 let style = format!("background:hsl({}deg 45% 28%)", hue_of(&p));
                                 view! { <span class="log-pod" style=style>{p}</span> }
                             })}
-                            {show_ts.then(|| timestamp.map(|ts| view! { <span class="log-ts">{ts}</span> }))}
+                            {move || show_timestamps.get().then(|| timestamp.clone().map(|ts| view! { <span class="log-ts">{ts}</span> }))}
                             <span class=format!("log-msg log-{lvl}") inner_html=msg_html></span>
                         </div>
                     }
@@ -212,57 +211,114 @@ pub(crate) fn LogsView(
     }
 }
 
-/// Extract ISO 8601 timestamp from the beginning of a log line.
-/// Returns (Some(timestamp), remaining_content) or (None, original_content).
+/// Extract an ISO 8601 timestamp from the beginning of a log line.
+/// Returns `(Some(timestamp), remaining_content)` or `(None, original_line)`.
 fn extract_timestamp(line: &str) -> (Option<String>, String) {
-    // Common timestamp patterns:
-    // 2024-01-15T10:30:45.123Z
-    // 2024-01-15 10:30:45
-    // 2024-01-15T10:30:45Z
     let trimmed = line.trim_start();
+    let b = trimmed.as_bytes();
 
-    // Try to find a timestamp pattern at the start
-    if trimmed.len() >= 19 {
-        // Check for ISO 8601 with T separator
-        if trimmed.chars().nth(4) == Some('-')
-            && trimmed.chars().nth(7) == Some('-')
-            && (trimmed.chars().nth(10) == Some('T') || trimmed.chars().nth(10) == Some(' '))
-            && trimmed.chars().nth(13) == Some(':')
-            && trimmed.chars().nth(16) == Some(':')
-        {
-            // Find the end of the timestamp (look for space, Z, or +)
-            let end = trimmed[19..]
-                .find([' ', 'Z', '+', '-'])
-                .map(|i| i + 19)
-                .unwrap_or(19);
+    // Use byte indexing throughout: ISO 8601 timestamps are pure ASCII so
+    // byte offsets == char offsets, and we never risk slicing mid-codepoint.
+    // Bail early if the first 19 bytes aren't all ASCII (e.g. line starts with
+    // a non-ASCII pod name in a multi-pod stream).
+    if b.len() >= 19
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && (b[10] == b'T' || b[10] == b' ')
+        && b[13] == b':'
+        && b[16] == b':'
+        && b[..19].iter().all(|c| c.is_ascii())
+    {
+        // Fractional seconds
+        let end = b[19..]
+            .iter()
+            .position(|&c| c == b' ' || c == b'Z' || c == b'+' || c == b'-')
+            .map(|i| i + 19)
+            .unwrap_or(19);
 
-            // Include fractional seconds and timezone if present
-            let mut ts_end = end;
-            if trimmed.len() > end && trimmed.chars().nth(end) == Some('.') {
-                // Fractional seconds
-                ts_end = trimmed[end..]
-                    .find(|c: char| !c.is_ascii_digit())
-                    .map(|i| i + end)
-                    .unwrap_or(trimmed.len());
-            }
-            if trimmed.len() > ts_end
-                && (trimmed.chars().nth(ts_end) == Some('Z')
-                    || trimmed.chars().nth(ts_end) == Some('+')
-                    || trimmed.chars().nth(ts_end) == Some('-'))
-            {
-                // Timezone
-                ts_end += 1;
-                if trimmed.len() > ts_end && trimmed.chars().nth(ts_end - 1) != Some('Z') {
-                    // +HH:MM or -HH:MM
-                    ts_end += 5.min(trimmed.len() - ts_end);
-                }
-            }
-
-            let timestamp = trimmed[..ts_end].to_string();
-            let content = trimmed[ts_end..].trim_start().to_string();
-            return (Some(timestamp), content);
+        let mut ts_end = end;
+        if b.get(end) == Some(&b'.') {
+            ts_end = b[end..]
+                .iter()
+                .position(|c| !c.is_ascii_digit())
+                .map(|i| i + end)
+                .unwrap_or(b.len());
         }
+        if matches!(b.get(ts_end), Some(&b'Z') | Some(&b'+') | Some(&b'-')) {
+            let was_z = b[ts_end] == b'Z';
+            ts_end += 1;
+            if !was_z {
+                // Consume +HH:MM or -HH:MM (up to 5 more bytes)
+                ts_end = (ts_end + 5).min(b.len());
+            }
+        }
+
+        let timestamp = trimmed[..ts_end].to_string();
+        let content = trimmed[ts_end..].trim_start().to_string();
+        return (Some(timestamp), content);
     }
 
     (None, line.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_timestamp;
+
+    #[test]
+    fn rfc3339_with_z() {
+        let (ts, rest) = extract_timestamp("2024-01-15T10:30:45Z some message");
+        assert_eq!(ts.as_deref(), Some("2024-01-15T10:30:45Z"));
+        assert_eq!(rest, "some message");
+    }
+
+    #[test]
+    fn rfc3339_with_fractional_and_z() {
+        let (ts, rest) = extract_timestamp("2024-01-15T10:30:45.123456789Z payload");
+        assert_eq!(ts.as_deref(), Some("2024-01-15T10:30:45.123456789Z"));
+        assert_eq!(rest, "payload");
+    }
+
+    #[test]
+    fn rfc3339_with_offset() {
+        let (ts, rest) = extract_timestamp("2024-01-15T10:30:45+05:30 message");
+        assert_eq!(ts.as_deref(), Some("2024-01-15T10:30:45+05:30"));
+        assert_eq!(rest, "message");
+    }
+
+    #[test]
+    fn space_separator() {
+        let (ts, rest) = extract_timestamp("2024-01-15 10:30:45Z message");
+        assert_eq!(ts.as_deref(), Some("2024-01-15 10:30:45Z"));
+        assert_eq!(rest, "message");
+    }
+
+    #[test]
+    fn no_timestamp_returns_original() {
+        let line = "plain log line without timestamp";
+        let (ts, rest) = extract_timestamp(line);
+        assert!(ts.is_none());
+        assert_eq!(rest, line);
+    }
+
+    #[test]
+    fn empty_line() {
+        let (ts, rest) = extract_timestamp("");
+        assert!(ts.is_none());
+        assert_eq!(rest, "");
+    }
+
+    #[test]
+    fn leading_whitespace_trimmed_for_match() {
+        let (ts, _rest) = extract_timestamp("  2024-01-15T10:30:45Z message");
+        assert_eq!(ts.as_deref(), Some("2024-01-15T10:30:45Z"));
+    }
+
+    #[test]
+    fn non_ascii_start_no_match() {
+        let line = "ñoño 2024-01-15T10:30:45Z";
+        let (ts, rest) = extract_timestamp(line);
+        assert!(ts.is_none());
+        assert_eq!(rest, line);
+    }
 }

@@ -48,26 +48,37 @@ pub(crate) fn daemonset_cells(data: &Value) -> (Vec<String>, RowStatus) {
 
 pub(crate) fn job_cells(data: &Value) -> (Vec<String>, RowStatus) {
     let succeeded = int_at(data, &["status", "succeeded"]).unwrap_or(0);
-    let desired = int_at(data, &["spec", "completions"]).unwrap_or(1);
+    let desired = int_at(data, &["spec", "completions"]);
     let failed = int_at(data, &["status", "failed"]).unwrap_or(0);
-    let status = if succeeded >= desired {
-        RowStatus::Ok
-    } else if failed > 0 {
-        RowStatus::Error
-    } else {
-        RowStatus::Pending
-    };
-    (
-        vec![
-            format!("{succeeded}/{desired}"),
-            if succeeded >= desired {
-                "Complete".into()
+    let (completions_str, status) = match desired {
+        Some(d) => {
+            let s = if succeeded >= d {
+                RowStatus::Ok
+            } else if failed > 0 {
+                RowStatus::Error
             } else {
-                "Running".into()
-            },
-        ],
-        status,
-    )
+                RowStatus::Pending
+            };
+            (format!("{succeeded}/{d}"), s)
+        }
+        // Work-queue job: spec.completions absent means "done when any pod succeeds".
+        None => {
+            let s = if succeeded > 0 {
+                RowStatus::Ok
+            } else if failed > 0 {
+                RowStatus::Error
+            } else {
+                RowStatus::Pending
+            };
+            (format!("{succeeded}"), s)
+        }
+    };
+    let phase = if matches!(status, RowStatus::Ok) {
+        "Complete"
+    } else {
+        "Running"
+    };
+    (vec![completions_str, phase.into()], status)
 }
 
 pub(crate) fn cronjob_cells(data: &Value) -> (Vec<String>, RowStatus) {
@@ -83,4 +94,80 @@ pub(crate) fn cronjob_cells(data: &Value) -> (Vec<String>, RowStatus) {
         RowStatus::Ok
     };
     (vec![schedule, suspended.to_string()], status)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn job_fixed_completions_pending() {
+        let data = json!({"spec": {"completions": 3}, "status": {"succeeded": 1}});
+        let (cells, status) = job_cells(&data);
+        assert_eq!(cells[0], "1/3");
+        assert_eq!(cells[1], "Running");
+        assert_eq!(status, RowStatus::Pending);
+    }
+
+    #[test]
+    fn job_fixed_completions_done() {
+        let data = json!({"spec": {"completions": 3}, "status": {"succeeded": 3}});
+        let (cells, status) = job_cells(&data);
+        assert_eq!(cells[0], "3/3");
+        assert_eq!(cells[1], "Complete");
+        assert_eq!(status, RowStatus::Ok);
+    }
+
+    #[test]
+    fn job_fixed_completions_failed() {
+        let data = json!({"spec": {"completions": 3}, "status": {"succeeded": 1, "failed": 2}});
+        let (cells, status) = job_cells(&data);
+        assert_eq!(cells[0], "1/3");
+        assert_eq!(status, RowStatus::Error);
+    }
+
+    #[test]
+    fn job_work_queue_pending() {
+        // spec.completions absent → work-queue mode; show just succeeded count
+        let data = json!({"spec": {}, "status": {"succeeded": 0}});
+        let (cells, status) = job_cells(&data);
+        assert_eq!(cells[0], "0");
+        assert_eq!(cells[1], "Running");
+        assert_eq!(status, RowStatus::Pending);
+    }
+
+    #[test]
+    fn job_work_queue_done() {
+        let data = json!({"spec": {}, "status": {"succeeded": 1}});
+        let (cells, status) = job_cells(&data);
+        assert_eq!(cells[0], "1");
+        assert_eq!(cells[1], "Complete");
+        assert_eq!(status, RowStatus::Ok);
+    }
+
+    #[test]
+    fn job_work_queue_failed() {
+        let data = json!({"spec": {}, "status": {"succeeded": 0, "failed": 1}});
+        let (cells, status) = job_cells(&data);
+        assert_eq!(cells[0], "0");
+        assert_eq!(status, RowStatus::Error);
+    }
+
+    #[test]
+    fn cronjob_active() {
+        let data = json!({"spec": {"schedule": "0 * * * *", "suspend": false}});
+        let (cells, status) = cronjob_cells(&data);
+        assert_eq!(cells[0], "0 * * * *");
+        assert_eq!(cells[1], "false");
+        assert_eq!(status, RowStatus::Ok);
+    }
+
+    #[test]
+    fn cronjob_suspended() {
+        let data = json!({"spec": {"schedule": "*/5 * * * *", "suspend": true}});
+        let (cells, status) = cronjob_cells(&data);
+        assert_eq!(cells[1], "true");
+        assert_eq!(status, RowStatus::Warn);
+    }
 }

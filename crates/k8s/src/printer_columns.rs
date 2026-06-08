@@ -110,7 +110,10 @@ pub fn eval(path: &str, root: &Value) -> String {
                 Sel::Filter { key, val } => {
                     if let Some(a) = target.as_array() {
                         for e in a {
-                            if e.get(key).and_then(|x| x.as_str()) == Some(val.as_str()) {
+                            // Compare via render_scalar so integers/booleans match
+                            // their string representation (e.g. `port==8080` matches
+                            // the JSON number 8080, not just the string "8080").
+                            if e.get(key).map(|x| render_scalar(x)).as_deref() == Some(val.as_str()) {
                                 next.push(e);
                             }
                         }

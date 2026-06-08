@@ -1,6 +1,10 @@
 {
-  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "local>krezh/renovate-config"
-  ]
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: ["local>krezh/renovate-config"],
+  packageRules: [
+    {
+      matchPackageNames: ["wasm-bindgen"],
+      groupName: "wasm-bindgen",
+    },
+  ],
 }

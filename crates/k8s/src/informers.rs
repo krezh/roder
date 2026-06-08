@@ -37,6 +37,11 @@ pub(crate) struct UsageEntry {
     pub(crate) mem: f64,
     prev_cpu: Option<f64>,
     prev_mem: Option<f64>,
+    /// Consecutive scrape cycles in which this pod was absent from the
+    /// metrics-server response. Pods are only evicted after several misses so
+    /// a single partial response (e.g. one node temporarily unreachable) does
+    /// not permanently wipe their usage history.
+    misses: u8,
 }
 
 impl UsageEntry {
@@ -262,7 +267,10 @@ fn start_informer(
     let objects: Arc<RwLock<HashMap<String, DynamicObject>>> =
         Arc::new(RwLock::new(HashMap::new()));
     let by_name: NameIndex = Arc::new(RwLock::new(HashMap::new()));
-    let idle_since: Arc<RwLock<Option<Instant>>> = Arc::new(RwLock::new(Some(Instant::now())));
+    // Start as None: the informer is being subscribed to immediately in
+    // subscribe(), which sets idle_since = None. Initialising to Some(now())
+    // would make the reaper start the eviction clock before any subscription.
+    let idle_since: Arc<RwLock<Option<Instant>>> = Arc::new(RwLock::new(None));
 
     let task_tx = tx.clone();
     let task_rows = rows.clone();
@@ -382,26 +390,43 @@ fn spawn_reaper(registry: Arc<InformerRegistry>) {
         let mut tick = tokio::time::interval(Duration::from_secs(15));
         loop {
             tick.tick().await;
-            let mut active = registry.active.lock().await;
+
+            // Phase 1: Snapshot (key, idle_since arc, receiver count) while
+            // holding the Mutex for the minimum time — no inner awaits here.
+            let entries: Vec<(WatchKey, Arc<RwLock<Option<Instant>>>, usize)> = {
+                let active = registry.active.lock().await;
+                active
+                    .iter()
+                    .map(|(k, e)| (k.clone(), e.idle_since.clone(), e.tx.receiver_count()))
+                    .collect()
+            };
+
+            // Phase 2: Update idle_since outside the Mutex so subscribe() isn't
+            // blocked while we await each entry's inner RwLock.
             let mut to_remove = Vec::new();
-            for (key, entry) in active.iter() {
-                if entry.tx.receiver_count() == 0 {
-                    let mut idle = entry.idle_since.write().await;
+            for (key, idle_since, receivers) in entries {
+                if receivers == 0 {
+                    let mut idle = idle_since.write().await;
                     match *idle {
                         Some(since) if since.elapsed() >= IDLE_GRACE => {
-                            to_remove.push(key.clone());
+                            to_remove.push(key);
                         }
                         None => *idle = Some(Instant::now()),
                         _ => {}
                     }
                 } else {
-                    *entry.idle_since.write().await = None;
+                    *idle_since.write().await = None;
                 }
             }
-            for key in to_remove {
-                if let Some(entry) = active.remove(&key) {
-                    entry.handle.abort();
-                    tracing::debug!("evicted idle informer {}", key.resource_key);
+
+            // Phase 3: Re-acquire to remove evicted entries.
+            if !to_remove.is_empty() {
+                let mut active = registry.active.lock().await;
+                for key in to_remove {
+                    if let Some(entry) = active.remove(&key) {
+                        entry.handle.abort();
+                        tracing::debug!("evicted idle informer {}", key.resource_key);
+                    }
                 }
             }
         }
@@ -469,14 +494,17 @@ fn spawn_metrics_refresh(registry: Arc<InformerRegistry>) {
                 let mut usage = registry.pod_usage.write().await;
                 let mut history = registry.metrics_history.write().await;
 
-                // Set prev for all existing entries
+                // Increment miss counter for all existing entries; reset below
+                // for pods that appear in this scrape.
                 for entry in usage.values_mut() {
+                    entry.misses = entry.misses.saturating_add(1);
                     entry.prev_cpu = Some(entry.cpu);
                     entry.prev_mem = Some(entry.mem);
                 }
                 // Update current values for fresh entries and record history
                 for (k, (cpu, mem)) in &fresh {
                     let entry = usage.entry(k.clone()).or_default();
+                    entry.misses = 0; // seen this scrape — reset
                     entry.cpu = *cpu;
                     entry.mem = *mem;
                     // For new entries, set prev to current (no trend on first sample)
@@ -497,9 +525,11 @@ fn spawn_metrics_refresh(registry: Arc<InformerRegistry>) {
                         pod_history.pop_front();
                     }
                 }
-                // Remove entries that disappeared from metrics-server
-                usage.retain(|k, _| fresh.contains_key(k));
-                history.retain(|k, _| fresh.contains_key(k));
+                // Evict entries absent for >3 consecutive scrapes (~45s). A single
+                // partial response (e.g. one node temporarily unreachable) only
+                // increments the miss counter, preserving history across transient gaps.
+                usage.retain(|_, v| v.misses <= 3);
+                history.retain(|k, _| usage.contains_key(k));
             }
 
             let usage = registry.pod_usage.read().await.clone();
@@ -539,12 +569,14 @@ fn spawn_pvc_usage_refresh(registry: Arc<InformerRegistry>) {
             *registry.pvc_usage.write().await = fresh;
 
             // Re-project any active PVC informer so the % column updates.
+            // Clone the cache before acquiring active so we don't hold the
+            // Mutex while awaiting the RwLock inside the loop.
+            let pvc_cache = registry.pvc_usage.read().await.clone();
             let active = registry.active.lock().await;
             for entry in active.values() {
                 if !entry.is_pvc || entry.tx.receiver_count() == 0 {
                     continue;
                 }
-                let pvc_cache = registry.pvc_usage.read().await.clone();
                 let objs = entry.objects.read().await;
                 let mut rows = entry.rows.write().await;
                 for (uid, obj) in objs.iter() {

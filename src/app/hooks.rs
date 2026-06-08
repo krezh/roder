@@ -225,6 +225,7 @@ pub(crate) fn table_window(
     Effect::new(move |_| {
         #[cfg(target_arch = "wasm32")]
         {
+            use send_wrapper::SendWrapper;
             use wasm_bindgen::closure::Closure;
             use wasm_bindgen::JsCast;
             let Some(wrap) = table_ref.get() else { return };
@@ -236,8 +237,15 @@ pub(crate) fn table_window(
                     viewport_h.set(ch);
                 }
             });
-            let _ = wrap.add_event_listener_with_callback("scroll", cb.as_ref().unchecked_ref());
-            cb.forget(); // listener lives for the element's lifetime
+            let cb_fn: js_sys::Function = cb.as_ref().unchecked_ref::<js_sys::Function>().clone();
+            let _ = wrap.add_event_listener_with_callback("scroll", &cb_fn);
+            // SendWrapper satisfies on_cleanup's Send+Sync bound; sound on wasm32 (single-threaded).
+            let cleanup = SendWrapper::new((wrap, cb_fn, cb));
+            on_cleanup(move || {
+                let (wrap, cb_fn, cb) = cleanup.take();
+                let _ = wrap.remove_event_listener_with_callback("scroll", &cb_fn);
+                drop(cb);
+            });
         }
     });
 

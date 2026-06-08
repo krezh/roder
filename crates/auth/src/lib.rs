@@ -39,4 +39,10 @@ impl Tokens {
     pub fn needs_refresh(&self) -> bool {
         self.expires_at - OffsetDateTime::now_utc() <= time::Duration::minutes(1)
     }
+
+    /// Whether the token has been fully expired long enough (>24 h) that the
+    /// session is considered abandoned and safe to evict without a refresh attempt.
+    pub fn is_abandoned(&self) -> bool {
+        OffsetDateTime::now_utc() > self.expires_at + time::Duration::hours(24)
+    }
 }

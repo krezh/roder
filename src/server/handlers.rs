@@ -25,8 +25,34 @@ pub async fn health() -> Json<roder_core::Health> {
 /// `connect-src` is widened to permit cargo-leptos's `live_reload` WebSocket
 /// on the loopback hot-reload port (default 8081, configurable).
 pub async fn security_headers(State(state): State<AppState>, req: Request, next: Next) -> Response {
+    let path = req.uri().path().to_owned();
     let mut resp = next.run(req).await;
     let h = resp.headers_mut();
+
+    // Cache-Control: static assets need explicit directives so browsers don't
+    // serve a stale WASM/JS after a new container is deployed.
+    //
+    // - .wasm / .js: must revalidate every load (ETag round-trip is cheap;
+    //   a stale WASM paired with new SSR HTML causes hydration failures).
+    // - .css: cargo-leptos writes a content-hash into the filename via
+    //   HashedStylesheet, so the URL changes on every build — safe to cache
+    //   forever.
+    // - fonts / favicon: content rarely changes, short public TTL is fine.
+    let cache = if path.ends_with(".wasm") || path.ends_with(".js") {
+        Some("no-cache")
+    } else if path.ends_with(".css") {
+        Some("public, max-age=31536000, immutable")
+    } else if path.starts_with("/fonts/") || path.ends_with(".svg") || path.ends_with(".ico") {
+        Some("public, max-age=604800")
+    } else {
+        None
+    };
+    if let Some(v) = cache {
+        h.insert(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static(v),
+        );
+    }
     h.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
     h.insert(
         header::X_CONTENT_TYPE_OPTIONS,
@@ -230,23 +256,34 @@ pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Response {
 
 /// Connect (or reconnect) the cluster backend using the passthrough ID token.
 async fn establish_cluster(state: &AppState, id_token: &str) -> Result<(), Response> {
-    // If a backend already exists (re-login / same user), just swap the token in.
-    if let Some(backend) = state.backend.read().await.clone() {
+    // Fast path: an existing backend only needs its token swapped.
+    if let Some(backend) = state.backend.read().await.as_ref() {
         if backend.set_token(id_token).is_ok() {
             return Ok(());
         }
     }
-    match Backend::connect_with_token(id_token).await {
-        Ok(backend) => {
-            *state.backend.write().await = Some(Arc::new(backend));
-            Ok(())
+    // Slow path: no backend yet. Build it outside the write lock so that
+    // other readers are not blocked during the (potentially slow) cluster probe.
+    let new_backend = match Backend::connect_with_token(id_token).await {
+        Ok(b) => Arc::new(b),
+        Err(e) => {
+            return Err((
+                StatusCode::BAD_GATEWAY,
+                format!("connected to OIDC but failed to reach the cluster: {e}"),
+            )
+                .into_response());
         }
-        Err(e) => Err((
-            StatusCode::BAD_GATEWAY,
-            format!("connected to OIDC but failed to reach the cluster: {e}"),
-        )
-            .into_response()),
+    };
+    // Re-check under the write lock to close the TOCTOU window: if another
+    // concurrent login raced us and already wrote a backend, update its token
+    // instead of overwriting it with a potentially different identity.
+    let mut lock = state.backend.write().await;
+    if let Some(existing) = lock.as_ref() {
+        let _ = existing.set_token(id_token);
+    } else {
+        *lock = Some(new_backend);
     }
+    Ok(())
 }
 
 #[cfg(test)]

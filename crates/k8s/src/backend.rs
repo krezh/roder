@@ -199,7 +199,12 @@ impl Backend {
             }
         }
         let fresh = self.compute_overview().await?;
-        *self.overview_cache.write().await = Some((std::time::Instant::now(), fresh.clone()));
+        let mut cache = self.overview_cache.write().await;
+        // Re-check under the write lock: another concurrent caller may have
+        // already populated a fresh entry while we were computing.
+        if cache.as_ref().map(|(at, _)| at.elapsed() >= TTL).unwrap_or(true) {
+            *cache = Some((std::time::Instant::now(), fresh.clone()));
+        }
         Ok(fresh)
     }
 
@@ -258,7 +263,7 @@ impl Backend {
         let (mut pod_running, mut pod_pending, mut pod_failed) = (0u32, 0u32, 0u32);
         for p in &pods.items {
             match p.status.as_ref().and_then(|s| s.phase.as_deref()) {
-                Some("Running") | Some("Succeeded") => pod_running += 1,
+                Some("Running") => pod_running += 1,
                 Some("Pending") => pod_pending += 1,
                 Some("Failed") => pod_failed += 1,
                 _ => {}
@@ -480,9 +485,16 @@ impl Backend {
             .and_then(|v| v.as_str())
             .unwrap_or_default();
 
-        // DNS-1123-safe name: <cronjob, truncated>-manual-<unix secs>.
+        // DNS-1123 subdomain: lowercase alphanumeric and hyphens only.
         let ts = time::OffsetDateTime::now_utc().unix_timestamp();
-        let base: String = name.chars().take(40).collect();
+        let base: String = name
+            .to_ascii_lowercase()
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+            .take(40)
+            .collect();
+        let base = base.trim_matches('-');
+        let base = if base.is_empty() { "job" } else { base };
         let job_name = format!("{base}-manual-{ts}");
 
         let job = json!({
@@ -623,12 +635,19 @@ impl Backend {
                 timestamps: false,
                 ..Default::default()
             };
-            if let Ok(reader) = api.log_stream(&pod, &lp).await {
-                let s = reader
-                    .lines()
-                    .filter_map(|r| async move { r.ok() })
-                    .map(move |line| format!("{pod} │ {line}"));
-                streams.push(Box::pin(s));
+            match api.log_stream(&pod, &lp).await {
+                Ok(reader) => {
+                    let s = reader
+                        .lines()
+                        .filter_map(|r| async move { r.ok() })
+                        .map(move |line| format!("{pod} │ {line}"));
+                    streams.push(Box::pin(s));
+                }
+                Err(e) => {
+                    tracing::debug!("failed to open log stream for pod {pod}: {e}");
+                    let msg = format!("{pod} │ [roder] failed to stream logs: {e}");
+                    streams.push(Box::pin(futures::stream::once(async move { msg })));
+                }
             }
         }
         Ok(Box::pin(futures::stream::select_all(streams)))
@@ -679,12 +698,17 @@ impl Backend {
         let api: Api<SelfSubjectAccessReview> = Api::all(self.client());
         let allowed = match api.create(&PostParams::default(), &ssar).await {
             Ok(r) => r.status.map(|s| s.allowed).unwrap_or(false),
-            Err(_) => false,
+            Err(e) => {
+                // Don't cache transient failures — a network blip would hide
+                // all action buttons for 30 seconds on every affected resource.
+                tracing::warn!("SSAR failed for {verb} on {key}: {e}");
+                return false;
+            }
         };
-        self.can_cache
-            .write()
-            .await
-            .insert(ck, (std::time::Instant::now(), allowed));
+        let mut cache = self.can_cache.write().await;
+        // Evict stale entries so the map doesn't grow O(verbs × kinds × namespaces).
+        cache.retain(|_, (at, _)| at.elapsed() < TTL * 10);
+        cache.insert(ck, (std::time::Instant::now(), allowed));
         allowed
     }
 

@@ -1,107 +1,49 @@
-# roder task runner. Run `just` to list recipes.
-# The Leptos package is the workspace root, so cargo-leptos recipes run from here.
-
-# Primary LAN IP — the default host the HTTPS proxy serves on.
-lan_ip := `ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[\d.]+' | head -1`
-
-# wasm-bindgen-cli version, derived from the workspace pin in Cargo.toml.
-# cargo-leptos shells out to this binary; if the CLI version doesn't match
-# the crate version, the JS shim and wasm disagree on the externref table
-# layout and hydration throws "failed to grow table" on init.
-_wbg_version := `grep -E '^wasm-bindgen[[:space:]]*=[[:space:]]*"=' Cargo.toml | sed -E 's/.*"=([0-9.]+)".*/\1/'`
-
 _default:
     @just --list
 
-# Install wasm-bindgen-cli at the workspace-pinned version. cargo-leptos
-# shells out to it; keeping the CLI in sync with the crate avoids the
-# externref table mismatch that breaks hydration.
-_wbg-install:
-    cargo install -f wasm-bindgen-cli --version {{_wbg_version}}
-
-# Hot-reloading dev server (SSR + wasm hydrate) at http://127.0.0.1:8080.
-# RODER_DEV_MODE bypasses OIDC and uses your current kubeconfig (e.g. `just kind-up`),
-# so local testing needs no IdP. Use `just dev-oidc` to exercise the real login flow.
-dev: _wbg-install
-    RODER_DEV_MODE=1 cargo leptos watch
-
-# Like `dev`, but with real OIDC (reads OIDC_* / BASE_URL from the environment).
-dev-oidc: _wbg-install
-    cargo leptos watch
-
-# Dev server + HTTPS proxy together, for phones/remote devices that block
-# WebAssembly on insecure (http://LAN-IP) origins. Open https://<lan-ip>:8443.
-# Uses a trusted mkcert cert if `just dev-certs` was run, else Caddy's internal CA.
-# `auto_https disable_redirects` keeps Caddy off ports 80/443 — only 8443 is bound.
-dev-https host=lan_ip: _wbg-install
-    #!/usr/bin/env bash
-    set -euo pipefail
-    mkdir -p .certs
-    if test -f .certs/roder.pem; then tls="tls .certs/roder.pem .certs/roder-key.pem"; else tls="tls internal"; fi
-    printf '{\n  auto_https disable_redirects\n}\nhttps://%s:8443 {\n  %s\n  reverse_proxy 127.0.0.1:8080\n}\n' "{{ host }}" "$tls" > .certs/Caddyfile
-    echo "roder over HTTPS:  https://{{ host }}:8443"
-    trap 'kill 0' EXIT
-    caddy run --adapter caddyfile --config .certs/Caddyfile &
-    RODER_DEV_MODE=1 cargo leptos watch
-
-# Generate an mkcert cert for `dev-https`; install the printed rootCA on the device.
-dev-certs host=lan_ip:
-    mkcert -install
-    mkdir -p .certs
-    mkcert -cert-file .certs/roder.pem -key-file .certs/roder-key.pem {{ host }} localhost 127.0.0.1
-    @echo "Install this CA on the device: $(mkcert -CAROOT)/rootCA.pem"
-
-# Bundle the self-hosted webfonts (Rubik for the UI, JetBrainsMono Nerd Font Mono
-# for logs) into public/fonts as compressed woff2, copied from your installed
-# fonts so the strict CSP needs no external CDN and there's no runtime internet.
-fonts:
-    #!/usr/bin/env bash
-    set -eu
-    dst="public/fonts"
-    mkdir -p "$dst"
-    tmp=$(mktemp -d)
-    trap 'rm -rf "$tmp"' EXIT
-    bundle() {
-      local src out
-      src=$(fc-list | grep -Fm1 "$1" | cut -d: -f1 | xargs)
-      [ -n "$src" ] || { echo "font not installed: $1"; exit 1; }
-      cp "$src" "$tmp/f.ttf"
-      woff2_compress "$tmp/f.ttf"
-      cp "$tmp/f.woff2" "$dst/$2"
-      rm -f "$tmp/f.ttf" "$tmp/f.woff2"
-      echo "  $2 <- $src"
-    }
-    bundle "Rubik[wght].ttf" "rubik.woff2"
-    bundle "JetBrainsMonoNerdFontMono-Regular.ttf" "jetbrains-mono-nerd.woff2"
-    rm -f "$dst"/*.ttf
-    echo "installed: $(ls -1 "$dst")"
-
-# Production build: server binary + hashed wasm/site assets
-build: _wbg-install
-    cargo leptos build --release
-
-# Type-check the whole workspace (server feature set)
+# Type-check the whole workspace (server feature set).
 check:
     cargo check --workspace --features ssr
 
-# Format
+# Format all code in the workspace.
 fmt:
     cargo fmt --all
 
-# Lint (server + wasm feature sets)
+# Lint (server + wasm feature sets).
 lint:
     cargo clippy --workspace --features ssr -- -D warnings
     cargo clippy -p roder --no-default-features --features hydrate -- -D warnings
 
-# Tests
+# Run all workspace tests.
 test:
     cargo test --workspace --features ssr
 
-# Build the container image
+# Build the production container image.
 docker tag="roder:dev":
     docker build -t {{ tag }} .
 
-# Spin up a local kind cluster for the verify loop
+# Build the production image and run it locally in dev mode (bypasses OIDC,
+# uses the host kubeconfig). Open http://127.0.0.1:8080.
+docker-run kubeconfig="${KUBECONFIG:-$HOME/.kube/config}" tag="roder:dev": (docker tag)
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! test -r "{{ kubeconfig }}"; then
+        echo "kubeconfig not readable: {{ kubeconfig }}" >&2
+        exit 1
+    fi
+    name="roder-docker-test"
+    docker rm -f "$name" >/dev/null 2>&1 || true
+    docker run --rm \
+      --name "$name" \
+      --network host \
+      --user 0:0 \
+      -e RODER_DEV_MODE=1 \
+      -e RUST_LOG=info \
+      -e KUBECONFIG=/tmp/kube/config \
+      -v "{{ kubeconfig }}:/tmp/kube/config:ro" \
+      {{ tag }}
+
+# Spin up / tear down a local kind cluster.
 kind-up:
     kind create cluster --name roder-dev
 

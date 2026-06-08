@@ -76,13 +76,12 @@ pub(crate) struct LogTarget {
 }
 impl LogTarget {
     pub(crate) fn url(&self) -> String {
+        let ns = crate::data::percent_encode(&self.namespace);
+        let name = crate::data::percent_encode(&self.name);
         if self.aggregate {
-            format!(
-                "/api/logs?key={}&namespace={}&name={}",
-                self.key, self.namespace, self.name
-            )
+            format!("/api/logs?key={}&namespace={}&name={}", self.key, ns, name)
         } else {
-            format!("/api/logs?namespace={}&pod={}", self.namespace, self.name)
+            format!("/api/logs?namespace={}&pod={}", ns, name)
         }
     }
 }

@@ -276,15 +276,6 @@ pub(crate) fn CommandPalette() -> impl IntoView {
         let ns_list = namespaces.get();
         let mut suggestions = Vec::new();
 
-        #[cfg(target_arch = "wasm32")]
-        web_sys::console::log_1(
-            &format!(
-                "autocomplete_suggestions: incomplete_in={:?} incomplete_ns={:?}",
-                p.incomplete_in, p.incomplete_ns
-            )
-            .into(),
-        );
-
         // Handle `in:` for resource kinds
         if let Some(incomplete) = &p.incomplete_in {
             for kind in kinds.iter() {
@@ -319,9 +310,6 @@ pub(crate) fn CommandPalette() -> impl IntoView {
         // Sort by score (descending)
         suggestions.sort_by_key(|s| std::cmp::Reverse(s.score));
         suggestions.truncate(10);
-
-        #[cfg(target_arch = "wasm32")]
-        web_sys::console::log_1(&format!("Total suggestions: {}", suggestions.len()).into());
 
         if suggestions.is_empty() {
             None
@@ -752,10 +740,16 @@ fn filter_kinds(catalog: &[ResourceKind], query: &str) -> Vec<(ResourceKind, Vec
             if query.is_empty() {
                 return Some((k.clone(), vec![], 0));
             }
-            // Match against plural form
+            // Match against both plural ("deployments") and singular kind name ("Deployment").
+            // Take whichever gives the higher score; positions come from the winning match.
             let plural_match = fuzzy_match(query, &k.plural);
-
-            plural_match.map(|m| (k.clone(), m.positions, m.score))
+            let kind_match = fuzzy_match(query, &k.kind.to_lowercase());
+            match (plural_match, kind_match) {
+                (None, None) => None,
+                (Some(m), None) | (None, Some(m)) => Some((k.clone(), m.positions, m.score)),
+                (Some(a), Some(b)) if a.score >= b.score => Some((k.clone(), a.positions, a.score)),
+                (Some(_), Some(b)) => Some((k.clone(), b.positions, b.score)),
+            }
         })
         .collect();
 

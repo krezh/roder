@@ -3,34 +3,32 @@
 # ---- build ----------------------------------------------------------------
 FROM rust:1-bookworm AS build
 
-# Pin the wasm-bindgen CLI to the exact crate version. The shim the CLI emits
-# and the wasm the crate produces must come from the same version, or
-# hydration throws "failed to grow table" on __wbindgen_init_externref_table.
-# The arg is referenced in the cargo leptos build RUN below so buildkit's
-# cache key for that step changes when WB_VERSION changes, which evicts the
-# stale wasm artifacts that would otherwise survive in the GHA buildx cache.
-ARG WB_VERSION=0.2.122
-
-# cargo-leptos + the wasm target + wasm-opt (binaryen) for the hydrate bundle.
+# cargo-leptos + the wasm target.
+# binaryen (wasm-opt) is intentionally omitted: Debian bookworm ships an old
+# version that corrupts the externref table wasm-bindgen 0.2.92+ uses, causing
+# "failed to grow table" at runtime. The Rust opt-level="z" profile already
+# produces well-optimized wasm; cargo-leptos skips wasm-opt when it's absent.
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     rustup target add wasm32-unknown-unknown \
-    && cargo install cargo-leptos --locked \
-    && apt-get update && apt-get install -y --no-install-recommends binaryen \
-    && rm -rf /var/lib/apt/lists/*
+    && cargo install cargo-leptos --locked
 
 WORKDIR /app
 COPY . .
 
-# Install the matching wasm-bindgen-cli.
+# Derive the wasm-bindgen CLI version directly from Cargo.lock so it always
+# matches the compiled crate. There is no ARG to keep in sync — when Renovate
+# bumps the crate, Cargo.lock changes, this layer is invalidated, and the new
+# CLI is installed automatically.
+#
+# The shim the CLI emits and the wasm the crate produces must be identical or
+# hydration throws "failed to grow table" on __wbindgen_init_externref_table.
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
-    cargo install -f wasm-bindgen-cli --version "${WB_VERSION}"
+    WB=$(awk '/^name = "wasm-bindgen"$/{f=1} f && /^version/{gsub(/"/, "", $3); print $3; exit}' Cargo.lock) \
+    && cargo install -f wasm-bindgen-cli --version "$WB"
 
-# WB_VERSION is referenced in the cache key for this RUN, so bumping the crate
-# pin in Cargo.toml (and the default above) invalidates the GHA-cached
-# /app/target/ and forces the wasm to be re-linked against a matching shim.
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/app/target,sharing=locked \
-    WB_VERSION=${WB_VERSION} \
+    LEPTOS_ENV=PROD \
     LEPTOS_SITE_ROOT=/app/site-out \
     cargo leptos build --release \
  && cp /app/target/release/roder /app/roder-bin

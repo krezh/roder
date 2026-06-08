@@ -153,7 +153,7 @@ pub(crate) fn RowDetail(target: DetailTarget) -> impl IntoView {
             data::fetch_json::<serde_json::Value>(&format!(
                 "/api/permissions?key={}&namespace={}",
                 t.key,
-                t.namespace.as_deref().unwrap_or("")
+                t.namespace.as_deref().map(data::percent_encode).unwrap_or_default()
             ))
             .await
             .ok()
@@ -256,7 +256,7 @@ pub(crate) fn RowDetail(target: DetailTarget) -> impl IntoView {
                     let d = d.clone();
                     let tab_content = move || match tab.get() {
                         Tab::Info => info_view(d.clone(), kind_sv.get_value()).into_any(),
-                        Tab::Logs => view! { <LogsView url=format!("/api/logs?namespace={}&pod={}", ns, pod) /> }.into_any(),
+                        Tab::Logs => view! { <LogsView url=format!("/api/logs?namespace={}&pod={}", data::percent_encode(&ns), data::percent_encode(&pod)) /> }.into_any(),
                         Tab::Metrics => view! { <MetricsChart namespace=ns.clone() name=pod.clone() /> }.into_any(),
                         Tab::Yaml => view! {
                             <div class="rd-body">

@@ -34,7 +34,13 @@ pub struct SessionStore {
 
 impl SessionStore {
     pub async fn insert(&self, id: String, session: Session) {
-        self.inner.write().await.insert(id, session);
+        let mut map = self.inner.write().await;
+        // Opportunistically evict sessions whose token has been expired for
+        // >24 hours and cannot be refreshed (no refresh token). Sessions with
+        // a refresh token are kept because the background refresh loop handles
+        // them and removes them on failure.
+        map.retain(|_, s| s.tokens.refresh_token.is_some() || !s.tokens.is_abandoned());
+        map.insert(id, session);
     }
 
     pub async fn get(&self, id: &str) -> Option<Session> {

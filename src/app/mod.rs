@@ -174,6 +174,7 @@ pub fn App() -> impl IntoView {
             } else if key == "Escape" {
                 palette_open.set(false);
                 shortcuts_open.set(false);
+                ctx_menu.set(None);
                 detail.set(None);
             }
         });

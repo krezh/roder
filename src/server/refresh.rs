@@ -19,12 +19,15 @@ pub fn spawn(state: AppState) {
             for (sid, refresh_token) in state.sessions.needing_refresh().await {
                 match provider.refresh(refresh_token).await {
                     Ok(tokens) => {
+                        let id_token = tokens.id_token.clone();
+                        // Update the session first so identity and token are
+                        // always in sync; then hot-swap into the cluster client.
+                        state.sessions.update_tokens(&sid, tokens).await;
                         if let Some(backend) = state.backend.read().await.as_ref() {
-                            if let Err(e) = backend.set_token(&tokens.id_token) {
+                            if let Err(e) = backend.set_token(&id_token) {
                                 tracing::warn!("failed to swap refreshed token into client: {e}");
                             }
                         }
-                        state.sessions.update_tokens(&sid, tokens).await;
                         tracing::debug!("refreshed session token");
                     }
                     Err(e) => {

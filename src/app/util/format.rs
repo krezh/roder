@@ -134,7 +134,13 @@ pub(crate) fn ansi_to_html(raw: &str) -> String {
     let mut chars = raw.char_indices().peekable();
     while let Some((i, ch)) = chars.next() {
         if ch != '\x1b' {
-            out.push(ch);
+            match ch {
+                '&' => out.push_str("&amp;"),
+                '<' => out.push_str("&lt;"),
+                '>' => out.push_str("&gt;"),
+                '"' => out.push_str("&quot;"),
+                _ => out.push(ch),
+            }
             continue;
         }
         // Look for '[' after ESC
@@ -268,5 +274,84 @@ pub(crate) fn fmt_mem(used: Option<f64>, total: Option<f64>) -> String {
         (Some(u), Some(t)) => format!("{:.1} / {:.1} GiB", g(u), g(t)),
         (None, Some(t)) => format!("{:.1} GiB", g(t)),
         _ => "—".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- ansi_to_html XSS escaping ---
+
+    #[test]
+    fn ansi_plain_text_passthrough() {
+        assert_eq!(ansi_to_html("hello world"), "hello world");
+    }
+
+    #[test]
+    fn ansi_escapes_html_special_chars() {
+        assert_eq!(ansi_to_html("<script>alert(1)</script>"), "&lt;script&gt;alert(1)&lt;/script&gt;");
+        assert_eq!(ansi_to_html("a & b"), "a &amp; b");
+        assert_eq!(ansi_to_html("\"quoted\""), "&quot;quoted&quot;");
+    }
+
+    #[test]
+    fn ansi_color_wraps_in_span() {
+        let out = ansi_to_html("\x1b[31mred\x1b[0m");
+        assert!(out.contains("<span class=\"ansi-1\">red</span>"), "got: {out}");
+    }
+
+    #[test]
+    fn ansi_color_with_html_in_content() {
+        let out = ansi_to_html("\x1b[31m<b>\x1b[0m");
+        assert!(out.contains("&lt;b&gt;"), "got: {out}");
+        assert!(!out.contains("<b>"), "got: {out}");
+    }
+
+    #[test]
+    fn ansi_bold_wraps_in_span() {
+        let out = ansi_to_html("\x1b[1mbold\x1b[0m");
+        assert!(out.contains("<span class=\"ansi-bold\">bold</span>"), "got: {out}");
+    }
+
+    // --- log_level ---
+
+    #[test]
+    fn log_level_klog_prefix_error() {
+        assert_eq!(log_level("E0603 some error message"), "error");
+    }
+
+    #[test]
+    fn log_level_klog_prefix_warn() {
+        assert_eq!(log_level("W0603 some warning"), "warn");
+    }
+
+    #[test]
+    fn log_level_klog_prefix_info() {
+        assert_eq!(log_level("I0603 informational"), "info");
+    }
+
+    #[test]
+    fn log_level_structured_level_key() {
+        assert_eq!(log_level(r#"{"level":"error","msg":"oops"}"#), "error");
+        assert_eq!(log_level("time=2024 level=warn msg=degraded"), "warn");
+    }
+
+    #[test]
+    fn log_level_keyword_fallback() {
+        assert_eq!(log_level("panic: runtime error"), "error");
+        assert_eq!(log_level("FATAL: out of memory"), "error");
+        assert_eq!(log_level("DEBUG: connecting..."), "debug");
+    }
+
+    #[test]
+    fn log_level_aggregated_prefix_stripped() {
+        // "pod │ message" format — classify the message part
+        assert_eq!(log_level("my-pod-xyz │ E0101 something bad"), "error");
+    }
+
+    #[test]
+    fn log_level_plain() {
+        assert_eq!(log_level("hello world"), "plain");
     }
 }

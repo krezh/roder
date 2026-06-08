@@ -126,7 +126,15 @@ pub(crate) fn pod_cells(
                 .map(|c| c["restartCount"].as_i64().unwrap_or(0))
                 .sum()
         })
-        .unwrap_or(0);
+        .unwrap_or(0)
+        + sidecars
+            .as_ref()
+            .map(|s| {
+                s.iter()
+                    .map(|c| c["restartCount"].as_i64().unwrap_or(0))
+                    .sum::<i64>()
+            })
+            .unwrap_or(0);
     let node = str_at(data, &["spec", "nodeName"]).unwrap_or_default();
     let phase = str_at(data, &["status", "phase"]).unwrap_or_default();
 

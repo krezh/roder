@@ -20,7 +20,7 @@ pub fn watch_url(key: &str, namespace: Option<&str>, selector: Option<&str>) -> 
 }
 
 /// Minimal percent-encoding for a query value (label selectors contain `=`, `,`).
-fn percent_encode(s: &str) -> String {
+pub(crate) fn percent_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         match b {
@@ -38,8 +38,8 @@ pub fn detail_url(key: &str, namespace: Option<&str>, name: &str) -> String {
     format!(
         "/api/detail?key={}&namespace={}&name={}",
         key,
-        namespace.unwrap_or(""),
-        name
+        namespace.map(percent_encode).unwrap_or_default(),
+        percent_encode(name)
     )
 }
 
@@ -252,5 +252,74 @@ fn format_age(secs: u64) -> String {
         format!("{m}m")
     } else {
         format!("{secs}s")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn percent_encode_unreserved_passthrough() {
+        assert_eq!(percent_encode("nginx-web"), "nginx-web");
+        assert_eq!(percent_encode("v1.2.3~rc_1"), "v1.2.3~rc_1");
+    }
+
+    #[test]
+    fn percent_encode_special_chars() {
+        assert_eq!(percent_encode("app=nginx,tier=web"), "app%3Dnginx%2Ctier%3Dweb");
+        assert_eq!(percent_encode("ns/name"), "ns%2Fname");
+        assert_eq!(percent_encode("hello world"), "hello%20world");
+    }
+
+    #[test]
+    fn percent_encode_empty() {
+        assert_eq!(percent_encode(""), "");
+    }
+
+    #[test]
+    fn detail_url_with_namespace() {
+        let u = detail_url("apps/v1/Deployment", Some("default"), "my-deploy");
+        assert_eq!(u, "/api/detail?key=apps/v1/Deployment&namespace=default&name=my-deploy");
+    }
+
+    #[test]
+    fn detail_url_cluster_scoped() {
+        let u = detail_url("rbac.authorization.k8s.io/v1/ClusterRole", None, "admin");
+        assert_eq!(u, "/api/detail?key=rbac.authorization.k8s.io/v1/ClusterRole&namespace=&name=admin");
+    }
+
+    #[test]
+    fn detail_url_encodes_name_with_special_chars() {
+        let u = detail_url("v1/Pod", Some("kube system"), "my=pod");
+        assert_eq!(u, "/api/detail?key=v1/Pod&namespace=kube%20system&name=my%3Dpod");
+    }
+
+    #[test]
+    fn format_age_seconds() {
+        assert_eq!(format_age(0), "0s");
+        assert_eq!(format_age(45), "45s");
+        assert_eq!(format_age(59), "59s");
+    }
+
+    #[test]
+    fn format_age_minutes() {
+        assert_eq!(format_age(60), "1m");
+        assert_eq!(format_age(90), "1m");
+        assert_eq!(format_age(3599), "59m");
+    }
+
+    #[test]
+    fn format_age_hours() {
+        assert_eq!(format_age(3600), "1h0m");
+        assert_eq!(format_age(3660), "1h1m");
+        assert_eq!(format_age(86399), "23h59m");
+    }
+
+    #[test]
+    fn format_age_days() {
+        assert_eq!(format_age(86400), "1d0h");
+        assert_eq!(format_age(86400 + 3600 * 5), "1d5h");
+        assert_eq!(format_age(86400 * 7 + 3600 * 12), "7d12h");
     }
 }

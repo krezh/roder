@@ -67,11 +67,15 @@ pub(crate) fn apply_event(rows: RowMap, entering: UidSet, removing: UidSet, ev: 
             rows.update(|m| {
                 m.insert(row.uid.clone(), row);
             });
+            // Always clear from removing: the object exists again regardless of
+            // whether it's truly new. This handles delete-then-recreate with the
+            // same uid (e.g. objects whose uid falls back to namespace/name) so
+            // the safety-net timeout below doesn't evict the newly-created row.
+            removing.update(|s| {
+                s.remove(&uid);
+            });
             // New rows animate in (briefly tagged, then untagged so the flash works again).
             if is_new {
-                removing.update(|s| {
-                    s.remove(&uid);
-                });
                 entering.update(|s| {
                     s.insert(uid.clone());
                 });
@@ -95,15 +99,20 @@ pub(crate) fn apply_event(rows: RowMap, entering: UidSet, removing: UidSet, ev: 
             // Safety net: if `transitionend` never fires (row was reordered, never
             // laid out, etc.), force the removal after the transition would have
             // completed so rows can't get stuck collapsed.
+            // Only act if uid is still in removing — an Applied event for a
+            // same-uid recreated object clears it, preventing this timeout from
+            // silently deleting the new row.
             let uid2 = uid.clone();
             set_timeout(
                 move || {
-                    rows.update(|m| {
-                        m.remove(&uid);
-                    });
-                    removing.update(|s| {
-                        s.remove(&uid2);
-                    });
+                    if removing.with_untracked(|s| s.contains(&uid)) {
+                        rows.update(|m| {
+                            m.remove(&uid);
+                        });
+                        removing.update(|s| {
+                            s.remove(&uid2);
+                        });
+                    }
                 },
                 std::time::Duration::from_millis(500),
             );

@@ -34,7 +34,7 @@ tower = "0.5"
 tower-http = { version = "0.6", features = ["fs", "trace", "compression-br"] }
 
 # Wasm
-wasm-bindgen = "=0.2.122"
+wasm-bindgen = "=0.2.123"
 console_error_panic_hook = "0.1"
 send_wrapper = "0.6"
 

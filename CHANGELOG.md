@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.7](https://github.com/krezh/roder/compare/0.1.6...0.1.7) (2026-06-08)
+
+
+### Bug Fixes
+
+* **docker:** bust buildx cache when wasm-bindgen version changes ([ce56373](https://github.com/krezh/roder/commit/ce56373448cbbb1437e454d940eff17fa2c20109))
+
 ## [0.1.6](https://github.com/krezh/roder/compare/0.1.5...0.1.6) (2026-06-08)
 
 

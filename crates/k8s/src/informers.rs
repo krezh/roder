@@ -393,6 +393,7 @@ fn spawn_reaper(registry: Arc<InformerRegistry>) {
 
             // Phase 1: Snapshot (key, idle_since arc, receiver count) while
             // holding the Mutex for the minimum time — no inner awaits here.
+            #[allow(clippy::type_complexity)]
             let entries: Vec<(WatchKey, Arc<RwLock<Option<Instant>>>, usize)> = {
                 let active = registry.active.lock().await;
                 active

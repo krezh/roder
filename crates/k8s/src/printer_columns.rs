@@ -113,7 +113,7 @@ pub fn eval(path: &str, root: &Value) -> String {
                             // Compare via render_scalar so integers/booleans match
                             // their string representation (e.g. `port==8080` matches
                             // the JSON number 8080, not just the string "8080").
-                            if e.get(key).map(|x| render_scalar(x)).as_deref() == Some(val.as_str()) {
+                            if e.get(key).map(render_scalar).as_deref() == Some(val.as_str()) {
                                 next.push(e);
                             }
                         }

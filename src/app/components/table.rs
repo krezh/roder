@@ -50,37 +50,43 @@ pub(crate) fn StatusDot(status: RowStatus) -> impl IntoView {
     view! { <span class=format!("dot dot-{}", dot_class(status))></span> }
 }
 
-/// A table cell that flashes briefly whenever its own value changes (skips the
-/// first render), so live updates highlight just the cell that changed.
-/// When a `trend` signal is provided, an inline arrow (↑ red / ↓ green) is shown
-/// next to the value; the arrow fades out after 1 s.
+/// A table cell that flashes briefly whenever its value changes (skips first
+/// render). Pass `flash` to use a row-level signal instead of a per-cell
+/// Effect — one Effect at the row level then fans out to each cell via bits.
+/// Pass `no_flash=true` to disable flashing entirely (e.g. metric columns).
 #[component]
 pub(crate) fn FlashTd<F>(
     value: F,
     #[prop(optional)] class: &'static str,
     #[prop(optional, into)] color: Option<Signal<&'static str>>,
     #[prop(optional)] no_flash: bool,
+    #[prop(optional, into)] flash: Option<Signal<bool>>,
     #[prop(optional)] trend: Option<Signal<Trend>>,
 ) -> impl IntoView
 where
     F: Fn() -> String + Copy + Send + Sync + 'static,
 {
-    let flash = RwSignal::new(false);
-    if !no_flash {
+    let flash_state: Signal<bool> = if let Some(sig) = flash {
+        sig
+    } else if no_flash {
+        Signal::derive(|| false)
+    } else {
+        let cell_flash = RwSignal::new(false);
         Effect::new(move |prev: Option<String>| {
             let v = value();
             if let Some(p) = prev {
                 if p != v {
-                    flash.set(true);
+                    cell_flash.set(true);
                     set_timeout(
-                        move || flash.set(false),
+                        move || cell_flash.set(false),
                         std::time::Duration::from_millis(1500),
                     );
                 }
             }
             v
         });
-    }
+        cell_flash.into()
+    };
     let trend_arrow = move || trend.and_then(|t| t.get().arrow());
     let trend_class = move || {
         trend
@@ -92,7 +98,7 @@ where
             .unwrap_or("trend-arrow")
     };
     view! {
-        <div class=format!("cell {class}") class:flash=move || flash.get()
+        <div class=format!("cell {class}") class:flash=move || flash_state.get()
             data-tip=value
             style=move || color.map(|c| {
                 let v = c.get();

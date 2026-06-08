@@ -268,6 +268,32 @@ pub(crate) fn ResourceView() -> impl IntoView {
                                         let ncols = cols.len();
                                         let uid_row = uid.clone();
                                         let row = Memo::new(move |_| rows.with(|m| m.get(&uid_row).cloned()));
+
+                                        // One Effect per row diffs all cells at once and writes a
+                                        // bitmask: bit 0 = namespace, bits 1..=ncols = cells[i].
+                                        // Each FlashTd reads its own bit — no per-cell Effects.
+                                        let flash_bits = RwSignal::new(0u64);
+                                        Effect::new(move |prev: Option<(Option<String>, Vec<String>)>| {
+                                            let r = row.get();
+                                            let ns = r.as_ref().and_then(|r| r.namespace.clone());
+                                            let cells = r.map(|r| r.cells.clone()).unwrap_or_default();
+                                            if let Some((prev_ns, prev_cells)) = prev {
+                                                let mut bits = 0u64;
+                                                if ns != prev_ns { bits |= 1; }
+                                                for (i, (cur, old)) in cells.iter().zip(prev_cells.iter()).enumerate() {
+                                                    if cur != old { bits |= 1u64 << (i + 1); }
+                                                }
+                                                if bits != 0 {
+                                                    flash_bits.update(|b| *b |= bits);
+                                                    set_timeout(
+                                                        move || flash_bits.update(|b| *b &= !bits),
+                                                        std::time::Duration::from_millis(1500),
+                                                    );
+                                                }
+                                            }
+                                            (ns, cells)
+                                        });
+
                                         let init = row.get_untracked();
                                         let target = DetailTarget {
                                             key,
@@ -310,7 +336,8 @@ pub(crate) fn ResourceView() -> impl IntoView {
                                                 {namespaced.then(|| view! {
                                                     <FlashTd
                                                         value=move || row.get().and_then(|r| r.namespace).unwrap_or_default()
-                                                        class="cell-ns" />
+                                                        class="cell-ns"
+                                                        flash=Signal::derive(move || flash_bits.get() & 1 != 0) />
                                                 })}
                                                 <NameCell
                                                     uid=uid.clone()
@@ -322,6 +349,7 @@ pub(crate) fn ResourceView() -> impl IntoView {
                                                 {(0..ncols).map(|i| {
                                                     let val = move || row.get().and_then(|r| r.cells.get(i).cloned()).unwrap_or_default();
                                                     let trend_sig = Signal::derive(move || row.get().and_then(|r| r.trends.get(i).copied()).unwrap_or(roder_core::Trend::None));
+                                                    let flash = Signal::derive(move || flash_bits.get() & (1u64 << (i + 1)) != 0);
                                                     if bool_cols.with_value(|v| v.contains(&i)) {
                                                         view! { <FlashTd value=val no_flash=true
                                                             color=Signal::derive(move || match val().as_str() {
@@ -329,11 +357,12 @@ pub(crate) fn ResourceView() -> impl IntoView {
                                                                 "false" => "warn",
                                                                 _ => "unknown",
                                                             }) /> }.into_any()
+                                                    } else if metric_cols.with_value(|v| v.contains(&i)) {
+                                                        view! { <FlashTd value=val no_flash=true trend=trend_sig /> }.into_any()
                                                     } else if colored_cols.with_value(|v| v.contains(&i)) {
-                                                        view! { <FlashTd value=val color=Signal::derive(move || dot_class(row.get().map(|r| r.status).unwrap_or(RowStatus::Unknown))) /> }.into_any()
+                                                        view! { <FlashTd value=val flash=flash color=Signal::derive(move || dot_class(row.get().map(|r| r.status).unwrap_or(RowStatus::Unknown))) /> }.into_any()
                                                     } else {
-                                                        let no_flash = metric_cols.with_value(|v| v.contains(&i));
-                                                        view! { <FlashTd value=val no_flash=no_flash trend=trend_sig /> }.into_any()
+                                                        view! { <FlashTd value=val flash=flash trend=trend_sig /> }.into_any()
                                                     }
                                                 }).collect_view()}
                                                 <div class="cell cell-age"><div class="cw"><div class="cwi">{move || { tick.get(); data::humanize_age(&row.get().and_then(|r| r.created)) }}</div></div></div>

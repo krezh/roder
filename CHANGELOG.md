@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.3](https://github.com/krezh/roder/compare/0.1.2...0.1.3) (2026-06-08)
+
+
+### Features
+
+* **cargo:** update rust crate gloo-net (0.6.0 ➔ 0.7.0) ([#19](https://github.com/krezh/roder/issues/19)) ([ba1d664](https://github.com/krezh/roder/commit/ba1d66455971be505e951a832101c51d713b0c9d))
+
+
+### Bug Fixes
+
+* **oauth:** fix oath ([f174b9d](https://github.com/krezh/roder/commit/f174b9d8520f6065f69b5546543d02f3c3267e1a))
+
 ## [0.1.2](https://github.com/krezh/roder/compare/0.1.1...0.1.2) (2026-06-07)
 
 

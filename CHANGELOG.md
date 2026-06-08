@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/krezh/roder/compare/0.1.3...0.1.4) (2026-06-08)
+
+
+### Bug Fixes
+
+* **ci:** improve ci ([6d6e794](https://github.com/krezh/roder/commit/6d6e7946433395fdb03463ecab0e8cbe5c1330c4))
+
 ## [0.1.3](https://github.com/krezh/roder/compare/0.1.2...0.1.3) (2026-06-08)
 
 

@@ -287,3 +287,119 @@ where
         self.id_token_verifier()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+    #[test]
+    fn effective_scopes_default_when_empty() {
+        let cfg = OidcConfig {
+            issuer_url: "https://x".into(),
+            client_id: "c".into(),
+            client_secret: "s".into(),
+            redirect_url: "https://x/cb".into(),
+            scopes: vec![],
+            allowed_groups: vec![],
+            groups_claim: "groups".into(),
+        };
+        assert_eq!(
+            cfg.effective_scopes(),
+            vec!["openid", "email", "profile", "groups", "offline_access"]
+        );
+    }
+
+    #[test]
+    fn effective_scopes_uses_custom_when_provided() {
+        let cfg = OidcConfig {
+            issuer_url: "https://x".into(),
+            client_id: "c".into(),
+            client_secret: "s".into(),
+            redirect_url: "https://x/cb".into(),
+            scopes: vec!["openid".into(), "email".into(), "custom_scope".into()],
+            allowed_groups: vec![],
+            groups_claim: "groups".into(),
+        };
+        assert_eq!(
+            cfg.effective_scopes(),
+            vec!["openid", "email", "custom_scope"]
+        );
+    }
+
+    fn jwt_with_payload(claims: serde_json::Value) -> String {
+        let header = URL_SAFE_NO_PAD.encode(b"{}");
+        let payload = URL_SAFE_NO_PAD.encode(claims.to_string().as_bytes());
+        format!("{header}.{payload}.sig")
+    }
+
+    #[test]
+    fn extract_groups_array_claim() {
+        let jwt = jwt_with_payload(serde_json::json!({
+            "sub": "user-1",
+            "groups": ["admins", "developers", "ops"],
+        }));
+        assert_eq!(
+            extract_groups(&jwt, "groups"),
+            vec!["admins", "developers", "ops"]
+        );
+    }
+
+    #[test]
+    fn extract_groups_string_claim() {
+        let jwt = jwt_with_payload(serde_json::json!({"groups": "admins"}));
+        assert_eq!(extract_groups(&jwt, "groups"), vec!["admins"]);
+    }
+
+    #[test]
+    fn extract_groups_missing_claim_returns_empty() {
+        let jwt = jwt_with_payload(serde_json::json!({"sub": "user-1"}));
+        assert!(extract_groups(&jwt, "groups").is_empty());
+    }
+
+    #[test]
+    fn extract_groups_wrong_claim_name_returns_empty() {
+        let jwt = jwt_with_payload(serde_json::json!({"roles": ["admins"]}));
+        assert!(extract_groups(&jwt, "groups").is_empty());
+    }
+
+    #[test]
+    fn extract_groups_array_with_non_string_entries_skipped() {
+        let jwt = jwt_with_payload(serde_json::json!({
+            "groups": ["admins", 42, null, "developers"],
+        }));
+        assert_eq!(extract_groups(&jwt, "groups"), vec!["admins", "developers"]);
+    }
+
+    #[test]
+    fn extract_groups_claim_wrong_type_returns_empty() {
+        let jwt = jwt_with_payload(serde_json::json!({"groups": 42}));
+        assert!(extract_groups(&jwt, "groups").is_empty());
+    }
+
+    #[test]
+    fn extract_groups_malformed_jwt_returns_empty() {
+        assert!(extract_groups("not-a-jwt", "groups").is_empty());
+    }
+
+    #[test]
+    fn extract_groups_invalid_base64_returns_empty() {
+        assert!(extract_groups("aaa.!!!.sig", "groups").is_empty());
+    }
+
+    #[test]
+    fn extract_groups_invalid_json_returns_empty() {
+        let bad = URL_SAFE_NO_PAD.encode(b"not json at all");
+        let jwt = format!("aaa.{bad}.sig");
+        assert!(extract_groups(&jwt, "groups").is_empty());
+    }
+
+    #[test]
+    fn extract_groups_custom_claim_name() {
+        let jwt = jwt_with_payload(serde_json::json!({
+            "roles": ["a", "b"],
+            "groups": ["ignored"],
+        }));
+        assert_eq!(extract_groups(&jwt, "roles"), vec!["a", "b"]);
+    }
+}

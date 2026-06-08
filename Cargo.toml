@@ -102,6 +102,10 @@ web-sys = { version = "0.3", features = [
     "DomRect",
 ], optional = true }
 
+[dev-dependencies]
+time = "0.3"
+serial_test = "3"
+
 [features]
 default = ["ssr"]
 hydrate = [

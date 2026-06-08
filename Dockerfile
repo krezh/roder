@@ -3,6 +3,14 @@
 # ---- build ----------------------------------------------------------------
 FROM rust:1-bookworm AS build
 
+# Pin the wasm-bindgen CLI to the exact crate version. The shim the CLI emits
+# and the wasm the crate produces must come from the same version, or
+# hydration throws "failed to grow table" on __wbindgen_init_externref_table.
+# The arg is referenced in the cargo leptos build RUN below so buildkit's
+# cache key for that step changes when WB_VERSION changes, which evicts the
+# stale wasm artifacts that would otherwise survive in the GHA buildx cache.
+ARG WB_VERSION=0.2.122
+
 # cargo-leptos + the wasm target + wasm-opt (binaryen) for the hydrate bundle.
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     rustup target add wasm32-unknown-unknown \
@@ -13,17 +21,16 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 WORKDIR /app
 COPY . .
 
-# Install the matching wasm-bindgen-cli. cargo-leptos shells out to it during
-# the hydrate build; if the CLI version doesn't match the crate version, the
-# JS shim and wasm disagree on the externref table layout and hydration
-# throws "failed to grow table" on __wbindgen_init_externref_table.
+# Install the matching wasm-bindgen-cli.
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
-    WB_VERSION=$(grep -E '^wasm-bindgen[[:space:]]*=[[:space:]]*"=' Cargo.toml \
-        | sed -E 's/.*"=([0-9.]+)".*/\1/') \
-    && cargo install -f wasm-bindgen-cli --version "${WB_VERSION}"
+    cargo install -f wasm-bindgen-cli --version "${WB_VERSION}"
 
+# WB_VERSION is referenced in the cache key for this RUN, so bumping the crate
+# pin in Cargo.toml (and the default above) invalidates the GHA-cached
+# /app/target/ and forces the wasm to be re-linked against a matching shim.
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/app/target,sharing=locked \
+    WB_VERSION=${WB_VERSION} \
     LEPTOS_SITE_ROOT=/app/site-out \
     cargo leptos build --release \
  && cp /app/target/release/roder /app/roder-bin

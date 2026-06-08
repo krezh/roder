@@ -82,10 +82,10 @@ httpRoute:
 
 resources:
   limits:
-    memory: 256Mi
+    memory: 400Mi
   requests:
     cpu: 50m
-    memory: 128Mi
+    memory: 400Mi
 
 livenessProbe:
   httpGet:

@@ -4,24 +4,36 @@
 # Primary LAN IP — the default host the HTTPS proxy serves on.
 lan_ip := `ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[\d.]+' | head -1`
 
+# wasm-bindgen-cli version, derived from the workspace pin in Cargo.toml.
+# cargo-leptos shells out to this binary; if the CLI version doesn't match
+# the crate version, the JS shim and wasm disagree on the externref table
+# layout and hydration throws "failed to grow table" on init.
+_wbg_version := `grep -E '^wasm-bindgen[[:space:]]*=[[:space:]]*"=' Cargo.toml | sed -E 's/.*"=([0-9.]+)".*/\1/'`
+
 _default:
     @just --list
+
+# Install wasm-bindgen-cli at the workspace-pinned version. cargo-leptos
+# shells out to it; keeping the CLI in sync with the crate avoids the
+# externref table mismatch that breaks hydration.
+_wbg-install:
+    cargo install -f wasm-bindgen-cli --version {{_wbg_version}}
 
 # Hot-reloading dev server (SSR + wasm hydrate) at http://127.0.0.1:8080.
 # RODER_DEV_MODE bypasses OIDC and uses your current kubeconfig (e.g. `just kind-up`),
 # so local testing needs no IdP. Use `just dev-oidc` to exercise the real login flow.
-dev:
+dev: _wbg-install
     RODER_DEV_MODE=1 cargo leptos watch
 
 # Like `dev`, but with real OIDC (reads OIDC_* / BASE_URL from the environment).
-dev-oidc:
+dev-oidc: _wbg-install
     cargo leptos watch
 
 # Dev server + HTTPS proxy together, for phones/remote devices that block
 # WebAssembly on insecure (http://LAN-IP) origins. Open https://<lan-ip>:8443.
 # Uses a trusted mkcert cert if `just dev-certs` was run, else Caddy's internal CA.
 # `auto_https disable_redirects` keeps Caddy off ports 80/443 — only 8443 is bound.
-dev-https host=lan_ip:
+dev-https host=lan_ip: _wbg-install
     #!/usr/bin/env bash
     set -euo pipefail
     mkdir -p .certs
@@ -65,7 +77,7 @@ fonts:
     echo "installed: $(ls -1 "$dst")"
 
 # Production build: server binary + hashed wasm/site assets
-build:
+build: _wbg-install
     cargo leptos build --release
 
 # Type-check the whole workspace (server feature set)

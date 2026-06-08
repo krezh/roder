@@ -42,10 +42,7 @@
           packages = [
             rustToolchain
             pkgs.cargo-leptos
-            # wasm-bindgen-cli MUST match the pinned `wasm-bindgen` crate (=0.2.100)
-            # so cargo-leptos uses it from the store instead of downloading a binary
-            # that can't run on NixOS. Bump both together on a leptos upgrade.
-            pkgs.wasm-bindgen-cli_0_2_100
+            pkgs.wasm-bindgen-cli_0_2_121
             pkgs.dart-sass # styles
             pkgs.binaryen # wasm-opt
             pkgs.just
@@ -53,11 +50,8 @@
             pkgs.kubectl
             pkgs.kubernetes-helm
             pkgs.kind
-            # HTTPS for testing from phones/remote devices, which block WebAssembly
-            # on insecure (http://LAN-IP) origins. `just dev-https`.
             pkgs.caddy
             pkgs.mkcert
-            # `just fonts`: fetch + woff2-compress the self-hosted webfonts.
             pkgs.unzip
             pkgs.woff2
           ];

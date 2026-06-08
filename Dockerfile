@@ -13,6 +13,15 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 WORKDIR /app
 COPY . .
 
+# Install the matching wasm-bindgen-cli. cargo-leptos shells out to it during
+# the hydrate build; if the CLI version doesn't match the crate version, the
+# JS shim and wasm disagree on the externref table layout and hydration
+# throws "failed to grow table" on __wbindgen_init_externref_table.
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    WB_VERSION=$(grep -E '^wasm-bindgen[[:space:]]*=[[:space:]]*"=' Cargo.toml \
+        | sed -E 's/.*"=([0-9.]+)".*/\1/') \
+    && cargo install -f wasm-bindgen-cli --version "${WB_VERSION}"
+
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/app/target,sharing=locked \
     cargo leptos build --release

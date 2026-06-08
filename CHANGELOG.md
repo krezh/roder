@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.6](https://github.com/krezh/roder/compare/0.1.5...0.1.6) (2026-06-08)
+
+
+### Bug Fixes
+
+* **build:** fix build ([bf56013](https://github.com/krezh/roder/commit/bf560137df79862a7da04d677ce1a6d5d6604d34))
+
 ## [0.1.5](https://github.com/krezh/roder/compare/0.1.4...0.1.5) (2026-06-08)
 
 

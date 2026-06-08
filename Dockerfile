@@ -24,7 +24,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/app/target,sharing=locked \
-    cargo leptos build --release
+    LEPTOS_SITE_ROOT=/app/site-out \
+    cargo leptos build --release \
+ && cp /app/target/release/roder /app/roder-bin
 
 # ---- runtime --------------------------------------------------------------
 FROM debian:bookworm-slim AS runtime
@@ -35,8 +37,8 @@ RUN apt-get update \
     && useradd --uid 1000 --user-group --no-create-home --shell /usr/sbin/nologin roder
 
 WORKDIR /app
-COPY --from=build /app/target/release/roder /app/roder
-COPY --from=build /app/target/site /app/site
+COPY --from=build /app/roder-bin /app/roder
+COPY --from=build /app/site-out /app/site
 
 ENV LEPTOS_SITE_ROOT=/app/site \
     LEPTOS_SITE_PKG_DIR=pkg \

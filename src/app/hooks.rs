@@ -3,10 +3,10 @@
 use leptos::html::Div;
 use leptos::prelude::*;
 
-use roder_core::ResourceKind;
+use roder_core::{ResourceKind, WatchEvent};
 
 use crate::app::events::{apply_event, RowMap, UidSet};
-use crate::app::state::{open_logs, DetailTarget, LogPods, LogTarget, SortKey};
+use crate::app::state::{open_logs, ConnectionState, DetailTarget, LogPods, LogTarget, SortKey};
 use crate::app::util::format::parse_key;
 use crate::app::util::predicate::KindKind;
 use crate::data;
@@ -24,14 +24,20 @@ pub(crate) fn use_sse_subscription(
 ) {
     // A counter that the error handler bumps to re-trigger the subscription Effect.
     let reconnect: RwSignal<u32> = RwSignal::new(0);
+    let conn = use_context::<ConnectionState>().map(|c| c.0);
     Effect::new(move |_prev: Option<Option<data::SseHandle>>| {
         reconnect.track();
         let url = url()?;
         data::subscribe_with_error(
             &url,
-            move |ev| apply_event(rows, entering, removing, ev),
-            // On error (e.g. 502 from ingress while pod restarts): wait 3s, reconnect.
+            move |ev| {
+                if matches!(ev, WatchEvent::Snapshot { .. }) {
+                    if let Some(c) = conn { c.set(true); }
+                }
+                apply_event(rows, entering, removing, ev)
+            },
             move || {
+                if let Some(c) = conn { c.set(false); }
                 set_timeout(
                     move || reconnect.update(|n| *n += 1),
                     std::time::Duration::from_secs(3),

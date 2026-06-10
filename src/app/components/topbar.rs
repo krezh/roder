@@ -1,11 +1,12 @@
-//! Top bar: hamburger, brand, palette button, error filter, namespace selector,
-//! failing-pod badge, cluster usage, and identity.
+//! Top bar: hamburger, brand, connection dot, palette button, error filter,
+//! namespace selector, failing-pod badge, cluster usage (with node health),
+//! and identity.
 
 use leptos::prelude::*;
 use roder_core::{ResourceKind, ResourceRow, RowStatus};
 
 use crate::app::hooks::use_sse_subscription;
-use crate::app::state::{Catalog, NavOpen, OnlyProblems, PaletteOpen};
+use crate::app::state::{Catalog, ConnectionState, NavOpen, OnlyProblems, PaletteOpen};
 use crate::app::util::format::pct;
 use crate::data;
 
@@ -23,6 +24,7 @@ pub(crate) fn Topbar() -> impl IntoView {
         <header class="topbar">
             <button class="hamburger" on:click=move |_| nav_open.update(|o| *o = !*o)>"☰"</button>
             <span class="brand" on:click=move |_| selected_kind.set(None)>"Roder"</span>
+            <ConnectionDot />
             <button class="palette-btn" on:click=move |_| palette_open.set(true)>
                 "Search " <kbd>"⌘K"</kbd>
             </button>
@@ -60,9 +62,12 @@ pub(crate) fn Topbar() -> impl IntoView {
     }
 }
 
-/// Cluster CPU/mem usage in the top bar, with a hover tooltip of per-node usage.
+/// Cluster CPU/mem usage + node health in the top bar, with a hover tooltip of
+/// per-node CPU/mem and ready status.
 #[component]
 fn TopUsage() -> impl IntoView {
+    let selected_kind = expect_context::<RwSignal<Option<ResourceKind>>>();
+    let catalog = expect_context::<Catalog>().0;
     let ov = LocalResource::new(|| async {
         data::fetch_json::<roder_core::ClusterOverview>("/api/overview").await
     });
@@ -78,17 +83,37 @@ fn TopUsage() -> impl IntoView {
                     Some(nodes.iter().filter_map(|n| n.mem_used).sum()),
                     Some(nodes.iter().filter_map(|n| n.mem_bytes).sum()),
                 );
+                let total = nodes.len();
+                let ready = nodes.iter().filter(|n| n.ready).count();
+                let nodes_ok = ready == total;
+                let go_nodes = move |_| {
+                    if let Some(nk) = catalog.get_untracked()
+                        .into_iter()
+                        .find(|k| k.group.is_empty() && k.kind == "Node")
+                    {
+                        selected_kind.set(Some(nk));
+                    }
+                };
                 view! {
                     <div class="topusage">
                         <span class="tu-stat">"CPU " <b>{format!("{cpu_p:.0}%")}</b></span>
                         <span class="tu-stat">"Mem " <b>{format!("{mem_p:.0}%")}</b></span>
+                        <span class="tu-stat tu-nodes"
+                            class:tu-nodes-warn=move || !nodes_ok
+                            on:click=go_nodes>
+                            <b>{ready}</b>"/"<b>{total}</b>" nodes"
+                        </span>
                         <div class="tooltip usage-tip">
                             {nodes.into_iter().map(|n| {
                                 let c = pct(n.cpu_used, n.cpu_cores);
                                 let m = pct(n.mem_used, n.mem_bytes);
+                                let ready_label = if n.ready { "✓" } else { "✕" };
                                 view! {
                                     <div class="tip-row">
-                                        <span class="tip-node">{n.name}</span>
+                                        <span class="tip-node"
+                                            class:tip-node-warn=move || !n.ready>
+                                            {ready_label}" "{n.name}
+                                        </span>
                                         <span>"CPU "{format!("{c:.0}%")}</span>
                                         <span>"Mem "{format!("{m:.0}%")}</span>
                                     </div>
@@ -147,6 +172,20 @@ fn FailingBadge() -> impl IntoView {
                 }
             })
         }}
+    }
+}
+
+/// A small dot showing whether the SSE data stream is live or reconnecting.
+#[component]
+fn ConnectionDot() -> impl IntoView {
+    let connected = expect_context::<ConnectionState>().0;
+    view! {
+        <span class="conn-dot-wrap">
+            <span class="conn-dot" class:conn-dot-ok=move || connected.get()></span>
+            <span class="tooltip conn-dot-tip">
+                {move || if connected.get() { "Connected" } else { "Reconnecting…" }}
+            </span>
+        </span>
     }
 }
 

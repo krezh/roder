@@ -52,6 +52,10 @@ pub(crate) struct PodModalTarget(pub(crate) RwSignal<Option<DetailTarget>>);
 #[derive(Clone, Copy)]
 pub(crate) struct ShortcutsOpen(pub(crate) RwSignal<bool>);
 
+/// Whether the SSE data stream is currently live (`true`) or reconnecting (`false`).
+#[derive(Clone, Copy)]
+pub(crate) struct ConnectionState(pub(crate) RwSignal<bool>);
+
 /// Global text filter for resource search (set by command palette).
 #[derive(Clone)]
 pub(crate) struct ResourceFilter(pub(crate) RwSignal<String>);

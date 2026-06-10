@@ -832,6 +832,37 @@ table.rules {
     background: color-mix(in srgb, var(--error) 26%, transparent);
   }
 }
+.conn-dot-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  cursor: default;
+  &:hover .conn-dot-tip { display: block; }
+}
+.conn-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warn);
+  flex-shrink: 0;
+  animation: conn-pulse 1.4s ease-in-out infinite;
+  &.conn-dot-ok {
+    background: var(--ok);
+    animation: none;
+  }
+}
+.conn-dot-tip {
+  display: none;
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 6px;
+  white-space: nowrap;
+}
+@keyframes conn-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
 
 /* ---- multiselect ---- */
 .check {
@@ -1319,6 +1350,12 @@ table.rules {
       font-variant-numeric: tabular-nums;
     }
   }
+  .tu-nodes {
+    cursor: pointer;
+    &:hover { color: var(--fg); }
+    &.tu-nodes-warn { color: var(--error); b { color: var(--error); } }
+  }
+  .tip-node-warn { color: var(--error) !important; }
   &:hover .usage-tip {
     display: block;
   }

@@ -537,7 +537,7 @@ fn spawn_metrics_refresh(registry: Arc<InformerRegistry>) {
                 let objs = entry.objects.read().await;
                 let mut rows = entry.rows.write().await;
                 for (uid, obj) in objs.iter() {
-                    let new_row = project_row("", "Pod", obj, usage_for(obj, &*usage), None, &[]);
+                    let new_row = project_row("", "Pod", obj, usage_for(obj, &usage), None, &[]);
                     if rows.get(uid) != Some(&new_row) {
                         rows.insert(uid.clone(), new_row.clone());
                         let _ = entry.tx.send(WatchEvent::Applied { row: new_row });
@@ -578,7 +578,7 @@ fn spawn_pvc_usage_refresh(registry: Arc<InformerRegistry>) {
                         "PersistentVolumeClaim",
                         obj,
                         None,
-                        pvc_usage_for(obj, &*pvc_cache),
+                        pvc_usage_for(obj, &pvc_cache),
                         &[],
                     );
                     if rows.get(uid) != Some(&new_row) {

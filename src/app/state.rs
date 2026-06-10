@@ -2,8 +2,10 @@
 //! newtype-wrapped context signals (so multiple same-typed signals can coexist in
 //! Leptos context).
 
+use std::collections::{BTreeSet, HashMap};
+
 use leptos::prelude::*;
-use roder_core::ResourceKind;
+use roder_core::{ResourceKind, ResourceRow};
 use serde::{Deserialize, Serialize};
 
 /// The object currently shown in the detail drawer.
@@ -21,7 +23,22 @@ pub(crate) struct CtxMenu {
     pub(crate) y: i32,
     pub(crate) target: DetailTarget,
     pub(crate) node: Option<String>,
+    /// uid of the right-clicked row — used to detect multi-select context.
+    pub(crate) uid: String,
 }
+
+/// Provided at App level; `ResourceView` writes the actual signal into it on
+/// mount so that `ContextMenu` (a sibling, not a child) can read multi-select
+/// state for bulk context-menu actions.
+#[derive(Clone, Copy)]
+pub(crate) struct TableSelected(
+    pub(crate) StoredValue<Option<RwSignal<BTreeSet<String>>>>,
+);
+
+#[derive(Clone, Copy)]
+pub(crate) struct TableRows(
+    pub(crate) StoredValue<Option<RwSignal<HashMap<String, ResourceRow>>>>,
+);
 
 /// Which column the resource table is sorted by.
 #[derive(Clone, Copy, PartialEq)]

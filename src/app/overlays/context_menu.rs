@@ -5,7 +5,9 @@ use roder_core::ResourceKind;
 
 use crate::app::events::{fire_action, fire_action_with};
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
-use crate::app::state::{open_logs, Catalog, CtxMenu, DetailTarget, LogPods, LogTarget};
+use crate::app::state::{
+    open_logs, Catalog, CtxMenu, DetailTarget, LogPods, LogTarget, TableRows, TableSelected,
+};
 use crate::app::util::clipboard::copy_to_clipboard;
 use crate::app::util::format::parse_key;
 use crate::app::util::predicate::KindKind;
@@ -19,6 +21,9 @@ pub(crate) fn ContextMenu() -> impl IntoView {
     let confirm = expect_context::<RwSignal<Option<Confirm>>>();
     let catalog = expect_context::<Catalog>().0;
     let log_pods = expect_context::<LogPods>().0;
+    // Provided at App level; ResourceView fills in the Option on mount.
+    let table_selected = expect_context::<TableSelected>().0;
+    let table_rows = expect_context::<TableRows>().0;
 
     view! {
         {move || ctx.get().map(|m| {
@@ -32,18 +37,43 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             let is_cronjob = kk.is_cronjob();
             let style = format!("left:{}px;top:{}px", m.x, m.y);
 
+            // When the right-clicked row is part of a multi-selection, all
+            // bulk-capable actions fire on every selected row.
+            let targets: Vec<DetailTarget> = match (table_selected.get_value(), table_rows.get_value()) {
+                (Some(sel), Some(rows)) => {
+                    let uids = sel.get_untracked();
+                    if uids.len() > 1 && uids.contains(&m.uid) {
+                        rows.with_untracked(|rm| {
+                            uids.iter()
+                                .filter_map(|uid| rm.get(uid).map(|r| DetailTarget {
+                                    key: m.target.key.clone(),
+                                    namespace: r.namespace.clone(),
+                                    name: r.name.clone(),
+                                }))
+                                .collect()
+                        })
+                    } else {
+                        vec![m.target.clone()]
+                    }
+                }
+                _ => vec![m.target.clone()],
+            };
+            let is_bulk = targets.len() > 1;
+
             let open = { let t = m.target.clone(); move |_| { detail.set(Some(t.clone())); ctx.set(None); } };
             let has_logs = is_pod || is_workload || kk.is_job();
             let logs = {
-                let t = m.target.clone();
-                let agg = !is_pod; // workloads/jobs aggregate their pods into one panel
+                let ts = targets.clone();
+                let agg = !is_pod;
                 move |_| {
-                    open_logs(log_pods, LogTarget {
-                        key: t.key.clone(),
-                        namespace: t.namespace.clone().unwrap_or_default(),
-                        name: t.name.clone(),
-                        aggregate: agg,
-                    });
+                    for t in &ts {
+                        open_logs(log_pods, LogTarget {
+                            key: t.key.clone(),
+                            namespace: t.namespace.clone().unwrap_or_default(),
+                            name: t.name.clone(),
+                            aggregate: agg,
+                        });
+                    }
                     ctx.set(None);
                 }
             };
@@ -62,36 +92,56 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                     ctx.set(None);
                 }
             };
-            let copy = { let name = m.target.name.clone(); move |_| { copy_to_clipboard(&name); ctx.set(None); } };
-            let restart = { let t = m.target.clone(); move |_| { fire_action("restart", &t); ctx.set(None); } };
-            let reconcile = { let t = m.target.clone(); move |_| { fire_action("flux-reconcile", &t); ctx.set(None); } };
-            let suspend = { let t = m.target.clone(); move |_| { fire_action("flux-suspend", &t); ctx.set(None); } };
-            let resume = { let t = m.target.clone(); move |_| { fire_action("flux-resume", &t); ctx.set(None); } };
-            let refresh = { let t = m.target.clone(); move |_| { fire_action("eso-refresh", &t); ctx.set(None); } };
-            let trigger = { let t = m.target.clone(); move |_| { fire_action("cronjob-trigger", &t); ctx.set(None); } };
-            let delete = { let t = m.target.clone(); move |_| {
-                let t = t.clone();
-                ask_confirm(confirm, "Delete this resource?", move || fire_action("delete", &t));
-                ctx.set(None);
-            } };
+            let copy = {
+                let names: Vec<String> = targets.iter().map(|t| t.name.clone()).collect();
+                move |_| { copy_to_clipboard(&names.join("\n")); ctx.set(None); }
+            };
+            // Bulk-aware single-action closures — each captures its own clone of targets.
+            macro_rules! bulk_act {
+                ($action:literal) => {{
+                    let ts = targets.clone();
+                    move |_| { for t in &ts { fire_action($action, t); } ctx.set(None); }
+                }};
+            }
+            let restart   = bulk_act!("restart");
+            let reconcile = bulk_act!("flux-reconcile");
+            let suspend   = bulk_act!("flux-suspend");
+            let resume    = bulk_act!("flux-resume");
+            let refresh   = bulk_act!("eso-refresh");
+            let trigger   = bulk_act!("cronjob-trigger");
+            let delete = {
+                let ts = targets.clone();
+                move |_| {
+                    let ts = ts.clone();
+                    let n = ts.len();
+                    let label = if n == 1 { "Delete this resource?".to_string() }
+                                else { format!("Delete {n} resources?") };
+                    ask_confirm(confirm, label, move || {
+                        for t in &ts { fire_action("delete", t); }
+                    });
+                    ctx.set(None);
+                }
+            };
 
             let scale_n = RwSignal::new(1i32);
-
-            let ns_item = m.target.namespace.clone();
-            let node_item = if is_pod { m.node.clone() } else { None };
+            let ns_item = (!is_bulk).then(|| m.target.namespace.clone()).flatten();
+            let node_item = (!is_bulk && is_pod).then(|| m.node.clone()).flatten();
 
             view! {
                 <div class="ctx-scrim"
                     on:click=move |_| ctx.set(None)
                     on:contextmenu=move |e: leptos::ev::MouseEvent| { e.prevent_default(); ctx.set(None); }></div>
                 <div class="ctx-menu" style=style>
+                    {is_bulk.then(|| view! {
+                        <div class="ctx-item ctx-bulk-header">{targets.len()}" resources"</div>
+                    })}
                     <button class="ctx-item" on:click=open>"Open details"</button>
                     {has_logs.then(|| view! { <button class="ctx-item" on:click=logs>"Logs"</button> })}
                     {ns_item.map(|ns| view! { <button class="ctx-item" on:click=goto_ns>"Go to namespace " <span class="ctx-sub">{ns}</span></button> })}
                     {node_item.map(|node| view! { <button class="ctx-item" on:click=goto_node>"Go to node " <span class="ctx-sub">{node}</span></button> })}
                     <button class="ctx-item" on:click=copy>"Copy name"</button>
                     {is_workload.then(|| view! { <button class="ctx-item" on:click=restart>"Restart"</button> })}
-                    {is_scalable.then(|| {
+                    {(!is_bulk && is_scalable).then(|| {
                         let t = m.target.clone();
                         view! {
                             <div class="ctx-item ctx-scale">

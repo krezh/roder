@@ -1739,6 +1739,15 @@ table.rules {
   &.danger:hover {
     color: var(--error);
   }
+  &.ctx-bulk-header {
+    color: var(--muted);
+    font-size: 0.75rem;
+    cursor: default;
+    padding-bottom: 0.2rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 0.15rem;
+    &:hover { background: none; }
+  }
   .ctx-sub {
     color: var(--muted);
     font-size: 0.78rem;

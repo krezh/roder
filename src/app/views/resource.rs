@@ -14,7 +14,7 @@ use crate::app::hooks::{
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::state::{
     open_logs, CtxMenu, DetailTarget, LogPods, LogTarget, OnlyProblems, ResourceFilter, SortKey,
-    Tick,
+    TableRows, TableSelected, Tick,
 };
 use crate::app::util::color::dot_class;
 use crate::app::views::dashboard::Dashboard;
@@ -33,6 +33,16 @@ pub(crate) fn ResourceView() -> impl IntoView {
     let confirm = expect_context::<RwSignal<Option<Confirm>>>();
 
     let t = use_resource_table(detail);
+    // Write into the app-level StoredValue slots so ContextMenu (a sibling,
+    // not a child) can see the live selection and row map.
+    let sv_sel = expect_context::<TableSelected>().0;
+    let sv_rows = expect_context::<TableRows>().0;
+    sv_sel.set_value(Some(t.selected));
+    sv_rows.set_value(Some(t.rows));
+    on_cleanup(move || {
+        sv_sel.set_value(None);
+        sv_rows.set_value(None);
+    });
 
     // (Re)subscribe to the live list whenever the selected kind/namespace changes.
     use_sse_subscription(t.rows, t.entering, t.removing, move || {
@@ -158,6 +168,7 @@ pub(crate) fn ResourceView() -> impl IntoView {
                     );
                     let bulk_workload = kind.group == "apps"
                         && matches!(kind.kind.as_str(), "Deployment" | "StatefulSet" | "DaemonSet" | "ReplicaSet");
+                    let bulk_flux = kind.group.ends_with("fluxcd.io");
                     let key_sv = StoredValue::new(kind.key.clone());
                     // Run an action on every selected row, then clear the selection.
                     let do_bulk = move |action: &'static str| {
@@ -245,6 +256,11 @@ pub(crate) fn ResourceView() -> impl IntoView {
                                     selected.set(std::collections::BTreeSet::new());
                                 }>"Logs"</button> })}
                                 {bulk_workload.then(|| view! { <button class="act" on:click=move |_| do_bulk("restart")>"Restart"</button> })}
+                                {bulk_flux.then(|| view! {
+                                    <button class="act" on:click=move |_| do_bulk("flux-reconcile")>"Reconcile"</button>
+                                    <button class="act" on:click=move |_| do_bulk("flux-suspend")>"Suspend"</button>
+                                    <button class="act" on:click=move |_| do_bulk("flux-resume")>"Resume"</button>
+                                })}
                                 <button class="act danger" on:click=move |_| {
                                     let n = selected.get_untracked().len();
                                     ask_confirm(confirm, format!("Delete {n} resources?"), move || do_bulk("delete"));

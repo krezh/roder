@@ -32,7 +32,7 @@ use overlays::palette::CommandPalette;
 use overlays::shortcuts::ShortcutsHelp;
 use state::{
     Catalog, ConnectionState, CtxMenu, LogPods, LogTarget, NavOpen, OnlyProblems, PaletteOpen,
-    PodModalTarget, ResourceFilter, ShortcutsOpen, Tick,
+    PodModalTarget, ResourceFilter, ShortcutsOpen, TableRows, TableSelected, Tick,
 };
 use views::resource::ResourceView;
 use views::search::SearchResultsView;
@@ -94,6 +94,8 @@ pub fn App() -> impl IntoView {
     provide_context(ctx_menu);
     provide_context(requested_tab);
     provide_context(ConnectionState(RwSignal::new(false)));
+    provide_context(TableSelected(StoredValue::new(None)));
+    provide_context(TableRows(StoredValue::new(None)));
 
     // Restore UI state from a previous session so a page reload stays put.
     let saved = data::storage_get("roder.nav")

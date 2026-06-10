@@ -52,6 +52,7 @@ where
     let uid_rm = uid.clone();
     let uid_te = uid.clone();
     let uid_pd = uid.clone();
+    let uid_ctx = uid.clone();
     let uid_ctrl = uid;
 
     view! {
@@ -110,6 +111,7 @@ where
                     y: e.client_y(),
                     target: t_ctx.clone(),
                     node: node_for_ctx(),
+                    uid: uid_ctx.clone(),
                 }));
             }
             on:transitionend=move |e: leptos::ev::TransitionEvent| {

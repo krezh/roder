@@ -9,9 +9,7 @@ use crate::app::components::table::{cmp_cell, sortable_th, FlashTd};
 use crate::app::components::table_row::{NameCell, ResourceRow as ResourceRowView};
 use crate::app::util::predicate::KindKind;
 use crate::app::events::fire_action;
-use crate::app::hooks::{
-    col_width, disp_len, min_width, table_window, use_resource_table, use_sse_subscription,
-};
+use crate::app::hooks::{table_window, use_resource_table, use_sse_subscription};
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::state::{
     open_logs, CtxMenu, DetailTarget, LogPods, LogTarget, OnlyProblems, ResourceFilter, SortKey,
@@ -184,48 +182,37 @@ pub(crate) fn ResourceView() -> impl IntoView {
                         selected.set(std::collections::BTreeSet::new());
                     };
 
-                    // Fixed column widths, computed once from the data's longest value per
-                    // column (virtualization mounts only a slice, so `max-content` would
-                    // jump as you scroll). The trailing 1fr absorbs slack; `.cwi` truncates.
-                    let cols_for_w = cols.clone();
-                    let grid_template = RwSignal::new(String::new());
-                    Effect::new(move |_| {
-                        let n = shown_uids.with(|v| v.len());
-                        if n == 0 {
-                            return;
-                        }
-                        let mut ns_w = if namespaced { "Namespace".len() } else { 0 };
-                        let mut name_w = "Name".len();
-                        let mut cell_w: Vec<usize> = cols_for_w.iter().map(|c| c.len().max(min_width(c))).collect();
-                        let age_w = "Age".len().max(6);
-                        rows.with_untracked(|m| {
-                            for r in m.values() {
-                                if namespaced {
-                                    ns_w = ns_w.max(disp_len(r.namespace.as_deref().unwrap_or("")));
+                    let n_tracks = cols.len() + 2 + usize::from(namespaced);
+                    let tmpl = format!("grid-template-columns: {};", vec!["max-content"; n_tracks].join(" "));
+                    let sizer: RwSignal<Vec<String>> = RwSignal::new(Vec::new());
+                    {
+                        let cols_for_sizer = cols.clone();
+                        Effect::new(move |_| {
+                            let _ = shown_uids.with(|v| v.len());
+                            let ncells = cols_for_sizer.len();
+                            let mut ns_max = if namespaced { "Namespace".to_string() } else { String::new() };
+                            let mut name_max = "Name".to_string();
+                            let mut cell_maxes: Vec<String> = cols_for_sizer.clone();
+                            rows.with_untracked(|m| {
+                                for r in m.values() {
+                                    if namespaced {
+                                        let ns = r.namespace.as_deref().unwrap_or("");
+                                        if ns.len() > ns_max.len() { ns_max = ns.to_string(); }
+                                    }
+                                    if r.name.len() > name_max.len() { name_max = r.name.clone(); }
+                                    for (i, c) in r.cells.iter().take(ncells).enumerate() {
+                                        if c.len() > cell_maxes[i].len() { cell_maxes[i] = c.clone(); }
+                                    }
                                 }
-                                name_w = name_w.max(r.name.chars().count());
-                                for (i, c) in r.cells.iter().enumerate() {
-                                    cell_w[i] = cell_w[i].max(disp_len(c)).max(min_width(cols_for_w.get(i).map_or("", String::as_str)));
-                                }
-                            }
+                            });
+                            let mut vals: Vec<String> = Vec::with_capacity(n_tracks);
+                            if namespaced { vals.push(ns_max); }
+                            vals.push(name_max);
+                            vals.extend(cell_maxes);
+                            vals.push("000d00h".to_string());
+                            sizer.set(vals);
                         });
-                        let mut tracks: Vec<String> = Vec::new();
-                        if namespaced {
-                            tracks.push(format!("{}ch", col_width(ns_w)));
-                        }
-                        tracks.push(format!("{}ch", col_width(name_w + 2)));
-                        for w in &cell_w {
-                            tracks.push(format!("{}ch", col_width(*w)));
-                        }
-                        tracks.push(format!("{}ch", col_width(age_w)));
-                        let new_tmpl = format!(
-                            "grid-template-columns: {} minmax(0,1fr);",
-                            tracks.join(" ")
-                        );
-                        if grid_template.get_untracked() != new_tmpl {
-                            grid_template.set(new_tmpl);
-                        }
-                    });
+                    }
 
                     let header = {
                         let cols = cols.clone();
@@ -241,7 +228,7 @@ pub(crate) fn ResourceView() -> impl IntoView {
                     view! {
                         <div class="view-head">
                             <h2 class="view-title">{title}</h2>
-                            <span class="count">{move || format!("{} items", shown_uids.get().len())}</span>
+                            <span class="count">{move || format!("{} items", shown_uids.with(|v| v.len()))}</span>
                         </div>
                         <div class="bulkbar-wrap" class:open=move || !selected.get().is_empty()>
                             <div class="bulkbar">
@@ -273,9 +260,12 @@ pub(crate) fn ResourceView() -> impl IntoView {
                         </div>
                         <div class="table-wrap" node_ref=table_ref>
                             <div class="grid-table"
-                                style=move || grid_template.get()
+                                style=tmpl
                                 class:selecting=move || !selected.get().is_empty()>
                                 {header}
+                                <div class="grid-row sizer" aria-hidden="true">
+                                    {move || sizer.get().into_iter().map(|s| view! { <div class="cell">{s}</div> }).collect_view()}
+                                </div>
                                 <div class="vpad" style=move || {
                                     format!("grid-column:1/-1;height:{}px", window.get().0 as f64 * row_h.get())
                                 }></div>
@@ -392,12 +382,12 @@ pub(crate) fn ResourceView() -> impl IntoView {
                                 </For>
                                 <div class="vpad" style=move || {
                                     let (_, last) = window.get();
-                                    let total = shown_uids.get().len();
+                                    let total = shown_uids.with(|v| v.len());
                                     format!("grid-column:1/-1;height:{}px", total.saturating_sub(last) as f64 * row_h.get())
                                 }></div>
                             </div>
                             {move || {
-                                let is_empty = shown_uids.get().is_empty();
+                                let is_empty = shown_uids.with(|v| v.is_empty());
                                 if !is_empty {
                                     return None;
                                 }

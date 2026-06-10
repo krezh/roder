@@ -363,6 +363,14 @@ body {
   animation: cell-flash 1.5s ease;
   border-radius: 4px;
 }
+/* Hidden anchor row: always in the DOM, holds max-content text per column so
+   max-content track widths stay stable while virtualized rows scroll in/out. */
+.grid-row.sizer {
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+  .cell { visibility: hidden; }
+}
 /* New/removed rows smoothly grow/collapse their cell height (grid-rows between
    var(--row-h) and 0 — definite lengths) so neighbours reflow ("push"). */
 @keyframes cw-grow {

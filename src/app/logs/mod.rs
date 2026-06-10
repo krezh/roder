@@ -128,32 +128,30 @@ pub(crate) fn LogsView(
     let filtered_lines = Memo::new(move |_| {
         let f = filter.get().to_lowercase();
         let lvl_f = level_filter.get().to_lowercase();
-        lines
-            .get()
-            .into_iter()
-            .filter(|(_, line)| {
-                let (pod, msg) = match line.split_once(" │ ") {
-                    Some((p, m)) => (Some(p), m),
-                    None => (None, line.as_str()),
-                };
-                // Level filter
-                if !lvl_f.is_empty() {
-                    let line_level = log_level(msg);
-                    if !lvl_f.contains(&line_level.to_string()) && line_level != lvl_f {
+        lines.with(|v| {
+            v.iter()
+                .filter(|(_, line)| {
+                    let (pod, msg) = match line.split_once(" │ ") {
+                        Some((p, m)) => (Some(p), m),
+                        None => (None, line.as_str()),
+                    };
+                    // Level filter
+                    if !lvl_f.is_empty() && log_level(msg) != lvl_f.as_str() {
                         return false;
                     }
-                }
-                // Text filter (search in pod name and message)
-                if !f.is_empty() {
-                    let pod_match = pod.is_none_or(|p| p.to_lowercase().contains(&f));
-                    let msg_match = msg.to_lowercase().contains(&f);
-                    if !pod_match && !msg_match {
-                        return false;
+                    // Text filter (search in pod name and message)
+                    if !f.is_empty() {
+                        let pod_match = pod.is_none_or(|p| p.to_lowercase().contains(&f));
+                        let msg_match = msg.to_lowercase().contains(&f);
+                        if !pod_match && !msg_match {
+                            return false;
+                        }
                     }
-                }
-                true
-            })
-            .collect::<Vec<_>>()
+                    true
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        })
     });
 
     view! {

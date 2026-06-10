@@ -6,8 +6,7 @@ use futures::StreamExt;
 use kube::api::{Api, DynamicObject};
 use kube::core::ApiResource;
 use kube::runtime::watcher::{self, Event};
-use roder_core::{ResourceRow, Trend, WatchEvent};
-use serde::Serialize;
+use roder_core::{MetricsPoint, ResourceRow, Trend, WatchEvent};
 use tokio::sync::{broadcast, Mutex, RwLock};
 
 use crate::client::{make_api, ClusterAccess};
@@ -70,14 +69,6 @@ impl UsageEntry {
 /// Combined current + previous usage map, updated atomically by the metrics refresh.
 pub(crate) type UsageWithTrend = HashMap<String, UsageEntry>;
 
-/// A single metrics data point with timestamp.
-#[derive(Clone, Copy, Serialize)]
-pub struct MetricsPoint {
-    pub timestamp: u64, // Unix timestamp in seconds
-    pub cpu: f64,
-    pub mem: f64,
-}
-
 /// Time-series history for a single pod (namespace/name).
 /// Stores up to MAX_HISTORY_POINTS data points.
 pub type PodMetricsHistory = VecDeque<MetricsPoint>;
@@ -89,7 +80,7 @@ const MAX_HISTORY_POINTS: usize = 240;
 pub(crate) type PvcUsageMap = HashMap<String, PvcUsage>;
 
 /// Map of pod key (namespace/name) to its metrics history.
-pub type MetricsHistory = HashMap<String, PodMetricsHistory>;
+pub(crate) type MetricsHistory = HashMap<String, PodMetricsHistory>;
 
 /// Secondary index key: (namespace, name) → uid for O(1) object lookup by name.
 type NameKey = (Option<String>, String);
@@ -343,9 +334,10 @@ fn start_informer(
                         );
                         let row = project_row(&group, &kind, &obj, usage, pvc_u, &crd);
                         let uid = row.uid.clone();
-                        task_objects.write().await.insert(uid.clone(), obj.clone());
+                        let name_k = name_key(&obj);
+                        task_objects.write().await.insert(uid.clone(), obj);
                         task_rows.write().await.insert(uid.clone(), row.clone());
-                        task_by_name.write().await.insert(name_key(&obj), uid);
+                        task_by_name.write().await.insert(name_k, uid);
                         let _ = task_tx.send(WatchEvent::Applied { row });
                     }
                     Ok(Event::Delete(obj)) => {
@@ -535,7 +527,7 @@ fn spawn_metrics_refresh(registry: Arc<InformerRegistry>) {
                 history.retain(|k, _| usage.contains_key(k));
             }
 
-            let usage = registry.pod_usage.read().await.clone();
+            let usage = registry.pod_usage.read().await;
             let active = registry.active.lock().await;
             for entry in active.values() {
                 // Only re-project pod informers that someone is actually watching.
@@ -545,7 +537,7 @@ fn spawn_metrics_refresh(registry: Arc<InformerRegistry>) {
                 let objs = entry.objects.read().await;
                 let mut rows = entry.rows.write().await;
                 for (uid, obj) in objs.iter() {
-                    let new_row = project_row("", "Pod", obj, usage_for(obj, &usage), None, &[]);
+                    let new_row = project_row("", "Pod", obj, usage_for(obj, &*usage), None, &[]);
                     if rows.get(uid) != Some(&new_row) {
                         rows.insert(uid.clone(), new_row.clone());
                         let _ = entry.tx.send(WatchEvent::Applied { row: new_row });
@@ -572,9 +564,7 @@ fn spawn_pvc_usage_refresh(registry: Arc<InformerRegistry>) {
             *registry.pvc_usage.write().await = fresh;
 
             // Re-project any active PVC informer so the % column updates.
-            // Clone the cache before acquiring active so we don't hold the
-            // Mutex while awaiting the RwLock inside the loop.
-            let pvc_cache = registry.pvc_usage.read().await.clone();
+            let pvc_cache = registry.pvc_usage.read().await;
             let active = registry.active.lock().await;
             for entry in active.values() {
                 if !entry.is_pvc || entry.tx.receiver_count() == 0 {
@@ -588,7 +578,7 @@ fn spawn_pvc_usage_refresh(registry: Arc<InformerRegistry>) {
                         "PersistentVolumeClaim",
                         obj,
                         None,
-                        pvc_usage_for(obj, &pvc_cache),
+                        pvc_usage_for(obj, &*pvc_cache),
                         &[],
                     );
                     if rows.get(uid) != Some(&new_row) {

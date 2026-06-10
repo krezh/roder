@@ -458,13 +458,8 @@ pub(crate) fn CommandPalette() -> impl IntoView {
                     text: p.text.clone(),
                 };
 
-                if let Some(storage) = web_sys::window()
-                    .and_then(|w| w.session_storage().ok())
-                    .flatten()
-                {
-                    if let Ok(json) = serde_json::to_string(&search_query) {
-                        let _ = storage.set_item("roder_search_query", &json);
-                    }
+                if let Ok(json) = serde_json::to_string(&search_query) {
+                    data::session_storage_set("roder_search_query", &json);
                 }
 
                 // Set the resource filter before navigating

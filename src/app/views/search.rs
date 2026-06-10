@@ -10,10 +10,10 @@ use std::sync::Arc;
 use leptos::prelude::*;
 use roder_core::{ResourceKind, ResourceRow, RowStatus, Trend};
 
-use crate::app::components::table::{sortable_th, FlashTd};
+use crate::app::components::table::{cmp_str, sortable_th, FlashTd};
 use crate::app::components::table_row::{NameCell, ResourceRow as ResourceRowView};
 use crate::app::events::{apply_event, fire_action};
-use crate::app::hooks::{col_width, disp_len, min_width, table_window, use_resource_table};
+use crate::app::hooks::{table_window, use_resource_table};
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::state::{
     open_logs, CtxMenu, DetailTarget, LogPods, LogTarget, MultiKindSearch, OnlyProblems,
@@ -169,17 +169,10 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
     let search_query = RwSignal::new(None::<MultiKindSearch>);
     Effect::new(move |_| {
         #[cfg(target_arch = "wasm32")]
-        {
-            if let Some(storage) = web_sys::window()
-                .and_then(|w| w.session_storage().ok())
-                .flatten()
-            {
-                if let Ok(Some(json)) = storage.get_item("roder_search_query") {
-                    if let Ok(query) = serde_json::from_str::<MultiKindSearch>(&json) {
-                        resource_filter.set(query.text.clone());
-                        search_query.set(Some(query));
-                    }
-                }
+        if let Some(json) = data::session_storage_get("roder_search_query") {
+            if let Ok(query) = serde_json::from_str::<MultiKindSearch>(&json) {
+                resource_filter.set(query.text.clone());
+                search_query.set(Some(query));
             }
         }
     });
@@ -343,13 +336,8 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                             // Borrow both cell values directly, then numeric-or-lexical compare.
                             let av = cell_value_str(col, &a.1.row);
                             let bv = cell_value_str(col, &b.1.row);
-                            match (av.parse::<f64>(), bv.parse::<f64>()) {
-                                (Ok(x), Ok(y)) => {
-                                    x.partial_cmp(&y).unwrap_or(std::cmp::Ordering::Equal)
-                                }
-                                _ => av.cmp(bv),
-                            }
-                            .then_with(|| a.1.row.name.cmp(&b.1.row.name))
+                            cmp_str(av, bv)
+                                .then_with(|| a.1.row.name.cmp(&b.1.row.name))
                         } else {
                             a.1.row.name.cmp(&b.1.row.name)
                         }
@@ -379,40 +367,35 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
     let row_h = t.row_h;
     let press = t.press;
 
-    // Fixed column widths, computed once from the data's longest value per
-    // column (virtualization mounts only a slice, so `max-content` would
-    // jump as you scroll). The trailing 1fr absorbs slack; `.cwi` truncates.
     let grid_template = RwSignal::new(String::new());
     Effect::new(move |_| {
         let cols = unified_columns.get();
-        let n = shown_uids.with(|v| v.len());
-        if n == 0 || cols.is_empty() {
-            return;
-        }
-
-        let mut cell_w: Vec<usize> = cols
-            .iter()
-            .map(|c| c.name.len().max(min_width(&c.name)))
-            .collect();
-        merged_rows.with_untracked(|m| {
-            for mr in m.values() {
-                for (i, col) in cols.iter().enumerate() {
-                    let val = cell_value_str(col, &mr.row);
-                    cell_w[i] = cell_w[i].max(disp_len(val));
-                }
-            }
-        });
-        let tracks: Vec<String> = cell_w
-            .iter()
-            .map(|w| format!("{}ch", col_width(*w)))
-            .collect();
+        if cols.is_empty() { return; }
         let new_tmpl = format!(
-            "grid-template-columns: {} minmax(0,1fr);",
-            tracks.join(" ")
+            "grid-template-columns: {};",
+            vec!["max-content"; cols.len()].join(" ")
         );
         if grid_template.get_untracked() != new_tmpl {
             grid_template.set(new_tmpl);
         }
+    });
+    let sizer: RwSignal<Vec<String>> = RwSignal::new(Vec::new());
+    Effect::new(move |_| {
+        let cols = unified_columns.get();
+        if cols.is_empty() { return; }
+        let _ = shown_uids.with(|v| v.len());
+        let mut col_maxes: Vec<String> = cols.iter().map(|c| c.name.clone()).collect();
+        merged_rows.with_untracked(|m| {
+            for mr in m.values() {
+                for (i, col) in cols.iter().enumerate() {
+                    let val = cell_value_str(col, &mr.row);
+                    if val.len() > col_maxes[i].len() {
+                        col_maxes[i] = val.to_string();
+                    }
+                }
+            }
+        });
+        sizer.set(col_maxes);
     });
 
     // Bulk action helper
@@ -436,12 +419,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
     let clear_search = move |_| {
         #[cfg(target_arch = "wasm32")]
         {
-            if let Some(storage) = web_sys::window()
-                .and_then(|w| w.session_storage().ok())
-                .flatten()
-            {
-                let _ = storage.remove_item("roder_search_query");
-            }
+            data::session_storage_remove("roder_search_query");
             history_back();
         }
     };
@@ -458,7 +436,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
             <div class="view-head">
                 <h2 class="view-title">"Search Results"</h2>
                 <button class="act" on:click=clear_search>"Clear Search"</button>
-                <span class="count">{move || format!("{} items", shown_uids.get().len())}</span>
+                <span class="count">{move || format!("{} items", shown_uids.with(|v| v.len()))}</span>
             </div>
             <div class="bulkbar-wrap" class:open=move || !selected.get().is_empty()>
                 <div class="bulkbar">
@@ -505,6 +483,9 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                                 sortable_th(col.name.clone(), sort_key, sort)
                             }).collect_view()
                         }}
+                    </div>
+                    <div class="grid-row sizer" aria-hidden="true">
+                        {move || sizer.get().into_iter().map(|s| view! { <div class="cell">{s}</div> }).collect_view()}
                     </div>
                     <div class="vpad" style=move || {
                         format!("grid-column:1/-1;height:{}px", window.get().0 as f64 * row_h.get())
@@ -633,12 +614,12 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                     </For>
                     <div class="vpad" style=move || {
                         let (_, last) = window.get();
-                        let total = shown_uids.get().len();
+                        let total = shown_uids.with(|v| v.len());
                         format!("grid-column:1/-1;height:{}px", total.saturating_sub(last) as f64 * row_h.get())
                     }></div>
                 </div>
                 {move || {
-                    if !shown_uids.get().is_empty() {
+                    if !shown_uids.with(|v| v.is_empty()) {
                         return None;
                     }
                     let problems = only_problems.get();

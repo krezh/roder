@@ -75,38 +75,6 @@ pub(crate) struct ResourceTable {
 
 /// Rows rendered beyond the viewport on each side, so scrolling doesn't flash blanks.
 pub(crate) const OVERSCAN: usize = 12;
-/// Column width bounds (in `ch`), derived from the data's longest value.
-pub(crate) const MIN_CH: usize = 5;
-pub(crate) const CAP_CH: usize = 44;
-/// Added to the longest value to leave room for the cell's horizontal padding.
-pub(crate) const PAD_CH: usize = 3;
-
-/// Displayed character width of a cell (newline list values render as `", "`).
-pub(crate) fn disp_len(s: &str) -> usize {
-    s.chars().count() + s.matches('\n').count()
-}
-
-pub(crate) fn col_width(max_chars: usize) -> usize {
-    (max_chars + PAD_CH).clamp(MIN_CH, CAP_CH)
-}
-
-/// Known minimum visual widths for columns whose content we project ourselves.
-pub(crate) fn min_width(header: &str) -> usize {
-    match header {
-        "Ready" | "Available" | "Completions" => 5,
-        "Status" => 24,
-        "Restarts" => 3,
-        "CPU" => 8,
-        "MEM" => 7,
-        "%CPU/R" | "%CPU/L" | "%MEM/R" | "%MEM/L" => 5,
-        "IP" => 15,
-        "Node" => 10,
-        "Phase" => 8,
-        "Version" => 12,
-        "Type" | "Store" => 8,
-        _ => 0,
-    }
-}
 
 /// Create the shared table state + attach the scroll/resize/RAF listeners, the
 /// Esc/⌘C keyboard handler, and the long-press infra. The caller then derives

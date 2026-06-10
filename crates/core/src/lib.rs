@@ -139,13 +139,7 @@ impl Trend {
         }
     }
 
-    pub fn color_class(&self) -> &'static str {
-        match self {
-            Trend::Up => "trend-up",
-            Trend::Down => "trend-down",
-            Trend::None => "",
-        }
-    }
+
 }
 
 /// A single row in a resource list, projected from the watched object.
@@ -223,6 +217,15 @@ pub struct NodeSummary {
     pub kubelet_version: Option<String>,
     /// `status.nodeInfo.osImage`, e.g. "Talos (v1.7.6)".
     pub os_image: Option<String>,
+}
+
+/// A single pod metrics data point, shared between the server (serializes) and
+/// the frontend (deserializes) via the `/api/metrics` endpoint.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct MetricsPoint {
+    pub timestamp: u64,
+    pub cpu: f64,
+    pub mem: f64,
 }
 
 /// Counts of resources by reconciled/suspended/failing for a CRD family.

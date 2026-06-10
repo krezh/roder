@@ -2,33 +2,34 @@
 
 /// Parse a resource key ("group/version/kind", group may be empty) into (group, kind).
 pub(crate) fn parse_key(key: &str) -> (String, String) {
-    let parts: Vec<&str> = key.splitn(3, '/').collect();
-    match parts.as_slice() {
-        [g, _v, k] => (g.to_string(), k.to_string()),
+    let mut parts = key.splitn(3, '/');
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some(g), Some(_v), Some(k)) => (g.to_string(), k.to_string()),
         _ => (String::new(), key.to_string()),
     }
 }
 
 /// "readyReplicas" -> "Ready replicas", "hostIP" -> "Host IP" (acronyms kept intact).
 pub(crate) fn camel_label(s: &str) -> String {
-    let chars: Vec<char> = s.chars().collect();
     let mut out = String::new();
-    for (i, &ch) in chars.iter().enumerate() {
-        if i == 0 {
+    let mut prev: Option<char> = None;
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if prev.is_none() {
             out.extend(ch.to_uppercase());
+            prev = Some(ch);
             continue;
         }
         if ch.is_uppercase() {
-            let prev = chars[i - 1];
-            let next_lower = chars.get(i + 1).is_some_and(|n| n.is_lowercase());
+            let p = prev.unwrap();
+            let next_lower = chars.peek().is_some_and(|n| n.is_lowercase());
             // Word boundary: camelCase (prev lower/digit) or end of an acronym (HTTPServer -> HTTP Server).
-            if prev.is_lowercase() || prev.is_ascii_digit() || (prev.is_uppercase() && next_lower) {
+            if p.is_lowercase() || p.is_ascii_digit() || (p.is_uppercase() && next_lower) {
                 out.push(' ');
             }
-            out.push(ch);
-        } else {
-            out.push(ch);
         }
+        out.push(ch);
+        prev = Some(ch);
     }
     out
 }
@@ -64,12 +65,23 @@ pub(crate) fn log_level(line: &str) -> &'static str {
             }
         }
     }
+    // Case-sensitive fast path — covers the vast majority of k8s structured and plain logs
+    // without allocating. Falls through to the allocation-based scan only for mixed-case lines.
+    if t.contains("error") || t.contains("fatal") || t.contains("panic") {
+        return "error";
+    }
+    if t.contains("warn") {
+        return "warn";
+    }
+    if t.contains("debug") || t.contains("trace") {
+        return "debug";
+    }
+    if t.contains("info") {
+        return "info";
+    }
+    // Allocate only for mixed-case keywords (e.g. "ERROR", "WARN", "INFO").
     let l = t.to_ascii_lowercase();
-    if l.contains("error")
-        || l.contains("fatal")
-        || l.contains("panic")
-        || l.contains("level=error")
-    {
+    if l.contains("error") || l.contains("fatal") || l.contains("panic") {
         "error"
     } else if l.contains("warn") {
         "warn"

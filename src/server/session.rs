@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::time::Instant;
 
 use axum::http::HeaderMap;
@@ -97,7 +98,11 @@ impl PendingStore {
 pub fn random_id() -> String {
     let mut bytes = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut bytes);
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    let mut s = String::with_capacity(64);
+    for b in &bytes {
+        let _ = write!(s, "{b:02x}");
+    }
+    s
 }
 
 /// Read a single cookie value from the request headers.

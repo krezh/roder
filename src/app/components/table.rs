@@ -7,14 +7,20 @@ use roder_core::{RowStatus, Trend};
 use crate::app::state::SortKey;
 use crate::app::util::color::dot_class;
 
-/// Compare two cell values, numerically when both parse as numbers.
-pub(crate) fn cmp_cell(a: Option<&String>, b: Option<&String>) -> std::cmp::Ordering {
-    let a = a.map(|s| s.as_str()).unwrap_or("");
-    let b = b.map(|s| s.as_str()).unwrap_or("");
+/// Compare two cell string values, numerically when both parse as numbers.
+pub(crate) fn cmp_str(a: &str, b: &str) -> std::cmp::Ordering {
     match (a.parse::<f64>(), b.parse::<f64>()) {
         (Ok(x), Ok(y)) => x.partial_cmp(&y).unwrap_or(std::cmp::Ordering::Equal),
         _ => a.cmp(b),
     }
+}
+
+/// Compare two optional cell values, numerically when both parse as numbers.
+pub(crate) fn cmp_cell(a: Option<&String>, b: Option<&String>) -> std::cmp::Ordering {
+    cmp_str(
+        a.map(|s| s.as_str()).unwrap_or(""),
+        b.map(|s| s.as_str()).unwrap_or(""),
+    )
 }
 
 /// A sortable column header. Clicking sets/toggles the table sort.

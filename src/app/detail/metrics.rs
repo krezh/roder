@@ -1,17 +1,9 @@
 //! Metrics chart component for displaying CPU and memory usage over time.
 
 use leptos::prelude::*;
-use serde::Deserialize;
+use roder_core::MetricsPoint;
 
 use crate::data;
-
-/// A single metrics data point from the API.
-#[derive(Clone, Deserialize)]
-pub struct MetricsPoint {
-    pub timestamp: u64,
-    pub cpu: f64,
-    pub mem: f64,
-}
 
 /// Chart component displaying CPU and memory usage over time.
 #[component]

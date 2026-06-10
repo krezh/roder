@@ -102,9 +102,7 @@ pub(crate) fn RowDetail(target: DetailTarget) -> impl IntoView {
     let (group, kind) = parse_key(&target.key);
     let kk = KindKind::new(&group, &kind);
     let is_workload = kk.is_workload();
-    // DaemonSets have no spec.replicas — restartable but not scalable.
-    let is_scalable =
-        group == "apps" && matches!(kind.as_str(), "Deployment" | "StatefulSet" | "ReplicaSet");
+    let is_scalable = kk.is_scalable();
     let is_flux = kk.is_flux();
     let is_eso = kk.is_eso();
     let is_pod = kk.is_pod();

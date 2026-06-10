@@ -239,6 +239,33 @@ pub fn storage_get(_key: &str) -> Option<String> {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn storage_set(_key: &str, _value: &str) {}
 
+// ---- sessionStorage (persist within a browser tab, cleared on tab close) ---
+
+#[cfg(target_arch = "wasm32")]
+pub fn session_storage_get(key: &str) -> Option<String> {
+    web_sys::window()?
+        .session_storage()
+        .ok()
+        .flatten()?
+        .get_item(key)
+        .ok()
+        .flatten()
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn session_storage_set(key: &str, value: &str) {
+    if let Some(Ok(Some(store))) = web_sys::window().map(|w| w.session_storage()) {
+        let _ = store.set_item(key, value);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn session_storage_remove(key: &str) {
+    if let Some(Ok(Some(store))) = web_sys::window().map(|w| w.session_storage()) {
+        let _ = store.remove_item(key);
+    }
+}
+
 /// Whether focus is currently in a text input (so shortcuts like ⌃Z don't hijack it).
 #[cfg(target_arch = "wasm32")]
 pub fn is_text_input_focused() -> bool {
@@ -276,7 +303,7 @@ pub fn humanize_age(_created: &Option<String>) -> String {
     String::new()
 }
 
-#[allow(dead_code)]
+#[cfg_attr(not(test), allow(dead_code))]
 fn format_age(secs: u64) -> String {
     let d = secs / 86400;
     let h = (secs % 86400) / 3600;

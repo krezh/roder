@@ -14,7 +14,8 @@ use kube::api::{
     Api, DeleteParams, DynamicObject, ListParams, LogParams, Patch, PatchParams, PostParams,
 };
 use roder_core::{
-    Category, ClusterOverview, HealthRollup, NodeSummary, ObjectDetail, ObjectEvent, ResourceKind,
+    Category, ClusterOverview, HealthRollup, MetricsPoint, NodeSummary, ObjectDetail, ObjectEvent,
+    ResourceKind,
 };
 use serde_json::json;
 
@@ -76,10 +77,6 @@ impl Backend {
     /// Swap in a refreshed ID token (called by the refresh task).
     pub fn set_token(&self, id_token: &str) -> Result<(), K8sError> {
         self.cluster.set_token(id_token)
-    }
-
-    pub fn cluster(&self) -> &Arc<ClusterAccess> {
-        &self.cluster
     }
 
     /// The current `kube::Client` (a cheap clone of the hot-swappable inner Arc).
@@ -658,7 +655,7 @@ impl Backend {
         &self,
         namespace: &str,
         name: &str,
-    ) -> Result<Vec<crate::informers::MetricsPoint>, K8sError> {
+    ) -> Result<Vec<MetricsPoint>, K8sError> {
         Ok(self
             .registry
             .pod_metrics_history(namespace, name)

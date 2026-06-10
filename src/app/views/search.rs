@@ -17,7 +17,7 @@ use crate::app::hooks::{col_width, disp_len, min_width, table_window, use_resour
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::state::{
     open_logs, CtxMenu, DetailTarget, LogPods, LogTarget, MultiKindSearch, OnlyProblems,
-    ResourceFilter, SortKey, Tick,
+    ResourceFilter, SortKey, TableRows, TableSelected, Tick,
 };
 #[cfg(target_arch = "wasm32")]
 use crate::app::util::history::history_back;
@@ -142,10 +142,28 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
 
     let t = use_resource_table(detail);
 
+    // Register selection + row map so the context menu can fire bulk actions in the search view.
+    let sv_sel = expect_context::<TableSelected>().0;
+    let sv_rows = expect_context::<TableRows>().0;
+    sv_sel.set_value(Some(t.selected));
+    sv_rows.set_value(Some(t.rows));
+    on_cleanup(move || {
+        sv_sel.set_value(None);
+        sv_rows.set_value(None);
+    });
+
     // Merged rows: the parent map for the search view. Keyed by `{kind_key}/{uid}`
     // so the same uid from different kinds can't collide. Holds a `MergedRow`
     // (kind + row) so the row component can deref both at render time.
     let merged_rows: RwSignal<HashMap<String, MergedRow>> = RwSignal::new(Default::default());
+    // Mirror merged_rows into t.rows (ResourceRow projection) so the context menu's
+    // TableRows lookup finds namespace/name by uid for bulk right-click actions.
+    let rows_for_ctx = t.rows;
+    Effect::new(move |_| {
+        merged_rows.with(|m| {
+            rows_for_ctx.set(m.iter().map(|(k, mr)| (k.clone(), mr.row.clone())).collect());
+        });
+    });
 
     // Load search query from session storage.
     let search_query = RwSignal::new(None::<MultiKindSearch>);
@@ -376,7 +394,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
             .iter()
             .map(|c| c.name.len().max(min_width(&c.name)))
             .collect();
-        merged_rows.with(|m| {
+        merged_rows.with_untracked(|m| {
             for mr in m.values() {
                 for (i, col) in cols.iter().enumerate() {
                     let val = cell_value_str(col, &mr.row);
@@ -388,10 +406,13 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
             .iter()
             .map(|w| format!("{}ch", col_width(*w)))
             .collect();
-        grid_template.set(format!(
+        let new_tmpl = format!(
             "grid-template-columns: {} minmax(0,1fr);",
             tracks.join(" ")
-        ));
+        );
+        if grid_template.get_untracked() != new_tmpl {
+            grid_template.set(new_tmpl);
+        }
     });
 
     // Bulk action helper

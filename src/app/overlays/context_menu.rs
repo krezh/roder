@@ -43,7 +43,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                 (Some(sel), Some(rows)) => {
                     let uids = sel.get_untracked();
                     if uids.len() > 1 && uids.contains(&m.uid) {
-                        rows.with_untracked(|rm| {
+                        let ts: Vec<DetailTarget> = rows.with_untracked(|rm| {
                             uids.iter()
                                 .filter_map(|uid| rm.get(uid).map(|r| DetailTarget {
                                     key: m.target.key.clone(),
@@ -51,7 +51,8 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                                     name: r.name.clone(),
                                 }))
                                 .collect()
-                        })
+                        });
+                        if ts.is_empty() { vec![m.target.clone()] } else { ts }
                     } else {
                         vec![m.target.clone()]
                     }
@@ -74,6 +75,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                             aggregate: agg,
                         });
                     }
+                    if let Some(sel) = table_selected.get_value() { sel.set(Default::default()); }
                     ctx.set(None);
                 }
             };
@@ -100,7 +102,11 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             macro_rules! bulk_act {
                 ($action:literal) => {{
                     let ts = targets.clone();
-                    move |_| { for t in &ts { fire_action($action, t); } ctx.set(None); }
+                    move |_| {
+                        for t in &ts { fire_action($action, t); }
+                        if let Some(sel) = table_selected.get_value() { sel.set(Default::default()); }
+                        ctx.set(None);
+                    }
                 }};
             }
             let restart   = bulk_act!("restart");
@@ -118,6 +124,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                                 else { format!("Delete {n} resources?") };
                     ask_confirm(confirm, label, move || {
                         for t in &ts { fire_action("delete", t); }
+                        if let Some(sel) = table_selected.get_value() { sel.set(Default::default()); }
                     });
                     ctx.set(None);
                 }
@@ -135,7 +142,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                     {is_bulk.then(|| view! {
                         <div class="ctx-item ctx-bulk-header">{targets.len()}" resources"</div>
                     })}
-                    <button class="ctx-item" on:click=open>"Open details"</button>
+                    {(!is_bulk).then(|| view! { <button class="ctx-item" on:click=open>"Open details"</button> })}
                     {has_logs.then(|| view! { <button class="ctx-item" on:click=logs>"Logs"</button> })}
                     {ns_item.map(|ns| view! { <button class="ctx-item" on:click=goto_ns>"Go to namespace " <span class="ctx-sub">{ns}</span></button> })}
                     {node_item.map(|node| view! { <button class="ctx-item" on:click=goto_node>"Go to node " <span class="ctx-sub">{node}</span></button> })}

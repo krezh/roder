@@ -131,8 +131,17 @@ where
         }
     }) as Box<dyn FnMut(web_sys::MessageEvent)>);
     es.set_onmessage(Some(cb.as_ref().unchecked_ref()));
-    let err_cb = Closure::wrap(Box::new(move |_: web_sys::Event| {
-        on_error();
+    let err_cb = Closure::wrap(Box::new(move |e: web_sys::Event| {
+        // Only trigger reconnect when the connection is fully closed (readyState=2).
+        // While CONNECTING (0) the browser is already auto-retrying; firing our own
+        // reconnect would open a second connection unnecessarily.
+        let closed = e
+            .target()
+            .and_then(|t| t.dyn_into::<web_sys::EventSource>().ok())
+            .map_or(true, |es| es.ready_state() == web_sys::EventSource::CLOSED);
+        if closed {
+            on_error();
+        }
     }) as Box<dyn FnMut(web_sys::Event)>);
     es.set_onerror(Some(err_cb.as_ref().unchecked_ref()));
     Some(SseHandle {

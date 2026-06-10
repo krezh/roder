@@ -7,6 +7,7 @@ use roder_core::{ResourceKind, ResourceRow, RowStatus};
 
 use crate::app::components::table::{cmp_cell, sortable_th, FlashTd};
 use crate::app::components::table_row::{NameCell, ResourceRow as ResourceRowView};
+use crate::app::util::predicate::KindKind;
 use crate::app::events::fire_action;
 use crate::app::hooks::{
     col_width, disp_len, min_width, table_window, use_resource_table, use_sse_subscription,
@@ -166,9 +167,9 @@ pub(crate) fn ResourceView() -> impl IntoView {
                             .map(|(i, _)| i)
                             .collect::<Vec<usize>>(),
                     );
-                    let bulk_workload = kind.group == "apps"
-                        && matches!(kind.kind.as_str(), "Deployment" | "StatefulSet" | "DaemonSet" | "ReplicaSet");
-                    let bulk_flux = kind.group.ends_with("fluxcd.io");
+                    let kk = KindKind::new(&kind.group, &kind.kind);
+                    let bulk_workload = kk.is_workload();
+                    let bulk_flux = kk.is_flux();
                     let key_sv = StoredValue::new(kind.key.clone());
                     // Run an action on every selected row, then clear the selection.
                     let do_bulk = move |action: &'static str| {
@@ -197,7 +198,7 @@ pub(crate) fn ResourceView() -> impl IntoView {
                         let mut name_w = "Name".len();
                         let mut cell_w: Vec<usize> = cols_for_w.iter().map(|c| c.len().max(min_width(c))).collect();
                         let age_w = "Age".len().max(6);
-                        rows.with(|m| {
+                        rows.with_untracked(|m| {
                             for r in m.values() {
                                 if namespaced {
                                     ns_w = ns_w.max(disp_len(r.namespace.as_deref().unwrap_or("")));
@@ -217,10 +218,13 @@ pub(crate) fn ResourceView() -> impl IntoView {
                             tracks.push(format!("{}ch", col_width(*w)));
                         }
                         tracks.push(format!("{}ch", col_width(age_w)));
-                        grid_template.set(format!(
+                        let new_tmpl = format!(
                             "grid-template-columns: {} minmax(0,1fr);",
                             tracks.join(" ")
-                        ));
+                        );
+                        if grid_template.get_untracked() != new_tmpl {
+                            grid_template.set(new_tmpl);
+                        }
                     });
 
                     let header = {

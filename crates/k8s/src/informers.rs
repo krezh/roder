@@ -307,7 +307,8 @@ fn start_informer(
                         building.clear();
                         building_objs.clear();
                     }
-                    Ok(Event::InitApply(obj)) => {
+                    Ok(Event::InitApply(mut obj)) => {
+                        obj.metadata.managed_fields = None;
                         let (usage, pvc_u) = enrichments(
                             &obj,
                             is_pod,
@@ -331,7 +332,8 @@ fn start_informer(
                         *task_by_name.write().await = name_idx;
                         let _ = task_tx.send(WatchEvent::Snapshot { rows: rows_vec });
                     }
-                    Ok(Event::Apply(obj)) => {
+                    Ok(Event::Apply(mut obj)) => {
+                        obj.metadata.managed_fields = None;
                         let (usage, pvc_u) = enrichments(
                             &obj,
                             is_pod,

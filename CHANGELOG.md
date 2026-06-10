@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.1.10](https://github.com/krezh/roder/compare/0.1.9...0.1.10) (2026-06-10)
+
+
+### Features
+
+* **bulk:** Flux reconcile/suspend/resume; right-click multi-select ([28af133](https://github.com/krezh/roder/commit/28af1338a27c634bd46d951f9bc270822495a171))
+* **topbar:** connection status dot, node health in cluster usage ([43b9a0e](https://github.com/krezh/roder/commit/43b9a0e8daec536cbc945698279ad3e1b9212231))
+* **ux:** scale widget in context menu, Enter/L keyboard shortcuts ([6e18b16](https://github.com/krezh/roder/commit/6e18b1604ec4ded9f2aa6a9a87dd27f93c23d3d6))
+
+
+### Bug Fixes
+
+* **cargo:** update wasm-bindgen (0.2.122 ➔ 0.2.123) ([#31](https://github.com/krezh/roder/issues/31)) ([cd7692f](https://github.com/krezh/roder/commit/cd7692fbefbb556eee0ed2a7e9867ecf72bdabd8))
+* **clippy:** remove explicit auto-derefs in informers.rs ([dabc7a5](https://github.com/krezh/roder/commit/dabc7a53113d5ea7e0346cf95a1d1fad53230de6))
+* **sse:** reconnect automatically when connection drops or pod restarts ([0f0080f](https://github.com/krezh/roder/commit/0f0080f18075aa1b1f608a8baace3d5e37d765c6))
+* **ux:** address 7 issues found in code review ([985ddc0](https://github.com/krezh/roder/commit/985ddc07f9a4a4abb2750fc187559d989386dfb9))
+
+
+### Performance Improvements
+
+* **memory:** strip managedFields from cached DynamicObjects ([e0f29f7](https://github.com/krezh/roder/commit/e0f29f7a9b996d69e65a3885c0ae350d13005ded))
+* reduce allocations, dedup types, fix column sizing ([f9d1d51](https://github.com/krezh/roder/commit/f9d1d51fbfb2689d97bfe8c4eb5f957bef96e9c9))
+
+
+### Code Refactoring
+
+* dedup logic, add reconnect to search/palette, clean up ([0bb5371](https://github.com/krezh/roder/commit/0bb5371fa28d8ab49ccfe7113cfa6d5a53e7f30f))
+
 ## [0.1.9](https://github.com/krezh/roder/compare/0.1.8...0.1.9) (2026-06-08)
 
 

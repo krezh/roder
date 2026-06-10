@@ -60,12 +60,7 @@ pub(crate) fn cond_to_status(s: Option<&str>) -> RowStatus {
 }
 
 pub(crate) fn ready_label(s: &Option<String>) -> String {
-    match s.as_deref() {
-        Some("True") => "True".to_string(),
-        Some("False") => "False".to_string(),
-        Some(other) => other.to_string(),
-        None => "-".to_string(),
-    }
+    s.as_deref().unwrap_or("-").to_string()
 }
 
 pub(crate) fn ready_replicas(data: &Value) -> String {

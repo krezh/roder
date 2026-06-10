@@ -11,28 +11,24 @@ pub(crate) fn replicaset_cells(data: &Value) -> (Vec<String>, RowStatus) {
 }
 
 pub(crate) fn workload_cells(data: &Value) -> (Vec<String>, RowStatus) {
-    let desired = int_at(data, &["status", "replicas"]).unwrap_or(0);
-    let ready = int_at(data, &["status", "readyReplicas"]).unwrap_or(0);
-    let available = int_at(data, &["status", "availableReplicas"])
-        .or_else(|| int_at(data, &["status", "numberAvailable"]))
-        .unwrap_or(0);
-    let status = if desired == 0 {
-        RowStatus::Warn
-    } else if ready >= desired {
-        RowStatus::Ok
-    } else {
-        RowStatus::Pending
-    };
-    (
-        vec![format!("{ready}/{desired}"), available.to_string()],
-        status,
+    replica_cells(
+        int_at(data, &["status", "replicas"]).unwrap_or(0),
+        int_at(data, &["status", "readyReplicas"]).unwrap_or(0),
+        int_at(data, &["status", "availableReplicas"])
+            .or_else(|| int_at(data, &["status", "numberAvailable"]))
+            .unwrap_or(0),
     )
 }
 
 pub(crate) fn daemonset_cells(data: &Value) -> (Vec<String>, RowStatus) {
-    let desired = int_at(data, &["status", "desiredNumberScheduled"]).unwrap_or(0);
-    let ready = int_at(data, &["status", "numberReady"]).unwrap_or(0);
-    let available = int_at(data, &["status", "numberAvailable"]).unwrap_or(0);
+    replica_cells(
+        int_at(data, &["status", "desiredNumberScheduled"]).unwrap_or(0),
+        int_at(data, &["status", "numberReady"]).unwrap_or(0),
+        int_at(data, &["status", "numberAvailable"]).unwrap_or(0),
+    )
+}
+
+fn replica_cells(desired: i64, ready: i64, available: i64) -> (Vec<String>, RowStatus) {
     let status = if desired == 0 {
         RowStatus::Warn
     } else if ready >= desired {
@@ -40,10 +36,7 @@ pub(crate) fn daemonset_cells(data: &Value) -> (Vec<String>, RowStatus) {
     } else {
         RowStatus::Pending
     };
-    (
-        vec![format!("{ready}/{desired}"), available.to_string()],
-        status,
-    )
+    (vec![format!("{ready}/{desired}"), available.to_string()], status)
 }
 
 pub(crate) fn job_cells(data: &Value) -> (Vec<String>, RowStatus) {

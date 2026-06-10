@@ -16,8 +16,8 @@ use crate::app::events::{apply_event, fire_action};
 use crate::app::hooks::{table_window, use_resource_table};
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::state::{
-    open_logs, CtxMenu, DetailTarget, LogPods, LogTarget, MultiKindSearch, OnlyProblems,
-    ResourceFilter, SortKey, TableRows, TableSelected, Tick,
+    open_logs, ConnectionState, CtxMenu, DetailTarget, LogPods, LogTarget, MultiKindSearch,
+    OnlyProblems, ResourceFilter, SortKey, TableRows, TableSelected, Tick,
 };
 #[cfg(target_arch = "wasm32")]
 use crate::app::util::history::history_back;
@@ -222,6 +222,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
         t.removing.set(Default::default());
         t.scroll_top.set(0.0);
 
+        let conn = use_context::<ConnectionState>().map(|c| c.0);
         for kind in &kinds {
             let kind_key = kind.key.clone();
             let url = data::watch_url(
@@ -236,7 +237,9 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
             // the parent `merged_rows` with the `{kind_key}/` prefix.
             let kind_rows = RwSignal::new(HashMap::<String, ResourceRow>::new());
             let prefix = format!("{}/", kind_key);
+            let reconnect: RwSignal<u32> = RwSignal::new(0);
             Effect::new(move |_prev: Option<Option<data::SseHandle>>| {
+                reconnect.track();
                 let ka = kind_arc.clone();
                 let url = url.clone();
                 let kr = kind_rows;
@@ -244,13 +247,14 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                 let ent = entering;
                 let rm = removing;
                 let pfx = prefix.clone();
-                data::subscribe(&url, move |ev| {
+                data::subscribe_with_error(&url, move |ev| {
                     use roder_core::WatchEvent::*;
                     match ev {
                         // Snapshot replaces the whole kind: mirror the full rebuild
                         // (otherwise the per-kind buffer's safety-net timeouts for
                         // deletes would orphan entries in the parent).
                         Snapshot { rows: r } => {
+                            if let Some(c) = conn { c.set(true); }
                             apply_event(kr, ent, rm, Snapshot { rows: r.clone() });
                             mr.update(|m| {
                                 m.retain(|k, _| !k.starts_with(&pfx));
@@ -291,6 +295,12 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                             });
                         }
                     }
+                }, move || {
+                    if let Some(c) = conn { c.set(false); }
+                    set_timeout(
+                        move || reconnect.update(|n| *n += 1),
+                        std::time::Duration::from_secs(3),
+                    );
                 })
             });
         }

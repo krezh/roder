@@ -381,16 +381,22 @@ pub(crate) fn CommandPalette() -> impl IntoView {
             // Create subscription for this kind
             let rows_copy = rows_for_kind;
             let all_rows_copy = all_rows;
+            let reconnect: RwSignal<u32> = RwSignal::new(0);
 
             Effect::new(move |_prev: Option<Option<data::SseHandle>>| {
+                reconnect.track();
                 let url = url.clone();
                 let kind_key_inner = kind_key.clone();
-                data::subscribe(&url, move |ev| {
+                data::subscribe_with_error(&url, move |ev| {
                     apply_event(rows_copy, entering, removing, ev);
-                    // Sync to all_rows
                     all_rows_copy.update(|ar| {
                         ar.insert(kind_key_inner.clone(), rows_copy.get_untracked());
                     });
+                }, move || {
+                    set_timeout(
+                        move || reconnect.update(|n| *n += 1),
+                        std::time::Duration::from_secs(3),
+                    );
                 })
             });
         }

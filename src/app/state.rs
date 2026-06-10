@@ -96,6 +96,24 @@ pub(crate) struct LogTarget {
     pub(crate) aggregate: bool,
 }
 impl LogTarget {
+    pub(crate) fn from_row(key: &str, row: &ResourceRow, aggregate: bool) -> Self {
+        Self {
+            key: key.to_string(),
+            namespace: row.namespace.clone().unwrap_or_default(),
+            name: row.name.clone(),
+            aggregate,
+        }
+    }
+
+    pub(crate) fn from_detail(target: &DetailTarget, aggregate: bool) -> Self {
+        Self {
+            key: target.key.clone(),
+            namespace: target.namespace.clone().unwrap_or_default(),
+            name: target.name.clone(),
+            aggregate,
+        }
+    }
+
     pub(crate) fn url(&self) -> String {
         let ns = crate::data::percent_encode(&self.namespace);
         let name = crate::data::percent_encode(&self.name);

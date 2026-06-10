@@ -68,12 +68,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                 let agg = !is_pod;
                 move |_| {
                     for t in &ts {
-                        open_logs(log_pods, LogTarget {
-                            key: t.key.clone(),
-                            namespace: t.namespace.clone().unwrap_or_default(),
-                            name: t.name.clone(),
-                            aggregate: agg,
-                        });
+                        open_logs(log_pods, LogTarget::from_detail(t, agg));
                     }
                     if let Some(sel) = table_selected.get_value() { sel.set(Default::default()); }
                     ctx.set(None);

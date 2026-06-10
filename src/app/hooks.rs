@@ -160,12 +160,7 @@ pub(crate) fn use_resource_table(detail: RwSignal<Option<DetailTarget>>) -> Reso
                         rows_for_kb.with_untracked(|m| {
                             for uid in &uids {
                                 if let Some(row) = m.get(uid) {
-                                    open_logs(log_pods, LogTarget {
-                                        key: kind.key.clone(),
-                                        namespace: row.namespace.clone().unwrap_or_default(),
-                                        name: row.name.clone(),
-                                        aggregate: agg,
-                                    });
+                                    open_logs(log_pods, LogTarget::from_row(&kind.key, row, agg));
                                 }
                             }
                         });

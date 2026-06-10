@@ -11,17 +11,8 @@ pub(crate) fn humanize_since(ts: &str) -> String {
     let Ok(t) = time::OffsetDateTime::parse(ts, &Rfc3339) else {
         return String::new();
     };
-    let secs = (time::OffsetDateTime::now_utc() - t).whole_seconds().max(0);
-    let (d, h, m) = (secs / 86400, (secs % 86400) / 3600, (secs % 3600) / 60);
-    if d > 0 {
-        format!("{d}d{h}h")
-    } else if h > 0 {
-        format!("{h}h{m}m")
-    } else if m > 0 {
-        format!("{m}m")
-    } else {
-        format!("{secs}s")
-    }
+    let secs = (time::OffsetDateTime::now_utc() - t).whole_seconds().max(0) as u64;
+    roder_core::format_age_secs(secs)
 }
 
 /// Render a byte count using the binary (Ki/Mi/Gi/Ti) suffixes that match how

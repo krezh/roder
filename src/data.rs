@@ -100,17 +100,7 @@ impl Drop for SseHandle {
     }
 }
 
-/// Open an SSE connection, calling `on_event` for each decoded message. The
-/// returned handle closes the connection when dropped.
-#[cfg(target_arch = "wasm32")]
-pub fn subscribe<F>(url: &str, on_event: F) -> Option<SseHandle>
-where
-    F: Fn(roder_core::WatchEvent) + 'static,
-{
-    subscribe_with_error(url, on_event, || {})
-}
-
-/// Like [`subscribe`] but calls `on_error` when the EventSource fires an error
+/// Like [`subscribe_with_error`] but calls `on_error` when the EventSource fires an error
 /// (e.g. the server returned a non-200 status). Callers use this to schedule a
 /// reconnect rather than leaving the stream dead.
 #[cfg(target_arch = "wasm32")]
@@ -185,14 +175,6 @@ where
 
 #[cfg(not(target_arch = "wasm32"))]
 pub struct SseHandle;
-
-#[cfg(not(target_arch = "wasm32"))]
-pub fn subscribe<F>(_url: &str, _on_event: F) -> Option<SseHandle>
-where
-    F: Fn(roder_core::WatchEvent) + 'static,
-{
-    None
-}
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn subscribe_with_error<F, E>(_url: &str, _on_event: F, _on_error: E) -> Option<SseHandle>
@@ -286,37 +268,16 @@ pub fn is_text_input_focused() -> bool {
 /// Humanize an RFC3339 timestamp into a compact relative age (e.g. "3d", "5m").
 #[cfg(target_arch = "wasm32")]
 pub fn humanize_age(created: &Option<String>) -> String {
-    let Some(ts) = created else {
-        return String::new();
-    };
+    let Some(ts) = created else { return String::new(); };
     let parsed = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(ts)).get_time();
-    if parsed.is_nan() {
-        return String::new();
-    }
-    let now = js_sys::Date::now();
-    let secs = ((now - parsed) / 1000.0).max(0.0) as u64;
-    format_age(secs)
+    if parsed.is_nan() { return String::new(); }
+    let secs = ((js_sys::Date::now() - parsed) / 1000.0).max(0.0) as u64;
+    roder_core::format_age_secs(secs)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn humanize_age(_created: &Option<String>) -> String {
     String::new()
-}
-
-#[cfg_attr(not(test), allow(dead_code))]
-fn format_age(secs: u64) -> String {
-    let d = secs / 86400;
-    let h = (secs % 86400) / 3600;
-    let m = (secs % 3600) / 60;
-    if d > 0 {
-        format!("{d}d{h}h")
-    } else if h > 0 {
-        format!("{h}h{m}m")
-    } else if m > 0 {
-        format!("{m}m")
-    } else {
-        format!("{secs}s")
-    }
 }
 
 #[cfg(test)]
@@ -359,31 +320,4 @@ mod tests {
         assert_eq!(u, "/api/detail?key=v1/Pod&namespace=kube%20system&name=my%3Dpod");
     }
 
-    #[test]
-    fn format_age_seconds() {
-        assert_eq!(format_age(0), "0s");
-        assert_eq!(format_age(45), "45s");
-        assert_eq!(format_age(59), "59s");
-    }
-
-    #[test]
-    fn format_age_minutes() {
-        assert_eq!(format_age(60), "1m");
-        assert_eq!(format_age(90), "1m");
-        assert_eq!(format_age(3599), "59m");
-    }
-
-    #[test]
-    fn format_age_hours() {
-        assert_eq!(format_age(3600), "1h0m");
-        assert_eq!(format_age(3660), "1h1m");
-        assert_eq!(format_age(86399), "23h59m");
-    }
-
-    #[test]
-    fn format_age_days() {
-        assert_eq!(format_age(86400), "1d0h");
-        assert_eq!(format_age(86400 + 3600 * 5), "1d5h");
-        assert_eq!(format_age(86400 * 7 + 3600 * 12), "7d12h");
-    }
 }

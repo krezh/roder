@@ -228,6 +228,22 @@ pub struct MetricsPoint {
     pub mem: f64,
 }
 
+/// Compact human-readable duration from a number of seconds ("5m", "2h3m", "1d4h").
+pub fn format_age_secs(secs: u64) -> String {
+    let d = secs / 86400;
+    let h = (secs % 86400) / 3600;
+    let m = (secs % 3600) / 60;
+    if d > 0 {
+        format!("{d}d{h}h")
+    } else if h > 0 {
+        format!("{h}h{m}m")
+    } else if m > 0 {
+        format!("{m}m")
+    } else {
+        format!("{secs}s")
+    }
+}
+
 /// Counts of resources by reconciled/suspended/failing for a CRD family.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HealthRollup {
@@ -235,4 +251,37 @@ pub struct HealthRollup {
     pub ready: u32,
     pub suspended: u32,
     pub failing: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_age_seconds() {
+        assert_eq!(format_age_secs(0), "0s");
+        assert_eq!(format_age_secs(45), "45s");
+        assert_eq!(format_age_secs(59), "59s");
+    }
+
+    #[test]
+    fn format_age_minutes() {
+        assert_eq!(format_age_secs(60), "1m");
+        assert_eq!(format_age_secs(90), "1m");
+        assert_eq!(format_age_secs(3599), "59m");
+    }
+
+    #[test]
+    fn format_age_hours() {
+        assert_eq!(format_age_secs(3600), "1h0m");
+        assert_eq!(format_age_secs(3660), "1h1m");
+        assert_eq!(format_age_secs(86399), "23h59m");
+    }
+
+    #[test]
+    fn format_age_days() {
+        assert_eq!(format_age_secs(86400), "1d0h");
+        assert_eq!(format_age_secs(86400 + 3600 * 5), "1d5h");
+        assert_eq!(format_age_secs(86400 * 7 + 3600 * 12), "7d12h");
+    }
 }

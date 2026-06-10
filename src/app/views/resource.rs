@@ -241,7 +241,7 @@ pub(crate) fn ResourceView() -> impl IntoView {
                                     let agg = !is_pod_kind;
                                     rows.with_untracked(|v| {
                                         for r in v.values().filter(|r| uids.contains(&r.uid)) {
-                                            open_logs(log_pods, LogTarget { key: key.clone(), namespace: r.namespace.clone().unwrap_or_default(), name: r.name.clone(), aggregate: agg });
+                                            open_logs(log_pods, LogTarget::from_row(&key, r, agg));
                                         }
                                     });
                                     selected.set(std::collections::BTreeSet::new());

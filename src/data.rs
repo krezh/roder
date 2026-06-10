@@ -89,6 +89,7 @@ pub async fn post_action(_body: &serde_json::Value) -> Result<(), String> {
 pub struct SseHandle {
     es: web_sys::EventSource,
     _on_message: wasm_bindgen::closure::Closure<dyn FnMut(web_sys::MessageEvent)>,
+    _on_error: Option<wasm_bindgen::closure::Closure<dyn FnMut(web_sys::Event)>>,
     _on_eof: Option<wasm_bindgen::closure::Closure<dyn FnMut(web_sys::MessageEvent)>>,
 }
 
@@ -106,6 +107,18 @@ pub fn subscribe<F>(url: &str, on_event: F) -> Option<SseHandle>
 where
     F: Fn(roder_core::WatchEvent) + 'static,
 {
+    subscribe_with_error(url, on_event, || {})
+}
+
+/// Like [`subscribe`] but calls `on_error` when the EventSource fires an error
+/// (e.g. the server returned a non-200 status). Callers use this to schedule a
+/// reconnect rather than leaving the stream dead.
+#[cfg(target_arch = "wasm32")]
+pub fn subscribe_with_error<F, E>(url: &str, on_event: F, on_error: E) -> Option<SseHandle>
+where
+    F: Fn(roder_core::WatchEvent) + 'static,
+    E: Fn() + 'static,
+{
     use wasm_bindgen::closure::Closure;
     use wasm_bindgen::JsCast;
 
@@ -118,9 +131,14 @@ where
         }
     }) as Box<dyn FnMut(web_sys::MessageEvent)>);
     es.set_onmessage(Some(cb.as_ref().unchecked_ref()));
+    let err_cb = Closure::wrap(Box::new(move |_: web_sys::Event| {
+        on_error();
+    }) as Box<dyn FnMut(web_sys::Event)>);
+    es.set_onerror(Some(err_cb.as_ref().unchecked_ref()));
     Some(SseHandle {
         es,
         _on_message: cb,
+        _on_error: Some(err_cb),
         _on_eof: None,
     })
 }
@@ -151,6 +169,7 @@ where
     Some(SseHandle {
         es,
         _on_message: cb,
+        _on_error: None,
         _on_eof: Some(eof),
     })
 }
@@ -162,6 +181,15 @@ pub struct SseHandle;
 pub fn subscribe<F>(_url: &str, _on_event: F) -> Option<SseHandle>
 where
     F: Fn(roder_core::WatchEvent) + 'static,
+{
+    None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn subscribe_with_error<F, E>(_url: &str, _on_event: F, _on_error: E) -> Option<SseHandle>
+where
+    F: Fn(roder_core::WatchEvent) + 'static,
+    E: Fn() + 'static,
 {
     None
 }

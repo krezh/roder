@@ -12,18 +12,32 @@ use crate::app::util::predicate::KindKind;
 use crate::data;
 
 /// Subscribe to a live resource list, re-subscribing whenever `url` re-reads a
-/// changed signal. The `url` closure also performs any per-(re)subscribe reset as a
-/// side effect, then yields the SSE URL (or `None` to skip). The returned SSE handle
-/// is owned by the effect, so the previous stream closes on each re-subscribe.
+/// changed signal or when the connection is lost (e.g. the pod restarts).
+/// The `url` closure also performs any per-(re)subscribe reset as a side effect,
+/// then yields the SSE URL (or `None` to skip). The returned SSE handle is owned
+/// by the effect, so the previous stream closes on each re-subscribe.
 pub(crate) fn use_sse_subscription(
     rows: RowMap,
     entering: UidSet,
     removing: UidSet,
     url: impl Fn() -> Option<String> + 'static,
 ) {
+    // A counter that the error handler bumps to re-trigger the subscription Effect.
+    let reconnect: RwSignal<u32> = RwSignal::new(0);
     Effect::new(move |_prev: Option<Option<data::SseHandle>>| {
+        reconnect.track();
         let url = url()?;
-        data::subscribe(&url, move |ev| apply_event(rows, entering, removing, ev))
+        data::subscribe_with_error(
+            &url,
+            move |ev| apply_event(rows, entering, removing, ev),
+            // On error (e.g. 502 from ingress while pod restarts): wait 3s, reconnect.
+            move || {
+                set_timeout(
+                    move || reconnect.update(|n| *n += 1),
+                    std::time::Duration::from_secs(3),
+                )
+            },
+        )
     });
 }
 

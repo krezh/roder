@@ -3,7 +3,7 @@
 use leptos::prelude::*;
 use roder_core::ResourceKind;
 
-use crate::app::events::fire_action;
+use crate::app::events::{fire_action, fire_action_with};
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::state::{open_logs, Catalog, CtxMenu, DetailTarget, LogPods, LogTarget};
 use crate::app::util::clipboard::copy_to_clipboard;
@@ -26,6 +26,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             let kk = KindKind::new(&group, &kind);
             let is_pod = kk.is_pod();
             let is_workload = kk.is_workload();
+            let is_scalable = kk.is_scalable();
             let is_flux = kk.is_flux();
             let is_eso = kk.is_eso();
             let is_cronjob = kk.is_cronjob();
@@ -74,6 +75,8 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                 ctx.set(None);
             } };
 
+            let scale_n = RwSignal::new(1i32);
+
             let ns_item = m.target.namespace.clone();
             let node_item = if is_pod { m.node.clone() } else { None };
 
@@ -88,6 +91,26 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                     {node_item.map(|node| view! { <button class="ctx-item" on:click=goto_node>"Go to node " <span class="ctx-sub">{node}</span></button> })}
                     <button class="ctx-item" on:click=copy>"Copy name"</button>
                     {is_workload.then(|| view! { <button class="ctx-item" on:click=restart>"Restart"</button> })}
+                    {is_scalable.then(|| {
+                        let t = m.target.clone();
+                        view! {
+                            <div class="ctx-item ctx-scale">
+                                <span>"Scale"</span>
+                                <input type="number" min="0" class="ctx-scale-input"
+                                    prop:value=move || scale_n.get().to_string()
+                                    on:click=|e: leptos::ev::MouseEvent| e.stop_propagation()
+                                    on:input=move |e| {
+                                        if let Ok(n) = event_target_value(&e).parse::<i32>() {
+                                            scale_n.set(n);
+                                        }
+                                    } />
+                                <button on:click=move |_| {
+                                    fire_action_with("scale", &t, serde_json::json!({ "replicas": scale_n.get_untracked() }));
+                                    ctx.set(None);
+                                }>"→"</button>
+                            </div>
+                        }
+                    })}
                     {is_cronjob.then(|| view! { <button class="ctx-item" on:click=trigger>"Trigger"</button> })}
                     {is_flux.then(|| view! {
                         <button class="ctx-item" on:click=reconcile>"Reconcile"</button>

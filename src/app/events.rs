@@ -15,9 +15,19 @@ pub(crate) type RowMap = RwSignal<HashMap<String, ResourceRow>>;
 
 /// Fire-and-forget mutation (context menu / bulk actions).
 pub(crate) fn fire_action(action: &'static str, t: &DetailTarget) {
-    let body = serde_json::json!({
+    fire_action_with(action, t, serde_json::Value::Null);
+}
+
+/// Like [`fire_action`] but merges extra fields into the request body (e.g. `{"replicas": 3}`).
+pub(crate) fn fire_action_with(action: &'static str, t: &DetailTarget, extra: serde_json::Value) {
+    let mut body = serde_json::json!({
         "action": action, "key": t.key, "namespace": t.namespace, "name": t.name,
     });
+    if let (Some(o), Some(ex)) = (body.as_object_mut(), extra.as_object()) {
+        for (k, v) in ex {
+            o.insert(k.clone(), v.clone());
+        }
+    }
     leptos::task::spawn_local(async move {
         let _ = data::post_action(&body).await;
     });

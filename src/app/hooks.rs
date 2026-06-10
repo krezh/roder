@@ -3,8 +3,12 @@
 use leptos::html::Div;
 use leptos::prelude::*;
 
+use roder_core::ResourceKind;
+
 use crate::app::events::{apply_event, RowMap, UidSet};
-use crate::app::state::{DetailTarget, SortKey};
+use crate::app::state::{open_logs, DetailTarget, LogPods, LogTarget, SortKey};
+use crate::app::util::format::parse_key;
+use crate::app::util::predicate::KindKind;
 use crate::data;
 
 /// Subscribe to a live resource list, re-subscribing whenever `url` re-reads a
@@ -117,15 +121,18 @@ pub(crate) fn use_resource_table(detail: RwSignal<Option<DetailTarget>>) -> Reso
 
     // Esc clears an active multi-select (only when one exists, so it doesn't
     // pre-empt the app-level Esc that closes the detail drawer).
-    // ⌘C copies the names of selected resources to the clipboard.
+    // ⌘C copies names of selected resources; Enter opens detail; L opens logs.
     let rows_for_kb = rows;
     let selected_for_kb = selected;
     let detail_for_kb = detail;
+    let selected_kind = expect_context::<RwSignal<Option<ResourceKind>>>();
+    let log_pods = expect_context::<LogPods>().0;
     Effect::new(move |_| {
         let h = window_event_listener(leptos::ev::keydown, move |e| {
-            if e.key() == "Escape" && !selected_for_kb.with_untracked(|s| s.is_empty()) {
+            let key = e.key();
+            if key == "Escape" && !selected_for_kb.with_untracked(|s| s.is_empty()) {
                 selected_for_kb.set(std::collections::BTreeSet::new());
-            } else if (e.meta_key() || e.ctrl_key()) && e.key().eq_ignore_ascii_case("c") {
+            } else if (e.meta_key() || e.ctrl_key()) && key.eq_ignore_ascii_case("c") {
                 let uids = selected_for_kb.with_untracked(|s| s.clone());
                 if !uids.is_empty() {
                     let names: Vec<String> = rows_for_kb.with_untracked(|m| {
@@ -137,8 +144,44 @@ pub(crate) fn use_resource_table(detail: RwSignal<Option<DetailTarget>>) -> Reso
                         crate::app::util::clipboard::copy_to_clipboard(&names.join("\n"));
                     }
                 } else if let Some(target) = detail_for_kb.with_untracked(|d| d.clone()) {
-                    // If nothing selected but detail is open, copy that resource name.
                     crate::app::util::clipboard::copy_to_clipboard(&target.name);
+                }
+            } else if key == "Enter" && !data::is_text_input_focused() {
+                // Open the detail drawer for a single selected row.
+                let uids = selected_for_kb.with_untracked(|s| s.clone());
+                if uids.len() == 1 {
+                    let uid = uids.into_iter().next().unwrap();
+                    if let Some(kind) = selected_kind.get_untracked() {
+                        if let Some(row) = rows_for_kb.with_untracked(|m| m.get(&uid).cloned()) {
+                            detail_for_kb.set(Some(DetailTarget {
+                                key: kind.key,
+                                namespace: row.namespace,
+                                name: row.name,
+                            }));
+                        }
+                    }
+                }
+            } else if key.eq_ignore_ascii_case("l") && !data::is_text_input_focused() {
+                // Open logs for all selected rows that support it.
+                if let Some(kind) = selected_kind.get_untracked() {
+                    let (group, knd) = parse_key(&kind.key);
+                    let kk = KindKind::new(&group, &knd);
+                    if kk.is_pod() || kk.is_workload() || kk.is_job() {
+                        let agg = !kk.is_pod();
+                        let uids = selected_for_kb.with_untracked(|s| s.clone());
+                        rows_for_kb.with_untracked(|m| {
+                            for uid in &uids {
+                                if let Some(row) = m.get(uid) {
+                                    open_logs(log_pods, LogTarget {
+                                        key: kind.key.clone(),
+                                        namespace: row.namespace.clone().unwrap_or_default(),
+                                        name: row.name.clone(),
+                                        aggregate: agg,
+                                    });
+                                }
+                            }
+                        });
+                    }
                 }
             }
         });

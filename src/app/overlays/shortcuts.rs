@@ -44,7 +44,11 @@ pub(crate) fn ShortcutsHelp() -> impl IntoView {
                             </div>
                             <div class="shortcut-row">
                                 <kbd>"Enter"</kbd>
-                                <span>"Open resource details"</span>
+                                <span>"Open details for selected row"</span>
+                            </div>
+                            <div class="shortcut-row">
+                                <kbd>"L"</kbd>
+                                <span>"Open logs for selected (pods / workloads)"</span>
                             </div>
                             <div class="shortcut-row">
                                 <kbd>"Shift+Click"</kbd>
@@ -53,21 +57,6 @@ pub(crate) fn ShortcutsHelp() -> impl IntoView {
                             <div class="shortcut-row">
                                 <kbd>"⌘+Click"</kbd>
                                 <span>"Toggle selection"</span>
-                            </div>
-                        </div>
-                        <div class="shortcuts-section">
-                            <h3>"Logs"</h3>
-                            <div class="shortcut-row">
-                                <kbd>"L"</kbd>
-                                <span>"Open logs for selected"</span>
-                            </div>
-                            <div class="shortcut-row">
-                                <kbd>"F"</kbd>
-                                <span>"Toggle follow"</span>
-                            </div>
-                            <div class="shortcut-row">
-                                <kbd>"W"</kbd>
-                                <span>"Toggle wrap"</span>
                             </div>
                         </div>
                     </div>

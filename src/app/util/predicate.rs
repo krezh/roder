@@ -39,4 +39,10 @@ impl<'a> KindKind<'a> {
     pub(crate) fn is_eso(&self) -> bool {
         self.group == "external-secrets.io"
     }
+
+    /// Scalable workloads have spec.replicas (DaemonSets do not).
+    pub(crate) fn is_scalable(&self) -> bool {
+        self.group == "apps"
+            && matches!(self.kind, "Deployment" | "StatefulSet" | "ReplicaSet")
+    }
 }

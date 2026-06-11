@@ -113,7 +113,7 @@ pub(crate) fn TooltipLayer() -> impl IntoView {
             };
             view! {
                 <div class="tooltip" node_ref=tip_ref
-                    style=move || { let (x, y) = pos.get(); format!("position:fixed;left:{x}px;top:{y}px") }>
+                    style=move || { let (x, y) = pos.get(); format!("left:{x}px;top:{y}px") }>
                     {body}
                 </div>
             }

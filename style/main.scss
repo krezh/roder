@@ -37,6 +37,15 @@
   box-sizing: border-box;
 }
 
+input,
+button,
+select,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
 html,
 body {
   margin: 0;
@@ -190,6 +199,32 @@ body {
     border: none;
     border-top: 1px solid var(--border);
     margin: 0.4rem 0.9rem;
+  }
+  .sidebar-workspace {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: var(--item-h);
+    padding: 0 0.9rem 0 1.4rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--accent);
+    text-decoration: none;
+    border-left: 2px solid var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    margin-bottom: 0.3rem;
+    &:hover {
+      background: color-mix(in srgb, var(--accent) 16%, transparent);
+    }
+  }
+  .sidebar-ws-badge {
+    font-size: 0.7rem;
+    font-weight: 700;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 9px;
+    padding: 0.05rem 0.45rem;
+    line-height: 1.5;
   }
 }
 
@@ -1213,6 +1248,30 @@ table.rules {
     color: var(--muted);
     font-size: 0.8rem;
   }
+  .view-filter {
+    flex: 1;
+    max-width: 14rem;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    outline: none;
+    color: var(--fg);
+    font-size: 0.8rem;
+    padding: 0.1rem 0.3rem;
+    &::placeholder { color: var(--muted); }
+  }
+  .view-close {
+    margin-left: auto;
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 1.1rem;
+    line-height: 1;
+    padding: 0 2px;
+    flex-shrink: 0;
+    &:hover { color: var(--error); }
+  }
 }
 
 /* ---- dashboard ---- */
@@ -1371,6 +1430,7 @@ table.rules {
 /* The one reusable tooltip look — used by the global hover tooltip and by any
    bespoke tooltip bubble (e.g. the cluster-usage per-node popover). */
 .tooltip {
+  position: fixed;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -1380,7 +1440,7 @@ table.rules {
   color: var(--fg);
   white-space: nowrap;
   max-width: 40rem;
-  z-index: 1000;
+  z-index: 9999;
   pointer-events: none;
 }
 .tip-list {
@@ -1480,7 +1540,7 @@ table.rules {
   font-size: 0.95rem;
   flex: 0 0 auto;
   &:hover {
-    color: var(--fg);
+    color: var(--error);
   }
 }
 .detailbar-body {
@@ -1552,7 +1612,7 @@ table.rules {
   cursor: pointer;
   font-size: 0.95rem;
   &:hover {
-    color: var(--fg);
+    color: var(--error);
   }
 }
 .logbar-body {
@@ -1641,7 +1701,7 @@ table.rules {
   font-size: 1rem;
   flex: 0 0 auto;
   &:hover {
-    color: var(--fg);
+    color: var(--error);
   }
 }
 
@@ -1714,11 +1774,11 @@ table.rules {
 .ctx-scrim {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  z-index: 500;
 }
 .ctx-menu {
   position: fixed;
-  z-index: 41;
+  z-index: 501;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1760,6 +1820,34 @@ table.rules {
     color: var(--muted);
     font-size: 0.78rem;
     margin-left: auto;
+  }
+}
+.ctx-scale {
+  .ctx-scale-input {
+    width: 52px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--fg);
+    border-radius: 5px;
+    padding: 0.15rem 0.35rem;
+    -webkit-appearance: textfield;
+    -moz-appearance: textfield;
+    appearance: textfield;
+    &::-webkit-inner-spin-button,
+    &::-webkit-outer-spin-button { display: none; }
+    &:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+  }
+  button {
+    background: var(--accent);
+    border: none;
+    color: var(--bg);
+    border-radius: 5px;
+    padding: 0.15rem 0.5rem;
+    cursor: pointer;
+    &:hover { opacity: 0.85; }
   }
 }
 
@@ -1864,7 +1952,7 @@ table.rules {
   padding: 0.2rem 0.5rem;
   border-radius: 4px;
   &:hover {
-    color: var(--fg);
+    color: var(--error);
     background: var(--panel-2);
   }
 }
@@ -1951,4 +2039,62 @@ table.rules {
   width: 10px;
   height: 10px;
   border-radius: 50%;
+}
+
+/* ---- workspace ---- */
+.workspace {
+  display: grid;
+  /* grid-template-columns/rows set inline from pane count */
+  gap: 8px;
+  padding: 8px;
+  height: 100%;
+  box-sizing: border-box;
+}
+.workspace-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--muted);
+  font-size: 0.875rem;
+  text-align: center;
+  p { margin: 0; line-height: 1.6; }
+  kbd { background: var(--surface); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; font-size: 0.8em; }
+}
+.pane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg);
+  > .resource-view {
+    height: auto;
+    flex: 1;
+    min-height: 0;
+  }
+}
+// Badges used in the pane's view-head (namespace + selector).
+.pane-badge {
+  font-size: 0.7rem;
+  padding: 1px 6px;
+  border-radius: 10px;
+  white-space: nowrap;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pane-badge-ns  { background: #1f3a5f; color: #79c0ff; }
+.pane-badge-sel { background: #1f3b2b; color: #3fb950; }
+// Per-pane namespace dropdown in the view-head — same appearance as the topbar selector.
+.pane-ns-select {
+  background: var(--panel-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+  &:focus { outline: none; border-color: var(--accent); }
 }

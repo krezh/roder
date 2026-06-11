@@ -2,6 +2,8 @@
 //! server/k8s layer. Keep this crate dependency-light and wasm-safe: no tokio,
 //! no kube-rs, no anything that can't compile to `wasm32-unknown-unknown`.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 /// Liveness/readiness payload served at `/health`.
@@ -156,6 +158,9 @@ pub struct ResourceRow {
     /// pod CPU/MEM cells carry `Up`/`Down` when usage changed vs the prior sample.
     pub trends: Vec<Trend>,
     pub status: RowStatus,
+    /// `metadata.labels` from the Kubernetes object.
+    #[serde(default)]
+    pub labels: BTreeMap<String, String>,
 }
 
 /// SSE event for a live resource list.
@@ -168,6 +173,13 @@ pub enum WatchEvent {
     Applied { row: ResourceRow },
     /// A row was removed (by uid).
     Deleted { uid: String },
+}
+
+/// Tagged SSE event for a multiplexed workspace watch stream.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MultiWatchEvent {
+    pub key: String,
+    pub event: WatchEvent,
 }
 
 /// Object detail payload (the expanded row).

@@ -299,6 +299,7 @@ pub fn project_row(
         .clone()
         .unwrap_or_else(|| format!("{}/{}", namespace.clone().unwrap_or_default(), name));
     let created = obj.metadata.creation_timestamp.as_ref().and_then(ts_string);
+    let labels = obj.metadata.labels.clone().unwrap_or_default();
 
     // A resource with a deletionTimestamp is being terminated; surface that
     // distinctly (yellow) instead of leaving it green/Running until it vanishes.
@@ -325,5 +326,6 @@ pub fn project_row(
         cells,
         trends,
         status,
+        labels,
     }
 }

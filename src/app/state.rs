@@ -83,7 +83,30 @@ pub struct MultiKindSearch {
     pub kinds: Vec<String>,
     pub namespaces: Vec<String>,
     pub text: String,
+    /// Pre-computed Kubernetes label selector (e.g. `"app=notifier,env=prod"`).
+    /// Passed to each SSE watch URL so the API server filters server-side.
+    #[serde(default)]
+    pub selector: Option<String>,
 }
+
+/// A single live-watching pane in the workspace view.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneConfig {
+    pub kind_key: String,
+    pub namespace: Option<String>,
+    /// Kubernetes label selector applied server-side via the SSE watch URL.
+    pub selector: Option<String>,
+}
+
+/// Persistent set of live-watching panes shown on the `/workspace` route.
+#[derive(Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct WorkspaceConfig {
+    pub panes: Vec<PaneConfig>,
+}
+
+/// App-level signal for the workspace configuration (persisted to localStorage).
+#[derive(Clone, Copy)]
+pub(crate) struct WorkspaceConf(pub(crate) RwSignal<WorkspaceConfig>);
 
 /// A source open in the log sidebar: a single pod, or a workload whose pods'
 /// logs are merged into one panel.

@@ -568,6 +568,26 @@ impl Backend {
         }
     }
 
+    /// When a pod has multiple containers and no container was explicitly selected,
+    /// return the name of the first non-init container so the kube API doesn't
+    /// reject the request with "please specify the container to tail".
+    async fn resolve_container(&self, ns: &str, pod: &str, container: Option<String>) -> Option<String> {
+        if container.is_some() {
+            return container;
+        }
+        let obj = self.registry.cached_object("/v1/Pod", Some(ns), pod).await?;
+        let containers = obj.data
+            .get("spec")
+            .and_then(|s| s.get("containers"))
+            .and_then(|c| c.as_array())?;
+        // Only force-specify a container when there are multiple; for single-container
+        // pods None is fine and avoids sending a potentially stale name.
+        if containers.len() <= 1 {
+            return None;
+        }
+        containers.first()?.get("name")?.as_str().map(|s| s.to_string())
+    }
+
     /// Recent (tail) pod logs.
     pub async fn logs(
         &self,
@@ -577,6 +597,7 @@ impl Backend {
         follow: bool,
     ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>, K8sError> {
         let api: Api<Pod> = Api::namespaced(self.client(), ns);
+        let container = self.resolve_container(ns, pod, container).await;
         let lp = LogParams {
             follow,
             tail_lines: Some(500),

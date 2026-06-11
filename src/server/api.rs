@@ -6,7 +6,8 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use roder_core::WatchEvent;
+use futures::stream::select_all;
+use roder_core::{MultiWatchEvent, WatchEvent};
 use roder_k8s::Backend;
 use serde::Deserialize;
 use tokio_stream::wrappers::BroadcastStream;
@@ -135,6 +136,71 @@ pub async fn watch(State(state): State<AppState>, Query(q): Query<WatchQuery>) -
         .into_response()
 }
 
+#[derive(Deserialize)]
+pub struct MultiWatchQuery {
+    panes: String,
+}
+
+/// Multiplexed workspace watch: one SSE stream merging N per-kind informer
+/// streams, so all panes share a single browser connection.
+pub async fn watch_multi(State(state): State<AppState>, Query(q): Query<MultiWatchQuery>) -> Response {
+    let b = backend_or_return!(state);
+
+    let pane_specs: Vec<(String, Option<String>)> = q.panes
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| {
+            let mut parts = s.splitn(2, ':');
+            let key = parts.next()?.to_string();
+            if key.is_empty() { return None; }
+            let ns = parts.next().filter(|n| !n.is_empty()).map(String::from);
+            Some((key, ns))
+        })
+        .collect();
+
+    if pane_specs.is_empty() {
+        return (StatusCode::BAD_REQUEST, "no panes specified").into_response();
+    }
+
+    type PaneStream = std::pin::Pin<Box<dyn futures::Stream<Item = Result<SseEvent, Infallible>> + Send>>;
+    let mut streams: Vec<PaneStream> = Vec::new();
+
+    for (key, ns) in pane_specs {
+        let handle = match b.subscribe(&key, ns, None).await {
+            Ok(h) => h,
+            Err(e) => return bad_gateway(e),
+        };
+        let rows = handle.rows.clone();
+        let snapshot = WatchEvent::Snapshot { rows: handle.snapshot };
+        let init = tokio_stream::once(to_multi_event(&MultiWatchEvent { key: key.clone(), event: snapshot }));
+        let live = BroadcastStream::new(handle.rx).then(move |res| {
+            let key = key.clone();
+            let rows = rows.clone();
+            async move {
+                let ev = match res {
+                    Ok(ev) => ev,
+                    Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(_)) => {
+                        let current = rows.read().await;
+                        WatchEvent::Snapshot { rows: current.values().cloned().collect() }
+                    }
+                };
+                to_multi_event(&MultiWatchEvent { key, event: ev })
+            }
+        });
+        streams.push(Box::pin(init.chain(live)));
+    }
+
+    Sse::new(select_all(streams))
+        .keep_alive(KeepAlive::default())
+        .into_response()
+}
+
+fn to_multi_event(ev: &MultiWatchEvent) -> Result<SseEvent, Infallible> {
+    Ok(SseEvent::default()
+        .json_data(ev)
+        .unwrap_or_else(|_| SseEvent::default().data("{}")))
+}
+
 // ---- mutations + logs (M6) -----------------------------------------------
 
 #[derive(Deserialize)]
@@ -250,9 +316,13 @@ pub async fn logs(State(state): State<AppState>, Query(q): Query<LogQuery>) -> R
     } else {
         return (StatusCode::BAD_REQUEST, "logs: need pod, or key+name").into_response();
     };
-    let stream = match res {
+    // Surface kube API errors as a visible log line rather than a silent 502, so
+    // the user sees why logs aren't showing (RBAC denied, container not found, etc.).
+    let stream: std::pin::Pin<Box<dyn futures::Stream<Item = String> + Send>> = match res {
         Ok(s) => s,
-        Err(e) => return bad_gateway(e),
+        Err(e) => Box::pin(futures::stream::once(async move {
+            format!("[roder] failed to get logs: {e}")
+        })),
     };
     // After the log stream ends (e.g. a completed pod), emit an `eof` event so the
     // browser closes the EventSource instead of auto-reconnecting and replaying.

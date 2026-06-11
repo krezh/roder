@@ -122,7 +122,7 @@ pub(crate) fn info_view(d: ObjectDetail, kind: String) -> impl IntoView {
                 <h4>"Labels"</h4>
                 <div class="kvlist">
                     {labels.into_iter().map(|(k, v)| view! {
-                        <div class="kvl"><span class="kvl-k">{k}</span><span class="kvl-v">{v}</span></div>
+                        <div class="kvl"><span class="kvl-k">{format!("{}:", k)}</span><span class="kvl-v">{v}</span></div>
                     }).collect_view()}
                 </div>
             })}
@@ -131,7 +131,7 @@ pub(crate) fn info_view(d: ObjectDetail, kind: String) -> impl IntoView {
                 <h4>"Annotations"</h4>
                 <div class="kvlist">
                     {annotations.into_iter().map(|(k, v)| view! {
-                        <div class="kvl"><span class="kvl-k">{k}</span><span class="kvl-v">{v}</span></div>
+                        <div class="kvl"><span class="kvl-k">{format!("{}:", k)}</span><span class="kvl-v">{v}</span></div>
                     }).collect_view()}
                 </div>
             })}

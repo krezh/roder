@@ -31,11 +31,13 @@ use overlays::context_menu::ContextMenu;
 use overlays::palette::CommandPalette;
 use overlays::shortcuts::ShortcutsHelp;
 use state::{
-    Catalog, ConnectionState, CtxMenu, LogPods, LogTarget, NavOpen, OnlyProblems, PaletteOpen,
-    PodModalTarget, ResourceFilter, ShortcutsOpen, TableRows, TableSelected, Tick,
+    Catalog, ConnectionState, CtxMenu, LogPods, LogTarget, NavOpen, OnlyProblems,
+    PaletteOpen, PodModalTarget, ResourceFilter, ShortcutsOpen, TableRows, TableSelected, Tick,
+    WorkspaceConf, WorkspaceConfig,
 };
 use views::resource::ResourceView;
 use views::search::SearchResultsView;
+use views::workspace::WorkspaceView;
 
 /// The HTML document shell rendered on the server.
 pub fn shell(options: LeptosOptions) -> impl IntoView {
@@ -96,6 +98,35 @@ pub fn App() -> impl IntoView {
     provide_context(ConnectionState(RwSignal::new(false)));
     provide_context(TableSelected(StoredValue::new(None)));
     provide_context(TableRows(StoredValue::new(None)));
+
+    // Namespace list shared across the topbar selector and all workspace pane dropdowns.
+    // Fetched once here so individual panes don't each open a separate HTTP connection.
+    let ns_resource: LocalResource<Result<Vec<String>, String>> =
+        LocalResource::new(|| async { data::fetch_json::<Vec<String>>("/api/namespaces").await });
+    provide_context(ns_resource);
+
+    // Workspace config: start empty (same on server and client, avoids hydration mismatch),
+    // restore from localStorage client-side after mount, then persist on every change.
+    let workspace = RwSignal::new(WorkspaceConfig::default());
+    provide_context(WorkspaceConf(workspace));
+    // workspace_ready prevents the persist effect from clobbering localStorage with the
+    // empty default before the restore effect has run.
+    let workspace_ready = RwSignal::new(false);
+    Effect::new(move |_| {
+        if let Some(saved) = data::storage_get("roder.workspace")
+            .and_then(|s| serde_json::from_str::<WorkspaceConfig>(&s).ok())
+        {
+            workspace.set(saved);
+        }
+        workspace_ready.set(true);
+    });
+    Effect::new(move |_| {
+        if !workspace_ready.get() { return; }
+        let w = workspace.get();
+        if let Ok(json) = serde_json::to_string(&w) {
+            data::storage_set("roder.workspace", &json);
+        }
+    });
 
     // Restore UI state from a previous session so a page reload stays put.
     let saved = data::storage_get("roder.nav")
@@ -203,6 +234,7 @@ pub fn App() -> impl IntoView {
                         <Routes fallback=|| view! { <p class="empty">"Not found."</p> }>
                             <Route path=StaticSegment("") view=ResourceView />
                             <Route path=StaticSegment("search") view=SearchResultsView />
+                            <Route path=StaticSegment("workspace") view=WorkspaceView />
                         </Routes>
                     </main>
                 </div>
@@ -213,8 +245,8 @@ pub fn App() -> impl IntoView {
                 <DetailDrawer />
                 <LogSidebar />
                 <ShortcutsHelp />
-                <TooltipLayer />
             </div>
+            <TooltipLayer />
         </Router>
     }
 }

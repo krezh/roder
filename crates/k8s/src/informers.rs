@@ -148,6 +148,11 @@ impl InformerRegistry {
         registry
     }
 
+    /// Expose the shared printer-column map for use by one-shot search queries.
+    pub fn columns(&self) -> Arc<ColumnMap> {
+        self.columns.clone()
+    }
+
     /// Subscribe to a live list, starting the shared informer if needed.
     pub async fn subscribe(
         &self,
@@ -234,6 +239,7 @@ impl InformerRegistry {
         let history = self.metrics_history.read().await;
         history.get(&key).map(|h| h.iter().copied().collect())
     }
+
 }
 
 #[allow(clippy::too_many_arguments)]

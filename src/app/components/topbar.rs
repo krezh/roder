@@ -17,8 +17,7 @@ pub(crate) fn Topbar() -> impl IntoView {
     let nav_open = expect_context::<NavOpen>().0;
     let palette_open = expect_context::<PaletteOpen>().0;
     let only_problems = expect_context::<OnlyProblems>().0;
-    let namespaces =
-        LocalResource::new(|| async { data::fetch_json::<Vec<String>>("/api/namespaces").await });
+    let namespaces = expect_context::<LocalResource<Result<Vec<String>, String>>>();
 
     view! {
         <header class="topbar">
@@ -145,6 +144,7 @@ fn FailingBadge() -> impl IntoView {
     let rows = RwSignal::new(std::collections::HashMap::<String, ResourceRow>::new());
     let entering = RwSignal::new(std::collections::BTreeSet::<String>::new());
     let removing = RwSignal::new(std::collections::BTreeSet::<String>::new());
+
     use_sse_subscription(rows, entering, removing, move || {
         let pk = pod_kind.get()?;
         Some(data::watch_url(&pk.key, None, None))

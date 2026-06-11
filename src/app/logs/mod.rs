@@ -51,7 +51,11 @@ pub(crate) fn LogSidebar() -> impl IntoView {
             <div class="logbar-resize" on:mousedown=move |e: ev::MouseEvent| { e.prevent_default(); dragging.set(true); }></div>
             <div class="logbar-head">
                 <span class="logbar-title">"Logs"</span>
-                <button class="logbar-close" on:click=move |_| log_pods.set(Vec::new())>"✕"</button>
+                // "Close all" only when multiple panes are open; with one pane the
+                // per-pane ✕ already does the same thing, so this would be a duplicate.
+                {move || (log_pods.with(|v| v.len()) > 1).then(|| view! {
+                    <button class="logbar-close" on:click=move |_| log_pods.set(Vec::new())>"✕"</button>
+                })}
             </div>
             <div class="logbar-body">
                 <For each=move || log_pods.get()

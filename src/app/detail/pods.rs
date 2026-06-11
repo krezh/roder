@@ -4,7 +4,7 @@ use leptos::prelude::*;
 use roder_core::{ResourceRow, RowStatus};
 
 use crate::app::hooks::use_sse_subscription;
-use crate::app::state::{Catalog, DetailTarget, PodModalTarget, Tick};
+use crate::app::state::{Catalog, CtxMenu, DetailTarget, PodModalTarget, Tick};
 use crate::app::util::color::dot_class;
 use crate::data;
 
@@ -37,6 +37,7 @@ pub(crate) fn PodModal() -> impl IntoView {
 #[component]
 pub(crate) fn PodsTab(namespace: String, selector: String) -> impl IntoView {
     let pod_modal = expect_context::<PodModalTarget>().0;
+    let ctx = expect_context::<RwSignal<Option<CtxMenu>>>();
     let catalog = expect_context::<Catalog>().0;
     let tick = expect_context::<Tick>().0;
 
@@ -81,8 +82,20 @@ pub(crate) fn PodsTab(namespace: String, selector: String) -> impl IntoView {
                                 pod_modal.set(Some(DetailTarget { key: pk.key, namespace: r.namespace, name: r.name }));
                             }
                         };
+                        let on_ctx = move |e: leptos::ev::MouseEvent| {
+                            e.prevent_default();
+                            if let (Some(r), Some(pk)) = (row.get_untracked(), pod_kind.get_untracked()) {
+                                ctx.set(Some(CtxMenu {
+                                    x: e.client_x(),
+                                    y: e.client_y(),
+                                    target: DetailTarget { key: pk.key, namespace: r.namespace.clone(), name: r.name.clone() },
+                                    node: None,
+                                    uid: r.uid.clone(),
+                                }));
+                            }
+                        };
                         view! {
-                            <div class="pm-row" on:click=open>
+                            <div class="pm-row" on:click=open on:contextmenu=on_ctx>
                                 <span class=move || format!("pm-dot {}", st())></span>
                                 <span class="pm-name">{move || row.get().map(|r| r.name).unwrap_or_default()}</span>
                                 <span class="pm-phase" style=move || format!("color:var(--{})", st())>

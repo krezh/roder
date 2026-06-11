@@ -4,7 +4,8 @@
 //! - Free text: searches resource names
 //! - `in:<kind>`: filter by resource kind (e.g., `in:pods`, `in:deployments`)
 //! - `ns:<namespace>`: filter by namespace (e.g., `ns:default`, `ns:kube-system`)
-//! - Combinations: `nginx in:pods ns:default` finds nginx pods in default namespace
+//! - `label:key=value`: filter by label exact match; `label:key` checks key existence
+//! - Combinations: `nginx in:pods ns:default label:app=nginx` finds nginx pods in default namespace
 //! - Autocomplete: Shows suggestions when typing `in:` or `ns:`
 //! - Fuzzy matching: "pods" matches "PodMonitor", "monit" matches "monitoring"
 
@@ -174,6 +175,9 @@ struct ParsedQuery {
     namespaces: Vec<String>,
     /// Resource kind filters (from `in:<kind>`).
     kinds: Vec<String>,
+    /// Label filters (from `label:key=value` or `label:key`).
+    /// Empty value means "key must exist with any value".
+    labels: Vec<(String, String)>,
     /// Current incomplete token being typed (for autocomplete).
     incomplete_in: Option<String>,
     incomplete_ns: Option<String>,
@@ -208,6 +212,14 @@ impl ParsedQuery {
                     result.incomplete_ns = Some(value.clone());
                 } else {
                     result.namespaces.push(value);
+                }
+            } else if let Some(value) = part.strip_prefix("label:") {
+                if !value.is_empty() {
+                    let (k, v) = match value.split_once('=') {
+                        Some((k, v)) => (k.to_string(), v.to_string()),
+                        None => (value.to_string(), String::new()),
+                    };
+                    result.labels.push((k, v));
                 }
             } else {
                 text_parts.push(*part);
@@ -447,68 +459,59 @@ pub(crate) fn CommandPalette() -> impl IntoView {
         palette_open.set(false);
     };
 
-    // Apply search filters without opening a resource
+    // Labels or multiple kinds → search view (SSE, selector applied server-side).
+    // Single kind → navigate to it.
     let apply_search = move || {
         let p = parsed.get();
         let kinds = catalog.get();
 
-        // If multiple kinds are specified, save to session storage and navigate to search view
-        if p.kinds.len() > 1 {
+        if !p.labels.is_empty() || p.kinds.len() > 1 {
             #[cfg(target_arch = "wasm32")]
             {
                 use crate::app::state::MultiKindSearch;
-
+                let selector = if p.labels.is_empty() {
+                    None
+                } else {
+                    Some(
+                        p.labels
+                            .iter()
+                            .map(|(k, v)| if v.is_empty() { k.clone() } else { format!("{}={}", k, v) })
+                            .collect::<Vec<_>>()
+                            .join(","),
+                    )
+                };
                 let search_query = MultiKindSearch {
                     kinds: p.kinds.clone(),
                     namespaces: p.namespaces.clone(),
                     text: p.text.clone(),
+                    selector,
                 };
-
                 if let Ok(json) = serde_json::to_string(&search_query) {
                     data::session_storage_set("roder_search_query", &json);
                 }
-
-                // Set the resource filter before navigating
                 resource_filter.set(p.text.clone());
-
-                // Navigate to search view
-                if let Some(window) = web_sys::window() {
-                    let _ = window.location().set_href("/search");
+                if let Some(win) = web_sys::window() {
+                    let _ = win.location().set_href("/search");
                 }
             }
-
             palette_open.set(false);
             return;
         }
 
-        // Apply kind filter if exactly one kind is specified
         if p.kinds.len() == 1 {
             let kind_name = &p.kinds[0];
-            // Try exact match on plural first
-            if let Some(k) = kinds.iter().find(|k| k.plural.to_lowercase() == *kind_name) {
-                selected_kind.set(Some(k.clone()));
-            }
-            // Try exact match on singular
-            else if let Some(k) = kinds.iter().find(|k| k.kind.to_lowercase() == *kind_name) {
-                selected_kind.set(Some(k.clone()));
-            }
-            // Try fuzzy match on plural
-            else if let Some(k) = kinds
-                .iter()
-                .find(|k| fuzzy_match(kind_name, &k.plural).is_some())
+            if let Some(k) = kinds.iter().find(|k| k.plural.to_lowercase() == *kind_name)
+                .or_else(|| kinds.iter().find(|k| k.kind.to_lowercase() == *kind_name))
+                .or_else(|| kinds.iter().find(|k| fuzzy_match(kind_name, &k.plural).is_some()))
             {
                 selected_kind.set(Some(k.clone()));
             }
         }
 
-        // Apply namespace filter if specified
         if let Some(ns) = p.namespaces.first() {
             selected_ns.set(Some(ns.clone()));
         }
-
-        // Apply text filter
         resource_filter.set(p.text.clone());
-
         palette_open.set(false);
     };
 
@@ -599,7 +602,7 @@ pub(crate) fn CommandPalette() -> impl IntoView {
             <div class="palette">
                 <div class="palette-input-wrap">
                     <input class="palette-input" node_ref=input_ref autofocus=true
-                        placeholder="Search resources... (in:kind ns:namespace)"
+                        placeholder="Search… (in:kind  ns:namespace  label:key=value  → workspace)"
                         prop:value=move || query.get()
                         on:input=move |e| query.set(event_target_value(&e))
                         on:keydown=handle_keydown />
@@ -698,6 +701,7 @@ pub(crate) fn CommandPalette() -> impl IntoView {
                 <div class="palette-hints">
                     <span class="hint"><kbd>"in:"</kbd>" kind"</span>
                     <span class="hint"><kbd>"ns:"</kbd>" namespace"</span>
+                    <span class="hint"><kbd>"label:"</kbd>" key=value"</span>
                     <span class="hint"><kbd>"↑↓"</kbd>" navigate"</span>
                     <span class="hint"><kbd>"tab"</kbd>" accept"</span>
                     <span class="hint"><kbd>"esc"</kbd>" close"</span>
@@ -776,6 +780,15 @@ fn filter_resources(
                     }
                 } else {
                     return None;
+                }
+            }
+
+            // Filter by labels (if specified in query)
+            for (k, v) in &query.labels {
+                match r.labels.get(k.as_str()) {
+                    None => return None,
+                    Some(lv) if !v.is_empty() && lv != v => return None,
+                    _ => {}
                 }
             }
 

@@ -3,6 +3,10 @@
 #[cfg(feature = "ssr")]
 #[tokio::main]
 async fn main() {
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+
     use axum::middleware::from_fn_with_state;
     use axum::routing::{get, post};
     use axum::Router;

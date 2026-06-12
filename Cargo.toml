@@ -82,6 +82,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 base64 = "0.22"
 rand = { version = "0.10", optional = true }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
 tokio-stream = { version = "0.1", features = ["sync"], optional = true }
 futures = { version = "0.3", optional = true }
 
@@ -139,6 +140,7 @@ ssr = [
     "dep:roder-k8s",
     "dep:roder-auth",
     "dep:rand",
+    "dep:rustls",
     "dep:tokio-stream",
     "dep:futures",
 ]

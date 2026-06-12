@@ -140,8 +140,6 @@ impl Trend {
             Trend::None => None,
         }
     }
-
-
 }
 
 /// A single row in a resource list, projected from the watched object.

@@ -30,12 +30,16 @@ pub(crate) fn use_sse_subscription(
             &url,
             move |ev| {
                 if matches!(ev, WatchEvent::Snapshot { .. }) {
-                    if let Some(c) = conn { c.set(true); }
+                    if let Some(c) = conn {
+                        c.set(true);
+                    }
                 }
                 apply_event(rows, entering, removing, ev)
             },
             move || {
-                if let Some(c) = conn { c.set(false); }
+                if let Some(c) = conn {
+                    c.set(false);
+                }
                 set_timeout(
                     move || reconnect.update(|n| *n += 1),
                     std::time::Duration::from_secs(3),

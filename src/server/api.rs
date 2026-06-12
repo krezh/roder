@@ -143,16 +143,22 @@ pub struct MultiWatchQuery {
 
 /// Multiplexed workspace watch: one SSE stream merging N per-kind informer
 /// streams, so all panes share a single browser connection.
-pub async fn watch_multi(State(state): State<AppState>, Query(q): Query<MultiWatchQuery>) -> Response {
+pub async fn watch_multi(
+    State(state): State<AppState>,
+    Query(q): Query<MultiWatchQuery>,
+) -> Response {
     let b = backend_or_return!(state);
 
-    let pane_specs: Vec<(String, Option<String>)> = q.panes
+    let pane_specs: Vec<(String, Option<String>)> = q
+        .panes
         .split(',')
         .filter(|s| !s.is_empty())
         .filter_map(|s| {
             let mut parts = s.splitn(2, ':');
             let key = parts.next()?.to_string();
-            if key.is_empty() { return None; }
+            if key.is_empty() {
+                return None;
+            }
             let ns = parts.next().filter(|n| !n.is_empty()).map(String::from);
             Some((key, ns))
         })
@@ -162,7 +168,8 @@ pub async fn watch_multi(State(state): State<AppState>, Query(q): Query<MultiWat
         return (StatusCode::BAD_REQUEST, "no panes specified").into_response();
     }
 
-    type PaneStream = std::pin::Pin<Box<dyn futures::Stream<Item = Result<SseEvent, Infallible>> + Send>>;
+    type PaneStream =
+        std::pin::Pin<Box<dyn futures::Stream<Item = Result<SseEvent, Infallible>> + Send>>;
     let mut streams: Vec<PaneStream> = Vec::new();
 
     for (key, ns) in pane_specs {
@@ -171,8 +178,13 @@ pub async fn watch_multi(State(state): State<AppState>, Query(q): Query<MultiWat
             Err(e) => return bad_gateway(e),
         };
         let rows = handle.rows.clone();
-        let snapshot = WatchEvent::Snapshot { rows: handle.snapshot };
-        let init = tokio_stream::once(to_multi_event(&MultiWatchEvent { key: key.clone(), event: snapshot }));
+        let snapshot = WatchEvent::Snapshot {
+            rows: handle.snapshot,
+        };
+        let init = tokio_stream::once(to_multi_event(&MultiWatchEvent {
+            key: key.clone(),
+            event: snapshot,
+        }));
         let live = BroadcastStream::new(handle.rx).then(move |res| {
             let key = key.clone();
             let rows = rows.clone();
@@ -181,7 +193,9 @@ pub async fn watch_multi(State(state): State<AppState>, Query(q): Query<MultiWat
                     Ok(ev) => ev,
                     Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(_)) => {
                         let current = rows.read().await;
-                        WatchEvent::Snapshot { rows: current.values().cloned().collect() }
+                        WatchEvent::Snapshot {
+                            rows: current.values().cloned().collect(),
+                        }
                     }
                 };
                 to_multi_event(&MultiWatchEvent { key, event: ev })

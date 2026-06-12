@@ -151,7 +151,10 @@ pub(crate) fn RowDetail(target: DetailTarget) -> impl IntoView {
             data::fetch_json::<serde_json::Value>(&format!(
                 "/api/permissions?key={}&namespace={}",
                 t.key,
-                t.namespace.as_deref().map(data::percent_encode).unwrap_or_default()
+                t.namespace
+                    .as_deref()
+                    .map(data::percent_encode)
+                    .unwrap_or_default()
             ))
             .await
             .ok()

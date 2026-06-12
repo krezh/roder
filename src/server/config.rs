@@ -235,7 +235,10 @@ mod tests {
         g.set("BASE_URL", "https://roder.example.com/");
         let cfg = ServerConfig::from_env().unwrap();
         assert_eq!(cfg.base_url, "https://roder.example.com");
-        assert_eq!(cfg.redirect_url(), "https://roder.example.com/auth/callback");
+        assert_eq!(
+            cfg.redirect_url(),
+            "https://roder.example.com/auth/callback"
+        );
     }
 
     #[test]
@@ -268,7 +271,10 @@ mod tests {
         // NOTE: trim_end_matches('/') only strips trailing slashes, not the
         // entire path. The callback then appends /auth/callback, which gives
         // /roder/auth/callback — correct for path-based deployments.
-        assert_eq!(cfg.redirect_url(), "https://example.com/roder/auth/callback");
+        assert_eq!(
+            cfg.redirect_url(),
+            "https://example.com/roder/auth/callback"
+        );
     }
 
     // -------- OIDC option parsing --------

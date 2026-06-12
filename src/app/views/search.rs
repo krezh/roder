@@ -13,8 +13,8 @@ use crate::app::events::{apply_event, fire_action};
 use crate::app::hooks::{table_window, use_table_state};
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::state::{
-    open_logs, ConnectionState, CtxMenu, DetailTarget, LogPods, LogTarget,
-    MultiKindSearch, OnlyProblems, ResourceFilter, SortKey, TableRows, TableSelected, Tick,
+    open_logs, ConnectionState, CtxMenu, DetailTarget, LogPods, LogTarget, MultiKindSearch,
+    OnlyProblems, ResourceFilter, SortKey, TableRows, TableSelected, Tick,
 };
 #[cfg(target_arch = "wasm32")]
 use crate::app::util::history::history_back;
@@ -154,7 +154,11 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
     let rows_for_ctx = t.rows;
     Effect::new(move |_| {
         merged_rows.with(|m| {
-            rows_for_ctx.set(m.iter().map(|(k, mr)| (k.clone(), mr.row.clone())).collect());
+            rows_for_ctx.set(
+                m.iter()
+                    .map(|(k, mr)| (k.clone(), mr.row.clone()))
+                    .collect(),
+            );
         });
     });
 
@@ -241,19 +245,38 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                 let ent = entering;
                 let rm = removing;
                 let pfx = prefix.clone();
-                data::subscribe_with_error(&url, move |ev| {
-                    use roder_core::WatchEvent::*;
-                    match ev {
-                        // Snapshot replaces the whole kind: mirror the full rebuild
-                        // (otherwise the per-kind buffer's safety-net timeouts for
-                        // deletes would orphan entries in the parent).
-                        Snapshot { rows: r } => {
-                            if let Some(c) = conn { c.set(true); }
-                            apply_event(kr, ent, rm, Snapshot { rows: r.clone() });
-                            mr.update(|m| {
-                                m.retain(|k, _| !k.starts_with(&pfx));
-                                for row in r {
-                                    let merged_key = format!("{}{}", pfx, row.uid);
+                data::subscribe_with_error(
+                    &url,
+                    move |ev| {
+                        use roder_core::WatchEvent::*;
+                        match ev {
+                            // Snapshot replaces the whole kind: mirror the full rebuild
+                            // (otherwise the per-kind buffer's safety-net timeouts for
+                            // deletes would orphan entries in the parent).
+                            Snapshot { rows: r } => {
+                                if let Some(c) = conn {
+                                    c.set(true);
+                                }
+                                apply_event(kr, ent, rm, Snapshot { rows: r.clone() });
+                                mr.update(|m| {
+                                    m.retain(|k, _| !k.starts_with(&pfx));
+                                    for row in r {
+                                        let merged_key = format!("{}{}", pfx, row.uid);
+                                        m.insert(
+                                            merged_key,
+                                            MergedRow {
+                                                kind: ka.clone(),
+                                                row,
+                                            },
+                                        );
+                                    }
+                                });
+                            }
+                            // Applied upserts a single row — no full rebuild needed.
+                            Applied { row } => {
+                                apply_event(kr, ent, rm, Applied { row: row.clone() });
+                                let merged_key = format!("{}{}", pfx, row.uid);
+                                mr.update(|m| {
                                     m.insert(
                                         merged_key,
                                         MergedRow {
@@ -261,41 +284,30 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                                             row,
                                         },
                                     );
-                                }
-                            });
+                                });
+                            }
+                            // Deleted removes a single row — the per-kind buffer's
+                            // `apply_event` already tags it in `removing`; mirror that
+                            // tagging for the parent's row.
+                            Deleted { uid } => {
+                                apply_event(kr, ent, rm, Deleted { uid: uid.clone() });
+                                let merged_key = format!("{}{}", pfx, uid);
+                                rm.update(|s| {
+                                    s.insert(merged_key);
+                                });
+                            }
                         }
-                        // Applied upserts a single row — no full rebuild needed.
-                        Applied { row } => {
-                            apply_event(kr, ent, rm, Applied { row: row.clone() });
-                            let merged_key = format!("{}{}", pfx, row.uid);
-                            mr.update(|m| {
-                                m.insert(
-                                    merged_key,
-                                    MergedRow {
-                                        kind: ka.clone(),
-                                        row,
-                                    },
-                                );
-                            });
+                    },
+                    move || {
+                        if let Some(c) = conn {
+                            c.set(false);
                         }
-                        // Deleted removes a single row — the per-kind buffer's
-                        // `apply_event` already tags it in `removing`; mirror that
-                        // tagging for the parent's row.
-                        Deleted { uid } => {
-                            apply_event(kr, ent, rm, Deleted { uid: uid.clone() });
-                            let merged_key = format!("{}{}", pfx, uid);
-                            rm.update(|s| {
-                                s.insert(merged_key);
-                            });
-                        }
-                    }
-                }, move || {
-                    if let Some(c) = conn { c.set(false); }
-                    set_timeout(
-                        move || reconnect.update(|n| *n += 1),
-                        std::time::Duration::from_secs(3),
-                    );
-                })
+                        set_timeout(
+                            move || reconnect.update(|n| *n += 1),
+                            std::time::Duration::from_secs(3),
+                        );
+                    },
+                )
             });
         }
     });
@@ -341,8 +353,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                             // Borrow both cell values directly, then numeric-or-lexical compare.
                             let av = cell_value_str(col, a.1);
                             let bv = cell_value_str(col, b.1);
-                            cmp_str(av, bv)
-                                .then_with(|| a.1.row.name.cmp(&b.1.row.name))
+                            cmp_str(av, bv).then_with(|| a.1.row.name.cmp(&b.1.row.name))
                         } else {
                             a.1.row.name.cmp(&b.1.row.name)
                         }
@@ -375,7 +386,9 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
     let grid_template = RwSignal::new(String::new());
     Effect::new(move |_| {
         let cols = unified_columns.get();
-        if cols.is_empty() { return; }
+        if cols.is_empty() {
+            return;
+        }
         let new_tmpl = format!(
             "grid-template-columns: {};",
             vec!["max-content"; cols.len()].join(" ")
@@ -387,7 +400,9 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
     let sizer: RwSignal<Vec<String>> = RwSignal::new(Vec::new());
     Effect::new(move |_| {
         let cols = unified_columns.get();
-        if cols.is_empty() { return; }
+        if cols.is_empty() {
+            return;
+        }
         let _ = shown_uids.with(|v| v.len());
         let mut col_maxes: Vec<String> = cols.iter().map(|c| c.name.clone()).collect();
         merged_rows.with_untracked(|m| {

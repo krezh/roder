@@ -31,9 +31,9 @@ use overlays::context_menu::ContextMenu;
 use overlays::palette::CommandPalette;
 use overlays::shortcuts::ShortcutsHelp;
 use state::{
-    Catalog, ConnectionState, CtxMenu, LogPods, LogTarget, NavOpen, OnlyProblems,
-    PaletteOpen, PodModalTarget, ResourceFilter, ShortcutsOpen, TableRows, TableSelected, Tick,
-    WorkspaceConf, WorkspaceConfig,
+    Catalog, ConnectionState, CtxMenu, LogPods, LogTarget, NavOpen, OnlyProblems, PaletteOpen,
+    PodModalTarget, ResourceFilter, ShortcutsOpen, TableRows, TableSelected, Tick, WorkspaceConf,
+    WorkspaceConfig,
 };
 use views::resource::ResourceView;
 use views::search::SearchResultsView;
@@ -121,7 +121,9 @@ pub fn App() -> impl IntoView {
         workspace_ready.set(true);
     });
     Effect::new(move |_| {
-        if !workspace_ready.get() { return; }
+        if !workspace_ready.get() {
+            return;
+        }
         let w = workspace.get();
         if let Ok(json) = serde_json::to_string(&w) {
             data::storage_set("roder.workspace", &json);

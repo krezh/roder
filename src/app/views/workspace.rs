@@ -136,9 +136,8 @@ fn PaneView(
     let _detail = expect_context::<RwSignal<Option<DetailTarget>>>();
 
     let kind_key = config.kind_key.clone();
-    let kind: Memo<Option<ResourceKind>> = Memo::new(move |_| {
-        catalog.get().into_iter().find(|k| k.key == kind_key)
-    });
+    let kind: Memo<Option<ResourceKind>> =
+        Memo::new(move |_| catalog.get().into_iter().find(|k| k.key == kind_key));
 
     let text_filter = RwSignal::new(String::new());
     let cfg_sv = StoredValue::new(config.clone());

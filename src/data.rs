@@ -324,9 +324,13 @@ pub fn is_text_input_focused() -> bool {
 /// Humanize an RFC3339 timestamp into a compact relative age (e.g. "3d", "5m").
 #[cfg(target_arch = "wasm32")]
 pub fn humanize_age(created: &Option<String>) -> String {
-    let Some(ts) = created else { return String::new(); };
+    let Some(ts) = created else {
+        return String::new();
+    };
     let parsed = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(ts)).get_time();
-    if parsed.is_nan() { return String::new(); }
+    if parsed.is_nan() {
+        return String::new();
+    }
     let secs = ((js_sys::Date::now() - parsed) / 1000.0).max(0.0) as u64;
     roder_core::format_age_secs(secs)
 }
@@ -348,7 +352,10 @@ mod tests {
 
     #[test]
     fn percent_encode_special_chars() {
-        assert_eq!(percent_encode("app=nginx,tier=web"), "app%3Dnginx%2Ctier%3Dweb");
+        assert_eq!(
+            percent_encode("app=nginx,tier=web"),
+            "app%3Dnginx%2Ctier%3Dweb"
+        );
         assert_eq!(percent_encode("ns/name"), "ns%2Fname");
         assert_eq!(percent_encode("hello world"), "hello%20world");
     }
@@ -361,19 +368,27 @@ mod tests {
     #[test]
     fn detail_url_with_namespace() {
         let u = detail_url("apps/v1/Deployment", Some("default"), "my-deploy");
-        assert_eq!(u, "/api/detail?key=apps/v1/Deployment&namespace=default&name=my-deploy");
+        assert_eq!(
+            u,
+            "/api/detail?key=apps/v1/Deployment&namespace=default&name=my-deploy"
+        );
     }
 
     #[test]
     fn detail_url_cluster_scoped() {
         let u = detail_url("rbac.authorization.k8s.io/v1/ClusterRole", None, "admin");
-        assert_eq!(u, "/api/detail?key=rbac.authorization.k8s.io/v1/ClusterRole&namespace=&name=admin");
+        assert_eq!(
+            u,
+            "/api/detail?key=rbac.authorization.k8s.io/v1/ClusterRole&namespace=&name=admin"
+        );
     }
 
     #[test]
     fn detail_url_encodes_name_with_special_chars() {
         let u = detail_url("v1/Pod", Some("kube system"), "my=pod");
-        assert_eq!(u, "/api/detail?key=v1/Pod&namespace=kube%20system&name=my%3Dpod");
+        assert_eq!(
+            u,
+            "/api/detail?key=v1/Pod&namespace=kube%20system&name=my%3Dpod"
+        );
     }
-
 }

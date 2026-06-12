@@ -277,7 +277,10 @@ mod tests {
         // Path ending at an array of objects → count
         assert_eq!(eval(".status.projects", &o), "3");
         // Path ending at an array of scalars → joined
-        assert_eq!(eval(".status.projects[*].status", &o), "completed,completed,failed");
+        assert_eq!(
+            eval(".status.projects[*].status", &o),
+            "completed,completed,failed"
+        );
         // Mixed array with scalars only → joined
         let o2 = json!({"items": ["a", "b", "c"]});
         assert_eq!(eval(".items", &o2), "a,b,c");

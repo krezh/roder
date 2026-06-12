@@ -199,7 +199,11 @@ impl Backend {
         let mut cache = self.overview_cache.write().await;
         // Re-check under the write lock: another concurrent caller may have
         // already populated a fresh entry while we were computing.
-        if cache.as_ref().map(|(at, _)| at.elapsed() >= TTL).unwrap_or(true) {
+        if cache
+            .as_ref()
+            .map(|(at, _)| at.elapsed() >= TTL)
+            .unwrap_or(true)
+        {
             *cache = Some((std::time::Instant::now(), fresh.clone()));
         }
         Ok(fresh)
@@ -571,21 +575,31 @@ impl Backend {
     /// When a pod has multiple containers and no container was explicitly selected,
     /// return the name of the first non-init container so the kube API doesn't
     /// reject the request with "please specify the container to tail".
-    async fn resolve_container(&self, ns: &str, pod: &str, container: Option<String>) -> Option<String> {
+    async fn resolve_container(
+        &self,
+        ns: &str,
+        pod: &str,
+        container: Option<String>,
+    ) -> Option<String> {
         if container.is_some() {
             return container;
         }
         // Try the informer cache first; fall back to a live API call on cache miss
         // (e.g. pods in namespaces not actively watched).
         if let Some(obj) = self.registry.cached_object("/v1/Pod", Some(ns), pod).await {
-            let containers = obj.data
+            let containers = obj
+                .data
                 .get("spec")
                 .and_then(|s| s.get("containers"))
                 .and_then(|c| c.as_array())?;
             if containers.len() <= 1 {
                 return None;
             }
-            return containers.first()?.get("name")?.as_str().map(|s| s.to_string());
+            return containers
+                .first()?
+                .get("name")?
+                .as_str()
+                .map(|s| s.to_string());
         }
         // Cache miss: fetch the pod directly so we still pick the right container.
         let api: Api<Pod> = Api::namespaced(self.client(), ns);
@@ -656,7 +670,9 @@ impl Backend {
         for p in pods.items {
             let pod = p.metadata.name.unwrap_or_default();
             let container = if p.spec.as_ref().map(|s| s.containers.len()).unwrap_or(0) > 1 {
-                p.spec.and_then(|s| s.containers.into_iter().next()).map(|c| c.name)
+                p.spec
+                    .and_then(|s| s.containers.into_iter().next())
+                    .map(|c| c.name)
             } else {
                 None
             };

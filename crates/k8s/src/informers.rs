@@ -234,7 +234,6 @@ impl InformerRegistry {
         let history = self.metrics_history.read().await;
         history.get(&key).map(|h| h.iter().copied().collect())
     }
-
 }
 
 #[allow(clippy::too_many_arguments)]

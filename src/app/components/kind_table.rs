@@ -5,11 +5,11 @@ use crate::app::components::table::{cmp_cell, sortable_th, FlashTd};
 use crate::app::components::table_row::{NameCell, ResourceRow as ResourceRowView};
 use crate::app::events::fire_action;
 use crate::app::events::RowMap;
-use crate::app::hooks::{table_window, use_table_state, use_sse_subscription};
+use crate::app::hooks::{table_window, use_sse_subscription, use_table_state};
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::state::{
-    open_logs, CtxMenu, DetailTarget, LogPods, LogTarget, OnlyProblems,
-    ResourceFilter, SortKey, TableRows, TableSelected, Tick,
+    open_logs, CtxMenu, DetailTarget, LogPods, LogTarget, OnlyProblems, ResourceFilter, SortKey,
+    TableRows, TableSelected, Tick,
 };
 use crate::app::util::color::dot_class;
 use crate::app::util::format::parse_key;
@@ -35,12 +35,14 @@ pub(crate) fn KindTable(
     #[prop(optional)] text_filter: Option<RwSignal<String>>,
     /// Per-pane namespace signal. When present the view-head shows a live `<select>`
     /// instead of the static badge, and the signal is updated on change.
-    #[prop(optional)] ns_filter: Option<RwSignal<Option<String>>>,
+    #[prop(optional)]
+    ns_filter: Option<RwSignal<Option<String>>>,
     #[prop(default = true)] keyboard: bool,
     #[prop(default = false)] register_global_selection: bool,
     /// When provided, rows are driven from this external signal instead of
     /// opening a per-table SSE connection (used by the workspace multi-watch).
-    #[prop(optional)] rows_override: Option<RowMap>,
+    #[prop(optional)]
+    rows_override: Option<RowMap>,
 ) -> impl IntoView {
     let detail = expect_context::<RwSignal<Option<DetailTarget>>>();
     let ctx_menu = expect_context::<RwSignal<Option<CtxMenu>>>();
@@ -135,9 +137,8 @@ pub(crate) fn KindTable(
 
     // Namespace list for the per-pane selector — shared context resource (fetched once at
     // App level) so individual panes don't each open a separate HTTP connection.
-    let ns_list = ns_filter.and_then(|_| {
-        use_context::<LocalResource<Result<Vec<String>, String>>>()
-    });
+    let ns_list =
+        ns_filter.and_then(|_| use_context::<LocalResource<Result<Vec<String>, String>>>());
 
     if let Some(ext) = rows_override {
         Effect::new(move |_| t.rows.set(ext.get()));
@@ -171,15 +172,26 @@ pub(crate) fn KindTable(
                 .collect();
             v.sort_by(|a, b| {
                 let ord = match sort_key {
-                    SortKey::Namespace => a.namespace.cmp(&b.namespace).then_with(|| a.name.cmp(&b.name)),
+                    SortKey::Namespace => a
+                        .namespace
+                        .cmp(&b.namespace)
+                        .then_with(|| a.name.cmp(&b.name)),
                     SortKey::Name => a.name.cmp(&b.name),
                     SortKey::Age => a.created.cmp(&b.created).then_with(|| a.name.cmp(&b.name)),
-                    SortKey::Cell(i) => cmp_cell(a.cells.get(i), b.cells.get(i)).then_with(|| a.name.cmp(&b.name)),
+                    SortKey::Cell(i) => {
+                        cmp_cell(a.cells.get(i), b.cells.get(i)).then_with(|| a.name.cmp(&b.name))
+                    }
                 }
                 .then_with(|| a.uid.cmp(&b.uid));
-                if asc { ord } else { ord.reverse() }
+                if asc {
+                    ord
+                } else {
+                    ord.reverse()
+                }
             });
-            v.into_iter().map(|r| r.uid.clone()).collect::<Vec<String>>()
+            v.into_iter()
+                .map(|r| r.uid.clone())
+                .collect::<Vec<String>>()
         })
     });
 
@@ -193,19 +205,22 @@ pub(crate) fn KindTable(
     let is_pod_kind = kind.group.is_empty() && kind.kind == "Pod";
     let node_col = cols.iter().position(|c| c == "Node");
     let colored_cols = StoredValue::new(
-        cols.iter().enumerate()
+        cols.iter()
+            .enumerate()
             .filter(|(_, c)| matches!(c.as_str(), "Phase" | "Status" | "Ready"))
             .map(|(i, _)| i)
             .collect::<Vec<usize>>(),
     );
     let bool_cols = StoredValue::new(
-        cols.iter().enumerate()
+        cols.iter()
+            .enumerate()
             .filter(|(_, c)| matches!(c.as_str(), "Mount"))
             .map(|(i, _)| i)
             .collect::<Vec<usize>>(),
     );
     let metric_cols = StoredValue::new(
-        cols.iter().enumerate()
+        cols.iter()
+            .enumerate()
             .filter(|(_, c)| c.starts_with("CPU") || c.starts_with("MEM") || c.starts_with("%"))
             .map(|(i, _)| i)
             .collect::<Vec<usize>>(),
@@ -230,37 +245,59 @@ pub(crate) fn KindTable(
         let uids = selected.get_untracked();
         rows.with_untracked(|v| {
             for r in v.values().filter(|r| uids.contains(&r.uid)) {
-                fire_action(action, &DetailTarget { key: key.clone(), namespace: r.namespace.clone(), name: r.name.clone() });
+                fire_action(
+                    action,
+                    &DetailTarget {
+                        key: key.clone(),
+                        namespace: r.namespace.clone(),
+                        name: r.name.clone(),
+                    },
+                );
             }
         });
         selected.set(std::collections::BTreeSet::new());
     };
 
     let n_tracks = cols.len() + 2 + usize::from(namespaced);
-    let tmpl = format!("grid-template-columns: {};", vec!["max-content"; n_tracks].join(" "));
+    let tmpl = format!(
+        "grid-template-columns: {};",
+        vec!["max-content"; n_tracks].join(" ")
+    );
     let sizer: RwSignal<Vec<String>> = RwSignal::new(Vec::new());
     {
         let cols_sz = cols.clone();
         Effect::new(move |_| {
             let _ = shown_uids.with(|v| v.len());
             let ncells = cols_sz.len();
-            let mut ns_max = if namespaced { "Namespace".to_string() } else { String::new() };
+            let mut ns_max = if namespaced {
+                "Namespace".to_string()
+            } else {
+                String::new()
+            };
             let mut name_max = "Name".to_string();
             let mut cell_maxes: Vec<String> = cols_sz.clone();
             rows.with_untracked(|m| {
                 for r in m.values() {
                     if namespaced {
                         let ns = r.namespace.as_deref().unwrap_or("");
-                        if ns.len() > ns_max.len() { ns_max = ns.to_string(); }
+                        if ns.len() > ns_max.len() {
+                            ns_max = ns.to_string();
+                        }
                     }
-                    if r.name.len() > name_max.len() { name_max = r.name.clone(); }
+                    if r.name.len() > name_max.len() {
+                        name_max = r.name.clone();
+                    }
                     for (i, c) in r.cells.iter().take(ncells).enumerate() {
-                        if c.len() > cell_maxes[i].len() { cell_maxes[i] = c.clone(); }
+                        if c.len() > cell_maxes[i].len() {
+                            cell_maxes[i] = c.clone();
+                        }
                     }
                 }
             });
             let mut vals: Vec<String> = Vec::with_capacity(n_tracks);
-            if namespaced { vals.push(ns_max); }
+            if namespaced {
+                vals.push(ns_max);
+            }
             vals.push(name_max);
             vals.extend(cell_maxes);
             vals.push("000d00h".to_string());

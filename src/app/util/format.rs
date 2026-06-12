@@ -298,7 +298,10 @@ mod tests {
 
     #[test]
     fn ansi_escapes_html_special_chars() {
-        assert_eq!(ansi_to_html("<script>alert(1)</script>"), "&lt;script&gt;alert(1)&lt;/script&gt;");
+        assert_eq!(
+            ansi_to_html("<script>alert(1)</script>"),
+            "&lt;script&gt;alert(1)&lt;/script&gt;"
+        );
         assert_eq!(ansi_to_html("a & b"), "a &amp; b");
         assert_eq!(ansi_to_html("\"quoted\""), "&quot;quoted&quot;");
     }
@@ -306,7 +309,10 @@ mod tests {
     #[test]
     fn ansi_color_wraps_in_span() {
         let out = ansi_to_html("\x1b[31mred\x1b[0m");
-        assert!(out.contains("<span class=\"ansi-1\">red</span>"), "got: {out}");
+        assert!(
+            out.contains("<span class=\"ansi-1\">red</span>"),
+            "got: {out}"
+        );
     }
 
     #[test]
@@ -319,7 +325,10 @@ mod tests {
     #[test]
     fn ansi_bold_wraps_in_span() {
         let out = ansi_to_html("\x1b[1mbold\x1b[0m");
-        assert!(out.contains("<span class=\"ansi-bold\">bold</span>"), "got: {out}");
+        assert!(
+            out.contains("<span class=\"ansi-bold\">bold</span>"),
+            "got: {out}"
+        );
     }
 
     // --- log_level ---

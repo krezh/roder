@@ -48,10 +48,7 @@ pub async fn security_headers(State(state): State<AppState>, req: Request, next:
         None
     };
     if let Some(v) = cache {
-        h.insert(
-            header::CACHE_CONTROL,
-            HeaderValue::from_static(v),
-        );
+        h.insert(header::CACHE_CONTROL, HeaderValue::from_static(v));
     }
     h.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
     h.insert(
@@ -415,10 +412,7 @@ mod tests {
         // Mirror the production success path's tuple exactly.
         let response = (
             AppendHeaders([
-                (
-                    SET_COOKIE,
-                    set_cookie(SESSION_COOKIE, sid, secure, 604_800),
-                ),
+                (SET_COOKIE, set_cookie(SESSION_COOKIE, sid, secure, 604_800)),
                 (SET_COOKIE, set_cookie(LOGIN_COOKIE, "", secure, 0)),
             ]),
             Redirect::to("/"),
@@ -553,13 +547,14 @@ mod tests {
 
         let res = logout(State(state.clone()), headers).await;
         assert_eq!(res.status(), StatusCode::SEE_OTHER);
-        assert_eq!(
-            res.headers().get(header::LOCATION).unwrap(),
-            "/auth/login"
-        );
+        assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/auth/login");
 
         let cookies = collect_set_cookies(&res);
-        assert_eq!(cookies.len(), 1, "logout should clear one cookie: {cookies:?}");
+        assert_eq!(
+            cookies.len(),
+            1,
+            "logout should clear one cookie: {cookies:?}"
+        );
         assert!(
             cookies[0].contains(&format!("{SESSION_COOKIE}=;")),
             "must clear {SESSION_COOKIE}: {}",

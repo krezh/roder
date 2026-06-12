@@ -399,17 +399,21 @@ pub(crate) fn CommandPalette() -> impl IntoView {
                 reconnect.track();
                 let url = url.clone();
                 let kind_key_inner = kind_key.clone();
-                data::subscribe_with_error(&url, move |ev| {
-                    apply_event(rows_copy, entering, removing, ev);
-                    all_rows_copy.update(|ar| {
-                        ar.insert(kind_key_inner.clone(), rows_copy.get_untracked());
-                    });
-                }, move || {
-                    set_timeout(
-                        move || reconnect.update(|n| *n += 1),
-                        std::time::Duration::from_secs(3),
-                    );
-                })
+                data::subscribe_with_error(
+                    &url,
+                    move |ev| {
+                        apply_event(rows_copy, entering, removing, ev);
+                        all_rows_copy.update(|ar| {
+                            ar.insert(kind_key_inner.clone(), rows_copy.get_untracked());
+                        });
+                    },
+                    move || {
+                        set_timeout(
+                            move || reconnect.update(|n| *n += 1),
+                            std::time::Duration::from_secs(3),
+                        );
+                    },
+                )
             });
         }
     });
@@ -475,7 +479,13 @@ pub(crate) fn CommandPalette() -> impl IntoView {
                     Some(
                         p.labels
                             .iter()
-                            .map(|(k, v)| if v.is_empty() { k.clone() } else { format!("{}={}", k, v) })
+                            .map(|(k, v)| {
+                                if v.is_empty() {
+                                    k.clone()
+                                } else {
+                                    format!("{}={}", k, v)
+                                }
+                            })
                             .collect::<Vec<_>>()
                             .join(","),
                     )
@@ -500,9 +510,15 @@ pub(crate) fn CommandPalette() -> impl IntoView {
 
         if p.kinds.len() == 1 {
             let kind_name = &p.kinds[0];
-            if let Some(k) = kinds.iter().find(|k| k.plural.to_lowercase() == *kind_name)
+            if let Some(k) = kinds
+                .iter()
+                .find(|k| k.plural.to_lowercase() == *kind_name)
                 .or_else(|| kinds.iter().find(|k| k.kind.to_lowercase() == *kind_name))
-                .or_else(|| kinds.iter().find(|k| fuzzy_match(kind_name, &k.plural).is_some()))
+                .or_else(|| {
+                    kinds
+                        .iter()
+                        .find(|k| fuzzy_match(kind_name, &k.plural).is_some())
+                })
             {
                 selected_kind.set(Some(k.clone()));
             }

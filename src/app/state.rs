@@ -31,14 +31,10 @@ pub(crate) struct CtxMenu {
 /// mount so that `ContextMenu` (a sibling, not a child) can read multi-select
 /// state for bulk context-menu actions.
 #[derive(Clone, Copy)]
-pub(crate) struct TableSelected(
-    pub(crate) StoredValue<Option<RwSignal<BTreeSet<String>>>>,
-);
+pub(crate) struct TableSelected(pub(crate) StoredValue<Option<RwSignal<BTreeSet<String>>>>);
 
 #[derive(Clone, Copy)]
-pub(crate) struct TableRows(
-    pub(crate) StoredValue<Option<RwSignal<HashMap<String, ResourceRow>>>>,
-);
+pub(crate) struct TableRows(pub(crate) StoredValue<Option<RwSignal<HashMap<String, ResourceRow>>>>);
 
 /// Which column the resource table is sorted by.
 #[derive(Clone, Copy, PartialEq)]

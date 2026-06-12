@@ -23,12 +23,7 @@ impl<'c> AsyncHttpClient<'c> for ReqwestClient {
 
     #[cfg(not(target_arch = "wasm32"))]
     type Future = Pin<
-        Box<
-            dyn Future<Output = std::result::Result<HttpResponse, Self::Error>>
-                + Send
-                + Sync
-                + 'c,
-        >,
+        Box<dyn Future<Output = std::result::Result<HttpResponse, Self::Error>> + Send + Sync + 'c>,
     >;
     #[cfg(target_arch = "wasm32")]
     type Future =
@@ -39,8 +34,7 @@ impl<'c> AsyncHttpClient<'c> for ReqwestClient {
             let req: reqwest::Request = request.try_into().map_err(Box::new)?;
             let response = self.0.execute(req).await.map_err(Box::new)?;
 
-            let mut builder =
-                openidconnect::http::Response::builder().status(response.status());
+            let mut builder = openidconnect::http::Response::builder().status(response.status());
 
             #[cfg(not(target_arch = "wasm32"))]
             {

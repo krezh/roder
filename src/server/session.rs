@@ -134,7 +134,10 @@ mod tests {
     #[test]
     fn set_cookie_secure_emits_all_attrs() {
         let c = set_cookie("k", "v", true, 600);
-        assert_eq!(c, "k=v; HttpOnly; SameSite=Lax; Path=/; Max-Age=600; Secure");
+        assert_eq!(
+            c,
+            "k=v; HttpOnly; SameSite=Lax; Path=/; Max-Age=600; Secure"
+        );
     }
 
     #[test]
@@ -319,7 +322,10 @@ mod tests {
         let ids: Vec<&str> = need.iter().map(|(id, _)| id.as_str()).collect();
         assert!(ids.contains(&"stale"), "stale should need refresh: {ids:?}");
         assert!(ids.contains(&"soon"), "soon should need refresh: {ids:?}");
-        assert!(!ids.contains(&"fresh"), "fresh must not need refresh: {ids:?}");
+        assert!(
+            !ids.contains(&"fresh"),
+            "fresh must not need refresh: {ids:?}"
+        );
         assert!(
             !ids.contains(&"no_rt"),
             "no refresh_token must be skipped: {ids:?}"

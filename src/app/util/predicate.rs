@@ -42,7 +42,6 @@ impl<'a> KindKind<'a> {
 
     /// Scalable workloads have spec.replicas (DaemonSets do not).
     pub(crate) fn is_scalable(&self) -> bool {
-        self.group == "apps"
-            && matches!(self.kind, "Deployment" | "StatefulSet" | "ReplicaSet")
+        self.group == "apps" && matches!(self.kind, "Deployment" | "StatefulSet" | "ReplicaSet")
     }
 }

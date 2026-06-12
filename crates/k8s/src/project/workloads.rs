@@ -36,7 +36,10 @@ fn replica_cells(desired: i64, ready: i64, available: i64) -> (Vec<String>, RowS
     } else {
         RowStatus::Pending
     };
-    (vec![format!("{ready}/{desired}"), available.to_string()], status)
+    (
+        vec![format!("{ready}/{desired}"), available.to_string()],
+        status,
+    )
 }
 
 pub(crate) fn job_cells(data: &Value) -> (Vec<String>, RowStatus) {

@@ -10,8 +10,8 @@ repository.workspace = true
 # ID-token verifier. Refresh via the token endpoint.
 
 [dependencies]
-openidconnect = { version = "4", features = ["reqwest"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+openidconnect = { version = "4" }
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

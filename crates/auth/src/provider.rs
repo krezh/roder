@@ -1,16 +1,62 @@
+use std::future::Future;
+use std::pin::Pin;
+
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use openidconnect::core::{
     CoreAuthenticationFlow, CoreClient, CoreIdTokenClaims, CoreProviderMetadata,
 };
 use openidconnect::{
-    AuthorizationCode, ClientId, ClientSecret, CsrfToken, IssuerUrl, Nonce, OAuth2TokenResponse,
-    PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, RefreshToken, Scope, TokenResponse,
+    AsyncHttpClient, AuthorizationCode, ClientId, ClientSecret, CsrfToken, HttpClientError,
+    HttpRequest, HttpResponse, IssuerUrl, Nonce, OAuth2TokenResponse, PkceCodeChallenge,
+    PkceCodeVerifier, RedirectUrl, RefreshToken, Scope, TokenResponse,
 };
 use time::OffsetDateTime;
 
 use crate::error::{AuthError, Result};
 use crate::{Identity, Tokens};
+
+struct ReqwestClient(reqwest::Client);
+
+impl<'c> AsyncHttpClient<'c> for ReqwestClient {
+    type Error = HttpClientError<reqwest::Error>;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    type Future = Pin<
+        Box<
+            dyn Future<Output = std::result::Result<HttpResponse, Self::Error>>
+                + Send
+                + Sync
+                + 'c,
+        >,
+    >;
+    #[cfg(target_arch = "wasm32")]
+    type Future =
+        Pin<Box<dyn Future<Output = std::result::Result<HttpResponse, Self::Error>> + 'c>>;
+
+    fn call(&'c self, request: HttpRequest) -> Self::Future {
+        Box::pin(async move {
+            let req: reqwest::Request = request.try_into().map_err(Box::new)?;
+            let response = self.0.execute(req).await.map_err(Box::new)?;
+
+            let mut builder =
+                openidconnect::http::Response::builder().status(response.status());
+
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                builder = builder.version(response.version());
+            }
+
+            for (name, value) in response.headers() {
+                builder = builder.header(name, value);
+            }
+
+            builder
+                .body(response.bytes().await.map_err(Box::new)?.to_vec())
+                .map_err(HttpClientError::Http)
+        })
+    }
+}
 
 /// Static OIDC configuration (from env / Helm values).
 #[derive(Debug, Clone)]
@@ -75,7 +121,7 @@ impl OidcProvider {
 
         let issuer = IssuerUrl::new(cfg.issuer_url.clone())
             .map_err(|e| AuthError::Config(format!("issuer_url: {e}")))?;
-        let metadata = CoreProviderMetadata::discover_async(issuer, &http)
+        let metadata = CoreProviderMetadata::discover_async(issuer, &ReqwestClient(http.clone()))
             .await
             .map_err(|e| AuthError::Discovery(cfg.issuer_url.clone(), e.to_string()))?;
         let redirect_uri = RedirectUrl::new(cfg.redirect_url.clone())
@@ -152,7 +198,7 @@ impl OidcProvider {
             .exchange_code(AuthorizationCode::new(code))
             .map_err(|e| AuthError::Exchange(e.to_string()))?
             .set_pkce_verifier(PkceCodeVerifier::new(pkce_verifier))
-            .request_async(&self.http)
+            .request_async(&ReqwestClient(self.http.clone()))
             .await
             .map_err(|e| AuthError::Exchange(e.to_string()))?;
 
@@ -166,7 +212,7 @@ impl OidcProvider {
         let resp = client
             .exchange_refresh_token(&RefreshToken::new(refresh_token))
             .map_err(|e| AuthError::Refresh(e.to_string()))?
-            .request_async(&self.http)
+            .request_async(&ReqwestClient(self.http.clone()))
             .await
             .map_err(|e| AuthError::Refresh(e.to_string()))?;
 

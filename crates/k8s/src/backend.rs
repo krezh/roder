@@ -575,17 +575,25 @@ impl Backend {
         if container.is_some() {
             return container;
         }
-        let obj = self.registry.cached_object("/v1/Pod", Some(ns), pod).await?;
-        let containers = obj.data
-            .get("spec")
-            .and_then(|s| s.get("containers"))
-            .and_then(|c| c.as_array())?;
-        // Only force-specify a container when there are multiple; for single-container
-        // pods None is fine and avoids sending a potentially stale name.
+        // Try the informer cache first; fall back to a live API call on cache miss
+        // (e.g. pods in namespaces not actively watched).
+        if let Some(obj) = self.registry.cached_object("/v1/Pod", Some(ns), pod).await {
+            let containers = obj.data
+                .get("spec")
+                .and_then(|s| s.get("containers"))
+                .and_then(|c| c.as_array())?;
+            if containers.len() <= 1 {
+                return None;
+            }
+            return containers.first()?.get("name")?.as_str().map(|s| s.to_string());
+        }
+        // Cache miss: fetch the pod directly so we still pick the right container.
+        let api: Api<Pod> = Api::namespaced(self.client(), ns);
+        let containers = api.get(pod).await.ok()?.spec?.containers;
         if containers.len() <= 1 {
             return None;
         }
-        containers.first()?.get("name")?.as_str().map(|s| s.to_string())
+        containers.into_iter().next().map(|c| c.name)
     }
 
     /// Recent (tail) pod logs.
@@ -647,10 +655,16 @@ impl Backend {
         let mut streams: Vec<Pin<Box<dyn Stream<Item = String> + Send>>> = Vec::new();
         for p in pods.items {
             let pod = p.metadata.name.unwrap_or_default();
+            let container = if p.spec.as_ref().map(|s| s.containers.len()).unwrap_or(0) > 1 {
+                p.spec.and_then(|s| s.containers.into_iter().next()).map(|c| c.name)
+            } else {
+                None
+            };
             let lp = LogParams {
                 follow,
                 tail_lines: Some(200),
                 timestamps: false,
+                container,
                 ..Default::default()
             };
             match api.log_stream(&pod, &lp).await {

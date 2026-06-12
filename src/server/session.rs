@@ -3,7 +3,6 @@ use std::fmt::Write as _;
 use std::time::Instant;
 
 use axum::http::HeaderMap;
-use rand::RngCore;
 use roder_auth::{Identity, Tokens};
 use tokio::sync::RwLock;
 
@@ -96,8 +95,7 @@ impl PendingStore {
 
 /// 256 bits of randomness, hex-encoded — used for opaque session/login ids.
 pub fn random_id() -> String {
-    let mut bytes = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    let bytes: [u8; 32] = rand::random();
     let mut s = String::with_capacity(64);
     for b in &bytes {
         let _ = write!(s, "{b:02x}");

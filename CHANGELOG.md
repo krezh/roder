@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.12](https://github.com/krezh/roder/compare/0.1.11...0.1.12) (2026-06-12)
+
+
+### Bug Fixes
+
+* install rustls crypto provider to fix TLS panic ([209c459](https://github.com/krezh/roder/commit/209c45949cdd24e88e8d2bc9472a1c1c71f9567b))
+
 ## [0.1.11](https://github.com/krezh/roder/compare/0.1.10...0.1.11) (2026-06-12)
 
 

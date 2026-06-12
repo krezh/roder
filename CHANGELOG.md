@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.1.11](https://github.com/krezh/roder/compare/0.1.10...0.1.11) (2026-06-12)
+
+
+### Features
+
+* **deps:** upgrade reqwest to 0.13, remove bundled reqwest from openidconnect ([59dbd01](https://github.com/krezh/roder/commit/59dbd012e374a144be93291bae2bd73853ee288c))
+* multi-watch SSE, workspace view, pod right-click, log fixes, UI polish ([5541406](https://github.com/krezh/roder/commit/5541406846805aa0743f4d17b01c9a851358bcfe))
+
+
+### Bug Fixes
+
+* resolve clippy lints (unused_unit, collapsible_match, manual_div_ceil) ([a3e28fd](https://github.com/krezh/roder/commit/a3e28fdaf1a6b1bf2f0581b3c4c2bfef53652691))
+* resolve container for multi-container pods in workload log streaming ([7e35c42](https://github.com/krezh/roder/commit/7e35c42c339d97ad4d9f8068ff8f80e854c9f8fe))
+* **session:** update rand API for 0.10 compatibility ([e425d84](https://github.com/krezh/roder/commit/e425d845357a9daad71c80d00ac49f38f0d583d3))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump rand to 0.10.1, time to 0.3.48 ([4533635](https://github.com/krezh/roder/commit/4533635153761f0a5a69f0a197e7a0aa339457cc))
+
 ## [0.1.10](https://github.com/krezh/roder/compare/0.1.9...0.1.10) (2026-06-10)
 
 

@@ -311,7 +311,7 @@ pub(crate) fn KindTable(
                                             }
                                         }).collect_view().into_any()
                                     } else {
-                                        view! {}.into_any()
+                                        ().into_any()
                                     }
                                 })}
                             </Suspense>

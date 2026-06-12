@@ -205,19 +205,15 @@ pub(crate) fn ansi_to_html(raw: &str) -> String {
                     bold = false;
                     fg = None;
                 }
-                1 => {
-                    if !bold {
-                        close_if_any(&mut out, bold, fg);
-                        bold = true;
-                        open_if_any(&mut out, bold, fg);
-                    }
+                1 if !bold => {
+                    close_if_any(&mut out, bold, fg);
+                    bold = true;
+                    open_if_any(&mut out, bold, fg);
                 }
                 2 => { /* dim — not rendered */ }
-                22 => {
-                    if bold {
-                        close_if_any(&mut out, bold, fg);
-                        bold = false;
-                    }
+                22 if bold => {
+                    close_if_any(&mut out, bold, fg);
+                    bold = false;
                 }
                 30..=37 => {
                     close_if_any(&mut out, bold, fg);

@@ -78,7 +78,7 @@ pub(crate) fn WorkspaceView() -> impl IntoView {
             let n = ws.with(|w| w.panes.len());
             if n == 0 { return String::new(); }
             let cols = (n as f64).sqrt().ceil() as usize;
-            let rows = (n + cols - 1) / cols;
+            let rows = n.div_ceil(cols);
             format!("grid-template-columns:repeat({cols},1fr);grid-template-rows:repeat({rows},1fr)")
         }>
             <For

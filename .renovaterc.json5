@@ -3,7 +3,12 @@
   extends: ["local>krezh/renovate-config"],
   packageRules: [
     {
-      matchPackageNames: ["wasm-bindgen"],
+      matchPackageNames: [
+        "wasm-bindgen",
+        "wasm-bindgen-futures",
+        "js-sys",
+        "web-sys",
+      ],
       groupName: "wasm-bindgen",
     },
   ],

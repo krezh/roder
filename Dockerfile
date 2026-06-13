@@ -1,13 +1,12 @@
 # syntax=docker/dockerfile:1
 
 # ---- build ----------------------------------------------------------------
-FROM rust:1-bookworm AS build
+FROM ghcr.io/rust-lang/rust:1.96.0-trixie@sha256:4fd8406017c992f7b8ab55a2f99a1d56aeb1d7ecd255850dfa04239a88601f73 AS build
 
 # cargo-leptos + the wasm target.
-# binaryen (wasm-opt) is intentionally omitted: Debian bookworm ships an old
-# version that corrupts the externref table wasm-bindgen 0.2.92+ uses, causing
-# "failed to grow table" at runtime. The Rust opt-level="z" profile already
-# produces well-optimized wasm; cargo-leptos skips wasm-opt when it's absent.
+# binaryen is not installed from apt: Debian bookworm ships a version that
+# corrupts the externref table wasm-bindgen 0.2.92+ uses. cargo-leptos
+# downloads the correct wasm-opt version itself at build time.
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     rustup target add wasm32-unknown-unknown \
     && cargo install cargo-leptos --locked
@@ -41,12 +40,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     fi
 
 # ---- runtime --------------------------------------------------------------
-FROM debian:bookworm-slim AS runtime
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && useradd --uid 1000 --user-group --no-create-home --shell /usr/sbin/nologin roder
+FROM gcr.io/distroless/cc-debian13@sha256:a017e74bd2a12d98342dbecd33d121d2b160415ed777573dc1808969e989d94d AS runtime
 
 WORKDIR /app
 COPY --from=build /app/roder-bin /app/roder
@@ -58,5 +52,5 @@ ENV LEPTOS_SITE_ROOT=/app/site \
     RUST_LOG=info
 
 EXPOSE 8080
-USER 1000
+USER 65532
 ENTRYPOINT ["/app/roder"]

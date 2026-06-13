@@ -14,7 +14,11 @@ use crate::metrics::PvcUsage;
 use crate::printer_columns::{self, ColumnMap, PrinterCol};
 use crate::project::project_row;
 
-const CHANNEL_CAP: usize = 4096;
+/// Broadcast backlog per informer. Each slot can hold a full `Snapshot` (every
+/// row), so a deep buffer multiplies memory on busy kinds. Kept modest: when a
+/// slow SSE consumer lags past it, the watch handler re-snapshots from the live
+/// `rows` cache (see `api::watch`), so a small backlog costs a resync, not data.
+const CHANNEL_CAP: usize = 512;
 /// How long an informer with no subscribers lingers before being evicted. Kept
 /// generous so reconnecting to a recently-viewed resource serves the warm cache
 /// instead of re-LISTing — and fewer LIST-then-WATCH restarts is kinder to etcd.
@@ -268,9 +272,21 @@ fn start_informer(
     let task_objects = objects.clone();
     let task_by_name = by_name.clone();
     let task_pvc_usage = pvc_usage.clone();
+    // Only pods and PVCs are re-projected from their full object body (live
+    // metrics / filesystem usage) — and only those need cached objects for the
+    // detail view. For every other kind we keep just the lightweight rows and
+    // let the detail handler fall back to a single GET, so large Secrets /
+    // ConfigMaps / CRDs don't pin their full bodies in memory for the cluster's
+    // lifetime. This is the main steady-state memory reduction.
+    let cache_objects = is_pod || is_pvc;
     let handle = tokio::spawn(async move {
-        // Outer loop rebuilds the watch (and picks up a refreshed client) after
-        // an unrecoverable stream end (e.g. token rotated → 401).
+        // `kube`'s `watcher` is self-healing: on a transient failure it yields
+        // an `Err`, backs off internally, then re-lists and resumes on the same
+        // stream. So we only rebuild the stream when the client itself must
+        // change — i.e. the bearer token rotated and the old client now 401s.
+        // Rebuilding on *every* error would force a fresh LIST each time, which
+        // both hammers etcd and doubles memory while the new list is buffered.
+        let mut backoff_attempt: u32 = 0;
         loop {
             let client = (*cluster.client()).clone();
             let api: Api<DynamicObject> = make_api(client, &ar, namespaced, namespace.as_deref());
@@ -292,6 +308,8 @@ fn start_informer(
                 )
             };
 
+            // Set when an auth error means we must rebuild with the refreshed client.
+            let mut rebuild_for_auth = false;
             while let Some(event) = stream.next().await {
                 match event {
                     Ok(Event::Init) => {
@@ -308,20 +326,27 @@ fn start_informer(
                             &*task_pvc_usage.read().await,
                         );
                         let row = project_row(&group, &kind, &obj, usage, pvc_u, &crd);
-                        building_objs.insert(row.uid.clone(), obj);
+                        if cache_objects {
+                            building_objs.insert(row.uid.clone(), obj);
+                        }
                         building.insert(row.uid.clone(), row);
                     }
                     Ok(Event::InitDone) => {
                         let rows_vec: Vec<ResourceRow> = building.values().cloned().collect();
                         // Rebuild the name index from the full init set.
                         let mut name_idx: HashMap<NameKey, String> = HashMap::new();
-                        for (uid, obj) in building_objs.iter() {
-                            name_idx.insert(name_key(obj), uid.clone());
+                        if cache_objects {
+                            for (uid, obj) in building_objs.iter() {
+                                name_idx.insert(name_key(obj), uid.clone());
+                            }
                         }
                         *task_rows.write().await = std::mem::take(&mut building);
                         *task_objects.write().await = std::mem::take(&mut building_objs);
                         *task_by_name.write().await = name_idx;
                         let _ = task_tx.send(WatchEvent::Snapshot { rows: rows_vec });
+                        // A completed (re)list means the stream is healthy again;
+                        // reset the rebuild backoff.
+                        backoff_attempt = 0;
                     }
                     Ok(Event::Apply(mut obj)) => {
                         obj.metadata.managed_fields = None;
@@ -334,32 +359,50 @@ fn start_informer(
                         );
                         let row = project_row(&group, &kind, &obj, usage, pvc_u, &crd);
                         let uid = row.uid.clone();
-                        let name_k = name_key(&obj);
-                        task_objects.write().await.insert(uid.clone(), obj);
-                        task_rows.write().await.insert(uid.clone(), row.clone());
-                        task_by_name.write().await.insert(name_k, uid);
+                        if cache_objects {
+                            let name_k = name_key(&obj);
+                            task_objects.write().await.insert(uid.clone(), obj);
+                            task_by_name.write().await.insert(name_k, uid.clone());
+                        }
+                        task_rows.write().await.insert(uid, row.clone());
                         let _ = task_tx.send(WatchEvent::Applied { row });
                     }
                     Ok(Event::Delete(obj)) => {
                         let row = project_row(&group, &kind, &obj, None, None, &crd);
                         task_rows.write().await.remove(&row.uid);
-                        task_objects.write().await.remove(&row.uid);
-                        task_by_name.write().await.remove(&name_key(&obj));
+                        if cache_objects {
+                            task_objects.write().await.remove(&row.uid);
+                            task_by_name.write().await.remove(&name_key(&obj));
+                        }
                         let _ = task_tx.send(WatchEvent::Deleted { uid: row.uid });
                     }
                     Err(e) => {
-                        tracing::debug!("watch error for {group}/{kind}: {e}");
-                        // Back off before letting the outer loop rebuild the
-                        // watch. Without this, a non-watchable (or
-                        // temporarily-broken) resource like PodMetrics would
-                        // log the error in a tight ~20ms loop.
-                        tokio::time::sleep(Duration::from_secs(2)).await;
-                        break;
+                        // A 401 means the token rotated: the watcher would keep
+                        // retrying with the now-stale client forever, so break to
+                        // rebuild with the hot-swapped one. Every other error is
+                        // transient — let the watcher self-heal in place (no LIST,
+                        // no memory spike).
+                        if is_auth_error(&e) {
+                            tracing::debug!("watch auth error for {group}/{kind}; rebuilding: {e}");
+                            rebuild_for_auth = true;
+                            break;
+                        }
+                        tracing::debug!("watch error for {group}/{kind} (self-healing): {e}");
                     }
                 }
             }
-            // Stream ended; back off then rebuild with the latest client.
-            tokio::time::sleep(Duration::from_secs(2)).await;
+
+            // We only get here on an auth rebuild or (in practice never) a truly
+            // ended stream. Back off — exponentially, with jitter, capped — so a
+            // sustained outage or token problem doesn't have every informer
+            // reconnecting in lockstep.
+            if !rebuild_for_auth {
+                // Defensive: an unexpected clean stream end shouldn't hot-loop.
+                backoff_attempt = backoff_attempt.max(1);
+            }
+            let delay = rebuild_backoff(backoff_attempt);
+            backoff_attempt = backoff_attempt.saturating_add(1);
+            tokio::time::sleep(delay).await;
         }
     });
 
@@ -426,6 +469,37 @@ fn spawn_reaper(registry: Arc<InformerRegistry>) {
             }
         }
     });
+}
+
+/// Whether a watcher error is an authentication failure (HTTP 401), which means
+/// the bearer token has rotated and the watch must be rebuilt with the
+/// hot-swapped client. Walks the error source chain and matches on the status
+/// text so it stays robust across `kube`'s error-enum shape changes. A 403
+/// (RBAC) is deliberately *not* treated as auth-rotation: rebuilding wouldn't
+/// help, so we let the watcher keep retrying.
+fn is_auth_error(e: &watcher::Error) -> bool {
+    use std::error::Error;
+    let mut src: Option<&dyn Error> = Some(e);
+    while let Some(err) = src {
+        let s = err.to_string();
+        if s.contains("Unauthorized") || s.contains("401") {
+            return true;
+        }
+        src = err.source();
+    }
+    false
+}
+
+/// Backoff before rebuilding a watch stream: 1, 2, 4, 8, 16, 30s (capped) plus
+/// up to ~1s of jitter so many informers don't reconnect in lockstep after a
+/// shared outage.
+fn rebuild_backoff(attempt: u32) -> Duration {
+    let secs = (1u64 << attempt.min(5)).min(30);
+    let jitter_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| u64::from(d.subsec_millis()))
+        .unwrap_or(0);
+    Duration::from_secs(secs) + Duration::from_millis(jitter_ms)
 }
 
 fn usage_for(obj: &DynamicObject, cache: &UsageWithTrend) -> Option<UsageEntry> {

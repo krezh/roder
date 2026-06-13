@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.13](https://github.com/krezh/roder/compare/0.1.12...0.1.13) (2026-06-13)
+
+
+### Bug Fixes
+
+* **cargo:** update wasm-bindgen ([#37](https://github.com/krezh/roder/issues/37)) ([53d72c4](https://github.com/krezh/roder/commit/53d72c47041ab3998c81cb82d1adf8cf013ecaf3))
+* **deps:** change images and update wasm-bindgen renovate group ([a2078ea](https://github.com/krezh/roder/commit/a2078eaa93f73ce199f9a4c9ee68ef745a9cb146))
+
 ## [0.1.12](https://github.com/krezh/roder/compare/0.1.11...0.1.12) (2026-06-12)
 
 

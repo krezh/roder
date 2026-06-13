@@ -89,6 +89,16 @@ fn classify(group: &str, kind: &str) -> Category {
     {
         return Category::CertManager;
     }
+    // Rook bundles several API groups (ceph.rook.io plus the object-bucket
+    // provisioner's objectbucket.io); collapse them all into one section, the
+    // same way every `*.fluxcd.io` group folds into Flux above.
+    if group == "ceph.rook.io"
+        || group.ends_with(".rook.io")
+        || group == "objectbucket.io"
+        || group.ends_with(".objectbucket.io")
+    {
+        return Category::Rook;
+    }
     if group == "rbac.authorization.k8s.io" {
         return Category::Rbac;
     }

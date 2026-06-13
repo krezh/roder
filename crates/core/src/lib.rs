@@ -45,6 +45,7 @@ pub enum Category {
     Flux,
     ExternalSecrets,
     CertManager,
+    Rook,
     Cluster,
     Custom(String),
 }
@@ -60,6 +61,7 @@ impl Category {
             Category::Flux => "Flux".into(),
             Category::ExternalSecrets => "External Secrets".into(),
             Category::CertManager => "cert-manager".into(),
+            Category::Rook => "Rook Ceph".into(),
             Category::Cluster => "Cluster".into(),
             Category::Custom(name) => name.clone(),
         }
@@ -77,7 +79,8 @@ impl Category {
             Category::Flux => 6,
             Category::ExternalSecrets => 7,
             Category::CertManager => 8,
-            Category::Custom(_) => 9,
+            Category::Rook => 9,
+            Category::Custom(_) => 10,
         }
     }
 

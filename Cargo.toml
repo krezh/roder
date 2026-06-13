@@ -124,7 +124,7 @@ web-sys = { version = "0.3", features = [
 # in `_RJEM_MALLOC_CONF`, see Dockerfile) returns freed pages to the OS promptly
 # after a relist spike instead of holding them as resident.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tikv-jemallocator = { version = "0.6", optional = true }
+tikv-jemallocator = { version = "0.7", optional = true }
 
 [dev-dependencies]
 time = "0.3"

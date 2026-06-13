@@ -149,7 +149,9 @@ async fn ensure_session(state: &AppState, cookie_tokens: Tokens) -> Result<Token
         cur.clone().unwrap_or(cookie_tokens)
     };
 
-    if working.needs_refresh() {
+    // The cookie carries no id token (kept small), so a cold start yields an
+    // empty one and must refresh to obtain a usable token + rebuild the backend.
+    if working.id_token.is_empty() || working.needs_refresh() {
         let _guard = state.refresh_lock.lock().await;
         // Re-check under the lock: another request may have just refreshed.
         if let Some(c) = state.current.read().await.clone() {
@@ -743,10 +745,12 @@ mod tests {
 
     #[tokio::test]
     async fn require_auth_production_with_valid_session_passes() {
-        // A fresh, validly-sealed cookie passes even with no cluster backend:
-        // backend establishment is best-effort, so an unreachable cluster does
-        // not log the user out (the API handlers surface 503 instead).
+        // A warm in-memory session (as just after login) with a validly-sealed
+        // cookie passes even with no cluster backend: the id token is present so
+        // no refresh is needed, and backend establishment is best-effort, so an
+        // unreachable cluster does not log the user out (handlers surface 503).
         let state = prod_state_without_provider();
+        *state.current.write().await = Some(fake_tokens());
         let sealed = seal_session(&fake_tokens(), &TEST_KEY);
 
         let app = make_protected_app(state);

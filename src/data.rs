@@ -54,11 +54,29 @@ pub fn detail_url(key: &str, namespace: Option<&str>, name: &str) -> String {
 
 // ---- REST fetch -----------------------------------------------------------
 
+/// A 401 means the session is gone (cookie expired, or its refresh token can no
+/// longer mint a new id token). Send the browser to the login route so it
+/// re-authenticates — silent if the IdP still holds an SSO session, otherwise a
+/// normal sign-in — instead of leaving the page stuck on failing requests.
+/// Returns `true` if it redirected. The 45s heartbeat (`/api/me`) makes this the
+/// chokepoint that catches a dead session even on SSE-only views.
+#[cfg(target_arch = "wasm32")]
+fn redirect_to_login_if_unauthorized(status: u16) -> bool {
+    if status != 401 {
+        return false;
+    }
+    if let Some(win) = web_sys::window() {
+        let _ = win.location().set_href("/auth/login");
+    }
+    true
+}
+
 #[cfg(target_arch = "wasm32")]
 pub async fn fetch_json<T: DeserializeOwned>(url: &str) -> Result<T, String> {
     use gloo_net::http::Request;
     let resp = Request::get(url).send().await.map_err(|e| e.to_string())?;
     if !resp.ok() {
+        redirect_to_login_if_unauthorized(resp.status());
         return Err(format!("{} {}", resp.status(), resp.status_text()));
     }
     resp.json::<T>().await.map_err(|e| e.to_string())
@@ -83,6 +101,7 @@ pub async fn post_action(body: &serde_json::Value) -> Result<(), String> {
     if resp.ok() {
         Ok(())
     } else {
+        redirect_to_login_if_unauthorized(resp.status());
         Err(resp.text().await.unwrap_or_else(|_| resp.status_text()))
     }
 }

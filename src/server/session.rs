@@ -20,12 +20,13 @@ pub struct PendingLogin {
     pub pkce_verifier: String,
 }
 
-/// The token set persisted in the sealed `roder_session` cookie. `access_token`
-/// is omitted — roder passes the *id* token to the apiserver and never uses the
-/// access token — which keeps the cookie small.
+/// What we persist in the sealed `roder_session` cookie. Deliberately *not* the
+/// id token (a JWT — the largest field, and groups-heavy ones can push the
+/// cookie past the ~4 KB browser limit) nor the access token (roder only ever
+/// passes the *id* token to the apiserver). The refresh token is enough: on a
+/// cold start the id token is re-minted from it, so the cookie stays small.
 #[derive(Serialize, Deserialize)]
 struct SealedSession {
-    id_token: String,
     #[serde(default)]
     refresh_token: Option<String>,
     identity: Identity,
@@ -79,7 +80,6 @@ fn open_bytes(cookie: &str, key: &[u8; 32]) -> Option<Vec<u8>> {
 /// Seal a token set into the `roder_session` cookie value.
 pub fn seal_session(tokens: &Tokens, key: &[u8; 32]) -> String {
     let payload = SealedSession {
-        id_token: tokens.id_token.clone(),
         refresh_token: tokens.refresh_token.clone(),
         identity: tokens.identity.clone(),
         expires_at_unix: tokens.expires_at.unix_timestamp(),
@@ -87,11 +87,12 @@ pub fn seal_session(tokens: &Tokens, key: &[u8; 32]) -> String {
     seal_bytes(&serde_json::to_vec(&payload).unwrap_or_default(), key)
 }
 
-/// Reverse of [`seal_session`].
+/// Reverse of [`seal_session`]. The returned `id_token` is empty — it isn't
+/// stored — so a cold-start path must refresh to obtain one (see `ensure_session`).
 pub fn open_session(cookie: &str, key: &[u8; 32]) -> Option<Tokens> {
     let s: SealedSession = serde_json::from_slice(&open_bytes(cookie, key)?).ok()?;
     Some(Tokens {
-        id_token: s.id_token,
+        id_token: String::new(),
         access_token: String::new(),
         refresh_token: s.refresh_token,
         expires_at: OffsetDateTime::from_unix_timestamp(s.expires_at_unix).ok()?,
@@ -290,7 +291,8 @@ mod tests {
         assert!(!sealed.is_empty());
 
         let opened = open_session(&sealed, &key).expect("round trip");
-        assert_eq!(opened.id_token, tokens.id_token);
+        // id_token is intentionally not stored (re-minted on cold start).
+        assert!(opened.id_token.is_empty());
         assert_eq!(opened.refresh_token, tokens.refresh_token);
         assert_eq!(opened.identity, tokens.identity);
         assert_eq!(

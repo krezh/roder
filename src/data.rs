@@ -109,6 +109,22 @@ impl Drop for SseHandle {
     }
 }
 
+/// Reconnect delay for a dropped SSE stream: a short *fixed* interval so the UI
+/// recovers within ~a second of the server coming back. Deliberately flat — no
+/// exponential backoff — because the connection blips repeatedly during a
+/// rolling cluster upgrade (nodes rebooting in turn), and a dashboard you have
+/// to hard-reload is far worse than a few extra reconnect attempts against a
+/// single-user server. A little jitter keeps the handful of table streams from
+/// all reconnecting on the exact same tick.
+pub fn reconnect_delay() -> std::time::Duration {
+    const BASE_MS: u64 = 1000;
+    #[cfg(target_arch = "wasm32")]
+    let ms = BASE_MS + (js_sys::Math::random() * 400.0) as u64; // +0..400ms
+    #[cfg(not(target_arch = "wasm32"))]
+    let ms = BASE_MS;
+    std::time::Duration::from_millis(ms)
+}
+
 /// Like [`subscribe_with_error`] but calls `on_error` when the EventSource fires an error
 /// (e.g. the server returned a non-200 status). Callers use this to schedule a
 /// reconnect rather than leaving the stream dead.

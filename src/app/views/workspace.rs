@@ -67,7 +67,7 @@ pub(crate) fn WorkspaceView() -> impl IntoView {
             move || {
                 set_timeout(
                     move || reconnect.update(|n| *n += 1),
-                    std::time::Duration::from_secs(3),
+                    data::reconnect_delay(),
                 );
             },
         )

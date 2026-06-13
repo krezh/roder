@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.14](https://github.com/krezh/roder/compare/0.1.13...0.1.14) (2026-06-13)
+
+
+### Features
+
+* **sidebar:** group Rook/Ceph CRDs into one category ([0c43797](https://github.com/krezh/roder/commit/0c43797f6b0a3c762f8050bb6e4b8696f79b5786))
+* **web:** fast flat SSE reconnect instead of exponential backoff ([804abb2](https://github.com/krezh/roder/commit/804abb2bbd6608d64db2bc1f807722c02fe57e37))
+
+
+### Bug Fixes
+
+* **auth:** slim session cookie + redirect to login on 401 ([c70a4d7](https://github.com/krezh/roder/commit/c70a4d76e22342ab212999792ac2949a9d2ba838))
+* **auth:** stateless sealed cookies; jemalloc; RODER_ env prefix ([7dc9c16](https://github.com/krezh/roder/commit/7dc9c16b898a295b2af8e407ae3f2da63d2e6062))
+* **cargo:** update rust crate time (0.3.48 ➔ 0.3.49) ([#34](https://github.com/krezh/roder/issues/34)) ([de33099](https://github.com/krezh/roder/commit/de3309953c0f0d4d2f5b42205bd2821b5f87a080))
+* **informers:** keep self-healing watcher alive; cut memory & OOM ([70692a2](https://github.com/krezh/roder/commit/70692a2dcd0c98ac6d3260e61a90d67c3b030629))
+
 ## [0.1.13](https://github.com/krezh/roder/compare/0.1.12...0.1.13) (2026-06-13)
 
 

@@ -225,6 +225,22 @@ pub fn App() -> impl IntoView {
         );
     });
 
+    // Session heartbeat: periodically hit a cheap endpoint so the server can
+    // refresh + re-seal the session cookie (and keep the cluster token fresh)
+    // even on long-lived, SSE-only views that otherwise make no requests. The
+    // response is ignored — the point is the round-trip through `require_auth`.
+    Effect::new(move |_| {
+        set_interval(
+            move || {
+                #[cfg(target_arch = "wasm32")]
+                leptos::task::spawn_local(async {
+                    let _ = data::fetch_json::<serde_json::Value>("/api/me").await;
+                });
+            },
+            std::time::Duration::from_secs(45),
+        );
+    });
+
     view! {
         <Title text="Roder" />
         <Router>

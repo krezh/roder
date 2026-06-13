@@ -1,5 +1,13 @@
 #![recursion_limit = "512"]
 
+// Server binary uses jemalloc: much lower RSS and fragmentation than glibc
+// malloc for roder's long-lived, watch-heavy allocation pattern. Behind the
+// `jemalloc` feature (enabled only in the production image) so local NixOS dev
+// builds — where jemalloc's C source won't compile — are unaffected.
+#[cfg(all(not(target_arch = "wasm32"), feature = "jemalloc"))]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 #[cfg(feature = "ssr")]
 #[tokio::main]
 async fn main() {
@@ -14,7 +22,7 @@ async fn main() {
     use leptos::prelude::*;
     use leptos_axum::{generate_route_list, LeptosRoutes};
     use roder::app::{shell, App};
-    use roder::server::{api, build_state, handlers, refresh};
+    use roder::server::{api, build_state, handlers};
 
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -35,9 +43,6 @@ async fn main() {
             std::process::exit(1);
         }
     };
-
-    // Keep tokens fresh so long-running watches survive.
-    refresh::spawn(state.clone());
 
     // App pages + private API, gated behind a valid session.
     let protected = Router::new()

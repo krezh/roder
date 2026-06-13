@@ -4,19 +4,17 @@
 pub mod api;
 pub mod config;
 pub mod handlers;
-pub mod refresh;
 pub mod session;
 
 use std::sync::Arc;
 
 use axum::extract::FromRef;
 use leptos::prelude::LeptosOptions;
-use roder_auth::OidcProvider;
+use roder_auth::{OidcProvider, Tokens};
 use roder_k8s::Backend;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 pub use config::ServerConfig;
-use session::{PendingStore, SessionStore};
 
 /// Shared application state for the axum router. Single user ⇒ one shared cluster
 /// client behind an `RwLock` (rebuilt on token refresh).
@@ -26,11 +24,16 @@ pub struct AppState {
     pub config: Arc<ServerConfig>,
     /// None in dev mode.
     pub provider: Option<Arc<OidcProvider>>,
-    pub sessions: Arc<SessionStore>,
-    pub pending: Arc<PendingStore>,
     /// Established after the first successful login (or at startup in dev mode):
     /// the connected cluster + discovery catalog + informer registry.
     pub backend: Arc<RwLock<Option<Arc<Backend>>>>,
+    /// The live token set for the shared cluster identity. Reconstructed from
+    /// the sealed `roder_session` cookie after a restart, and refreshed on use.
+    /// `None` until the first authenticated request (or in dev mode).
+    pub current: Arc<RwLock<Option<Tokens>>>,
+    /// Single-flight guard around token refresh so concurrent requests don't
+    /// each call the IdP and invalidate one another's rotated refresh token.
+    pub refresh_lock: Arc<Mutex<()>>,
 }
 
 // Lets Leptos's axum handlers pull `LeptosOptions` out of our custom state.
@@ -74,8 +77,8 @@ pub async fn build_state(leptos_options: LeptosOptions) -> Result<AppState, Stri
         leptos_options,
         config: Arc::new(config),
         provider,
-        sessions: Arc::new(SessionStore::default()),
-        pending: Arc::new(PendingStore::default()),
         backend,
+        current: Arc::new(RwLock::new(None)),
+        refresh_lock: Arc::new(Mutex::new(())),
     })
 }

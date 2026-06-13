@@ -1,106 +1,126 @@
-use std::collections::HashMap;
-use std::fmt::Write as _;
-use std::time::Instant;
-
+use aes_gcm::aead::{Aead, KeyInit};
+use aes_gcm::{Aes256Gcm, Key, Nonce};
 use axum::http::HeaderMap;
+use base64::Engine;
 use roder_auth::{Identity, Tokens};
-use tokio::sync::RwLock;
+use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
 
 pub const SESSION_COOKIE: &str = "roder_session";
 pub const LOGIN_COOKIE: &str = "roder_login";
 
-/// A logged-in session. Tokens (incl. the passthrough ID token + refresh token)
-/// live server-side; the browser only holds an opaque session id.
-#[derive(Debug, Clone)]
-pub struct Session {
-    pub identity: Identity,
-    pub tokens: Tokens,
-}
-
-/// In-flight login: the CSRF state / nonce / PKCE verifier stashed between the
-/// `/auth/login` redirect and the `/auth/callback` return.
+/// In-flight login state stashed between the `/auth/login` redirect and the
+/// `/auth/callback` return. Sealed into the `roder_login` cookie (not a
+/// server-side store), so the callback can recover it on any replica and across
+/// a restart — that store was the last thing making the login flow pod-sticky.
 #[derive(Debug, Clone)]
 pub struct PendingLogin {
     pub csrf_state: String,
     pub nonce: String,
     pub pkce_verifier: String,
-    pub created: Instant,
 }
 
-#[derive(Default)]
-pub struct SessionStore {
-    inner: RwLock<HashMap<String, Session>>,
+/// The token set persisted in the sealed `roder_session` cookie. `access_token`
+/// is omitted — roder passes the *id* token to the apiserver and never uses the
+/// access token — which keeps the cookie small.
+#[derive(Serialize, Deserialize)]
+struct SealedSession {
+    id_token: String,
+    #[serde(default)]
+    refresh_token: Option<String>,
+    identity: Identity,
+    /// id-token expiry as a unix timestamp (avoids serializing OffsetDateTime).
+    expires_at_unix: i64,
 }
 
-impl SessionStore {
-    pub async fn insert(&self, id: String, session: Session) {
-        let mut map = self.inner.write().await;
-        // Opportunistically evict sessions whose token has been expired for
-        // >24 hours and cannot be refreshed (no refresh token). Sessions with
-        // a refresh token are kept because the background refresh loop handles
-        // them and removes them on failure.
-        map.retain(|_, s| s.tokens.refresh_token.is_some() || !s.tokens.is_abandoned());
-        map.insert(id, session);
-    }
-
-    pub async fn get(&self, id: &str) -> Option<Session> {
-        self.inner.read().await.get(id).cloned()
-    }
-
-    pub async fn contains(&self, id: &str) -> bool {
-        self.inner.read().await.contains_key(id)
-    }
-
-    pub async fn remove(&self, id: &str) {
-        self.inner.write().await.remove(id);
-    }
-
-    /// (session_id, refresh_token) for sessions whose ID token is near expiry.
-    pub async fn needing_refresh(&self) -> Vec<(String, String)> {
-        self.inner
-            .read()
-            .await
-            .iter()
-            .filter(|(_, s)| s.tokens.needs_refresh())
-            .filter_map(|(id, s)| s.tokens.refresh_token.clone().map(|rt| (id.clone(), rt)))
-            .collect()
-    }
-
-    pub async fn update_tokens(&self, id: &str, tokens: Tokens) {
-        if let Some(s) = self.inner.write().await.get_mut(id) {
-            s.identity = tokens.identity.clone();
-            s.tokens = tokens;
-        }
-    }
+/// The `roder_login` cookie payload: the login state plus an absolute expiry, so
+/// a stale or replayed login cookie is rejected even within its browser Max-Age.
+#[derive(Serialize, Deserialize)]
+struct SealedPending {
+    csrf_state: String,
+    nonce: String,
+    pkce_verifier: String,
+    expires_at_unix: i64,
 }
 
-#[derive(Default)]
-pub struct PendingStore {
-    inner: RwLock<HashMap<String, PendingLogin>>,
+fn cipher(key: &[u8; 32]) -> Aes256Gcm {
+    Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key))
 }
 
-impl PendingStore {
-    pub async fn insert(&self, id: String, pending: PendingLogin) {
-        let mut map = self.inner.write().await;
-        // Opportunistically drop stale pending logins (>10 min).
-        map.retain(|_, p| p.created.elapsed().as_secs() < 600);
-        map.insert(id, pending);
-    }
-
-    /// Take (remove + return) a pending login — single use.
-    pub async fn take(&self, id: &str) -> Option<PendingLogin> {
-        self.inner.write().await.remove(id)
-    }
+/// AES-256-GCM seal of arbitrary bytes over a 12-byte random nonce, URL-safe
+/// base64 of `nonce || ciphertext`. The shared primitive behind both sealed
+/// cookies; any instance holding the same `RODER_SESSION_KEY` can open them, so
+/// there is no server-side store to lose on restart or to make pods sticky.
+fn seal_bytes(plain: &[u8], key: &[u8; 32]) -> String {
+    let nonce_bytes: [u8; 12] = rand::random();
+    let Ok(ct) = cipher(key).encrypt(Nonce::from_slice(&nonce_bytes), plain) else {
+        return String::new();
+    };
+    let mut buf = Vec::with_capacity(nonce_bytes.len() + ct.len());
+    buf.extend_from_slice(&nonce_bytes);
+    buf.extend_from_slice(&ct);
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(buf)
 }
 
-/// 256 bits of randomness, hex-encoded — used for opaque session/login ids.
-pub fn random_id() -> String {
-    let bytes: [u8; 32] = rand::random();
-    let mut s = String::with_capacity(64);
-    for b in &bytes {
-        let _ = write!(s, "{b:02x}");
+/// Reverse of [`seal_bytes`]: `None` if malformed, sealed with a different key,
+/// or GCM authentication fails (tampered).
+fn open_bytes(cookie: &str, key: &[u8; 32]) -> Option<Vec<u8>> {
+    let raw = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(cookie.as_bytes())
+        .ok()?;
+    // 12-byte nonce + 16-byte GCM tag minimum.
+    if raw.len() < 28 {
+        return None;
     }
-    s
+    let (nonce, ct) = raw.split_at(12);
+    cipher(key).decrypt(Nonce::from_slice(nonce), ct).ok()
+}
+
+/// Seal a token set into the `roder_session` cookie value.
+pub fn seal_session(tokens: &Tokens, key: &[u8; 32]) -> String {
+    let payload = SealedSession {
+        id_token: tokens.id_token.clone(),
+        refresh_token: tokens.refresh_token.clone(),
+        identity: tokens.identity.clone(),
+        expires_at_unix: tokens.expires_at.unix_timestamp(),
+    };
+    seal_bytes(&serde_json::to_vec(&payload).unwrap_or_default(), key)
+}
+
+/// Reverse of [`seal_session`].
+pub fn open_session(cookie: &str, key: &[u8; 32]) -> Option<Tokens> {
+    let s: SealedSession = serde_json::from_slice(&open_bytes(cookie, key)?).ok()?;
+    Some(Tokens {
+        id_token: s.id_token,
+        access_token: String::new(),
+        refresh_token: s.refresh_token,
+        expires_at: OffsetDateTime::from_unix_timestamp(s.expires_at_unix).ok()?,
+        identity: s.identity,
+    })
+}
+
+/// Seal in-flight login state into the `roder_login` cookie, valid for `ttl_secs`.
+pub fn seal_pending(pending: &PendingLogin, key: &[u8; 32], ttl_secs: i64) -> String {
+    let payload = SealedPending {
+        csrf_state: pending.csrf_state.clone(),
+        nonce: pending.nonce.clone(),
+        pkce_verifier: pending.pkce_verifier.clone(),
+        expires_at_unix: OffsetDateTime::now_utc().unix_timestamp() + ttl_secs,
+    };
+    seal_bytes(&serde_json::to_vec(&payload).unwrap_or_default(), key)
+}
+
+/// Reverse of [`seal_pending`]; also rejects a login whose absolute expiry passed.
+pub fn open_pending(cookie: &str, key: &[u8; 32]) -> Option<PendingLogin> {
+    let s: SealedPending = serde_json::from_slice(&open_bytes(cookie, key)?).ok()?;
+    if OffsetDateTime::now_utc().unix_timestamp() > s.expires_at_unix {
+        return None;
+    }
+    Some(PendingLogin {
+        csrf_state: s.csrf_state,
+        nonce: s.nonce,
+        pkce_verifier: s.pkce_verifier,
+    })
 }
 
 /// Read a single cookie value from the request headers.
@@ -125,8 +145,8 @@ pub fn set_cookie(name: &str, value: &str, secure: bool, max_age: i64) -> String
 mod tests {
     use super::*;
     use axum::http::HeaderMap;
+    use base64::Engine;
     use roder_auth::{Identity, Tokens};
-    use std::time::Duration;
     use time::OffsetDateTime;
 
     // -------- set_cookie --------
@@ -240,26 +260,7 @@ mod tests {
         assert_eq!(cookie_value(&h, "roder_login").as_deref(), Some(""));
     }
 
-    // -------- random_id --------
-
-    #[test]
-    fn random_id_is_64_hex_chars() {
-        let id = random_id();
-        assert_eq!(id.len(), 64, "32 bytes -> 64 hex chars, got {id}");
-        assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
-    }
-
-    #[test]
-    fn random_id_unique_across_calls() {
-        let a = random_id();
-        let b = random_id();
-        let c = random_id();
-        assert_ne!(a, b);
-        assert_ne!(b, c);
-        assert_ne!(a, c);
-    }
-
-    // -------- SessionStore --------
+    // -------- token / cookie helpers --------
 
     fn fake_tokens(expires_in_secs: i64) -> Tokens {
         Tokens {
@@ -276,129 +277,86 @@ mod tests {
         }
     }
 
-    fn fake_session(expires_in_secs: i64) -> Session {
-        Session {
-            identity: Identity {
-                subject: "sub".into(),
-                email: Some("a@b".into()),
-                name: None,
-                groups: vec!["g".into()],
-            },
-            tokens: fake_tokens(expires_in_secs),
-        }
-    }
+    // -------- seal_session / open_session --------
 
-    #[tokio::test]
-    async fn session_store_insert_get_contains_remove() {
-        let store = SessionStore::default();
-        let s = fake_session(3600);
-        store.insert("sid".into(), s.clone()).await;
+    #[test]
+    fn seal_open_round_trips_the_token_set() {
+        let key = [42u8; 32];
+        let mut tokens = fake_tokens(3600);
+        tokens.identity.email = Some("a@b".into());
+        tokens.identity.groups = vec!["admins".into()];
 
-        assert!(store.contains("sid").await);
-        assert!(!store.contains("other").await);
-        let got = store.get("sid").await;
-        assert!(got.is_some());
-        assert_eq!(got.unwrap().identity.subject, "sub");
+        let sealed = seal_session(&tokens, &key);
+        assert!(!sealed.is_empty());
 
-        store.remove("sid").await;
-        assert!(!store.contains("sid").await);
-        assert!(store.get("sid").await.is_none());
-    }
-
-    #[tokio::test]
-    async fn session_store_needing_refresh_filters_by_expiry() {
-        let store = SessionStore::default();
-        // Within 1-min safety buffer (needs_refresh) + already-expired.
-        store.insert("stale".into(), fake_session(-10)).await;
-        store.insert("soon".into(), fake_session(30)).await;
-        // Well outside the buffer.
-        store.insert("fresh".into(), fake_session(3600)).await;
-        // No refresh token — must not be picked up even if expired.
-        let mut no_refresh = fake_session(-10);
-        no_refresh.tokens.refresh_token = None;
-        store.insert("no_rt".into(), no_refresh).await;
-
-        let need = store.needing_refresh().await;
-        let ids: Vec<&str> = need.iter().map(|(id, _)| id.as_str()).collect();
-        assert!(ids.contains(&"stale"), "stale should need refresh: {ids:?}");
-        assert!(ids.contains(&"soon"), "soon should need refresh: {ids:?}");
-        assert!(
-            !ids.contains(&"fresh"),
-            "fresh must not need refresh: {ids:?}"
-        );
-        assert!(
-            !ids.contains(&"no_rt"),
-            "no refresh_token must be skipped: {ids:?}"
+        let opened = open_session(&sealed, &key).expect("round trip");
+        assert_eq!(opened.id_token, tokens.id_token);
+        assert_eq!(opened.refresh_token, tokens.refresh_token);
+        assert_eq!(opened.identity, tokens.identity);
+        assert_eq!(
+            opened.expires_at.unix_timestamp(),
+            tokens.expires_at.unix_timestamp()
         );
     }
 
-    #[tokio::test]
-    async fn session_store_update_tokens_replaces_in_place() {
-        let store = SessionStore::default();
-        store.insert("sid".into(), fake_session(3600)).await;
-
-        let new_tokens = fake_tokens(7200);
-        store.update_tokens("sid", new_tokens.clone()).await;
-
-        let got = store.get("sid").await.unwrap();
-        assert_eq!(got.tokens.expires_at, new_tokens.expires_at);
+    #[test]
+    fn open_with_wrong_key_fails() {
+        let sealed = seal_session(&fake_tokens(3600), &[1u8; 32]);
+        assert!(open_session(&sealed, &[2u8; 32]).is_none());
     }
 
-    #[tokio::test]
-    async fn session_store_update_tokens_missing_sid_is_noop() {
-        let store = SessionStore::default();
-        // No panic, no insert.
-        store.update_tokens("nope", fake_tokens(60)).await;
-        assert!(!store.contains("nope").await);
+    #[test]
+    fn open_rejects_tampered_or_garbage_cookies() {
+        assert!(open_session("not base64 $$$", &[0u8; 32]).is_none());
+        assert!(open_session("", &[0u8; 32]).is_none());
+        // Valid base64 but too short to be nonce+tag.
+        assert!(open_session("AAAA", &[0u8; 32]).is_none());
+
+        // Flip a byte of a real sealed cookie → GCM auth must reject it.
+        let key = [9u8; 32];
+        let sealed = seal_session(&fake_tokens(3600), &key);
+        let mut bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(&sealed)
+            .unwrap();
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xff;
+        let tampered = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+        assert!(open_session(&tampered, &key).is_none());
     }
 
-    // -------- PendingStore --------
+    // -------- seal_pending / open_pending --------
 
-    #[tokio::test]
-    async fn pending_store_insert_and_take_round_trip() {
-        let store = PendingStore::default();
-        let p = PendingLogin {
+    fn fake_pending() -> PendingLogin {
+        PendingLogin {
             csrf_state: "csrf".into(),
             nonce: "nonce".into(),
             pkce_verifier: "verifier".into(),
-            created: Instant::now(),
-        };
-        store.insert("pid".into(), p.clone()).await;
-
-        let taken = store.take("pid").await;
-        assert!(taken.is_some());
-        assert_eq!(taken.unwrap().csrf_state, "csrf");
-
-        // Single-use: take again returns None.
-        assert!(store.take("pid").await.is_none());
+        }
     }
 
-    #[tokio::test]
-    async fn pending_store_insert_drops_stale_entries() {
-        // Seed with an old (manually-aged) pending login; the next insert should
-        // garbage-collect anything older than 10 minutes.
-        let store = PendingStore::default();
-        let old = PendingLogin {
-            csrf_state: "old-csrf".into(),
-            nonce: "old-nonce".into(),
-            pkce_verifier: "old-verifier".into(),
-            // 11 minutes ago — over the 600s retention.
-            created: Instant::now() - Duration::from_secs(11 * 60),
-        };
-        // Bypass insert's GC by writing directly through a fresh `inner` map.
-        // We use a *new* entry, then a second one, to trigger GC.
-        store.insert("new1".into(), old).await;
-        let fresh = PendingLogin {
-            csrf_state: "fresh".into(),
-            nonce: "n".into(),
-            pkce_verifier: "v".into(),
-            created: Instant::now(),
-        };
-        store.insert("new2".into(), fresh).await;
+    #[test]
+    fn pending_seal_open_round_trips() {
+        let key = [3u8; 32];
+        let p = fake_pending();
+        let sealed = seal_pending(&p, &key, 600);
+        let opened = open_pending(&sealed, &key).expect("round trip");
+        assert_eq!(opened.csrf_state, p.csrf_state);
+        assert_eq!(opened.nonce, p.nonce);
+        assert_eq!(opened.pkce_verifier, p.pkce_verifier);
+    }
 
-        // After GC, "new1" must be gone.
-        assert!(store.take("new1").await.is_none());
-        // "new2" survives.
-        assert!(store.take("new2").await.is_some());
+    #[test]
+    fn pending_rejects_expired_login() {
+        let key = [3u8; 32];
+        // Negative TTL → already expired.
+        let sealed = seal_pending(&fake_pending(), &key, -1);
+        assert!(open_pending(&sealed, &key).is_none());
+    }
+
+    #[test]
+    fn pending_rejects_wrong_key_and_garbage() {
+        let sealed = seal_pending(&fake_pending(), &[1u8; 32], 600);
+        assert!(open_pending(&sealed, &[2u8; 32]).is_none());
+        assert!(open_pending("garbage", &[1u8; 32]).is_none());
     }
 }

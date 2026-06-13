@@ -232,9 +232,20 @@ async fn actor(state: &AppState, headers: &HeaderMap) -> String {
     if state.config.dev_mode {
         return "dev".to_string();
     }
-    if let Some(sid) = super::session::cookie_value(headers, super::session::SESSION_COOKIE) {
-        if let Some(s) = state.sessions.get(&sid).await {
-            return s.identity.email.clone().unwrap_or(s.identity.subject);
+    // Prefer the live identity (set by `require_auth`); fall back to the cookie.
+    if let Some(tokens) = state.current.read().await.as_ref() {
+        return tokens
+            .identity
+            .email
+            .clone()
+            .unwrap_or_else(|| tokens.identity.subject.clone());
+    }
+    if let (Some(key), Some(cookie)) = (
+        state.config.session_key,
+        super::session::cookie_value(headers, super::session::SESSION_COOKIE),
+    ) {
+        if let Some(tokens) = super::session::open_session(&cookie, &key) {
+            return tokens.identity.email.unwrap_or(tokens.identity.subject);
         }
     }
     "unknown".to_string()

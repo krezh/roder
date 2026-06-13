@@ -15,17 +15,19 @@ serviceAccount:
   annotations: {}
   name: ""
 
-# Name of the Secret holding OIDC_CLIENT_SECRET.
+# Name of the Secret holding the sensitive env vars — at least
+# RODER_OIDC_CLIENT_SECRET and RODER_SESSION_KEY (a stable 32-byte key, hex or
+# base64, that seals the session cookie; sessions are stateless and survive a
+# restart only if this key is set and unchanged across instances).
 # Backward-compatible shortcut: prepended to `envFrom` as a `secretRef`.
 # For additional sources (configMap refs, multiple secrets), use `envFrom` below.
-# Sessions are opaque + server-side, so no signing/encryption keys are needed.
 existingSecret: ""
 
 # Environment variables from Secrets and/or ConfigMaps. Each entry is one of:
 #   - secretRef:     { name: <secret> }
 #   - configMapRef:  { name: <configmap> }
 # Multiple sources are supported. `existingSecret` (if set) is prepended as a
-# `secretRef`. Use this for sensitive values (OIDC_CLIENT_SECRET, etc.).
+# `secretRef`. Use this for sensitive values (RODER_OIDC_CLIENT_SECRET, etc.).
 # Example:
 #   envFrom:
 #     - configMapRef:
@@ -34,16 +36,16 @@ envFrom: []
 
 # Additional, non-sensitive environment variables. Each entry is a
 # `{name, value}` pair. The roder app reads its own env — at minimum set
-# BASE_URL, OIDC_ISSUER_URL, OIDC_CLIENT_ID, and (optionally) OIDC_ALLOWED_GROUPS.
+# RODER_BASE_URL, RODER_OIDC_ISSUER_URL, RODER_OIDC_CLIENT_ID, and (optionally) RODER_OIDC_ALLOWED_GROUPS.
 # Example:
 #   env:
-#     - name: BASE_URL
+#     - name: RODER_BASE_URL
 #       value: "https://roder.example.com"
-#     - name: OIDC_ISSUER_URL
+#     - name: RODER_OIDC_ISSUER_URL
 #       value: "https://accounts.google.com"
-#     - name: OIDC_CLIENT_ID
+#     - name: RODER_OIDC_CLIENT_ID
 #       value: "abc.apps.googleusercontent.com"
-#     - name: OIDC_ALLOWED_GROUPS
+#     - name: RODER_OIDC_ALLOWED_GROUPS
 #       value: "admins,developers"   # Comma-separated; empty = any authenticated user
 env: []
 

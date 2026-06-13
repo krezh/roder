@@ -82,6 +82,10 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 base64 = "0.22"
 rand = { version = "0.10", optional = true }
+# Stateless session cookie: AES-256-GCM seal of the token set, keyed by
+# RODER_SESSION_KEY, so a session survives roder being restarted/rescheduled.
+aes-gcm = { version = "0.10", optional = true }
+time = { version = "0.3", optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
 tokio-stream = { version = "0.1", features = ["sync"], optional = true }
 futures = { version = "0.3", optional = true }
@@ -109,6 +113,18 @@ web-sys = { version = "0.3", features = [
     "TransitionEvent",
     "DomRect",
 ], optional = true }
+
+# Native (server) binary only — target-gated out of the wasm/hydrate build, and
+# behind the off-by-default `jemalloc` feature so it isn't pulled in for local
+# `cargo leptos watch` / clippy. tikv-jemalloc-sys builds jemalloc from C source,
+# which doesn't compile on a NixOS host; the production image (full glibc
+# toolchain) enables it via `cargo leptos build --bin-features ssr,jemalloc`.
+# jemalloc cuts RSS and fragmentation dramatically versus glibc malloc for
+# roder's long-lived, watch-heavy allocation pattern, and (with the decay tuning
+# in `_RJEM_MALLOC_CONF`, see Dockerfile) returns freed pages to the OS promptly
+# after a relist spike instead of holding them as resident.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tikv-jemallocator = { version = "0.6", optional = true }
 
 [dev-dependencies]
 time = "0.3"
@@ -143,7 +159,13 @@ ssr = [
     "dep:rustls",
     "dep:tokio-stream",
     "dep:futures",
+    "dep:aes-gcm",
+    "dep:time",
 ]
+# Use jemalloc for the server allocator. Off by default (jemalloc builds from C
+# source and won't compile on a NixOS dev host); enabled only in the production
+# image via `cargo leptos build --bin-features ssr,jemalloc`.
+jemalloc = ["dep:tikv-jemallocator"]
 
 [package.metadata.leptos]
 output-name = "roder"

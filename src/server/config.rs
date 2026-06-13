@@ -12,6 +12,11 @@ pub struct ServerConfig {
     pub base_url: String,
     /// OIDC settings (None in dev mode).
     pub oidc: Option<OidcSettings>,
+    /// 32-byte key (from `RODER_SESSION_KEY`) used to seal the stateless session
+    /// cookie. `None` in dev mode (auth is bypassed). Required in production so
+    /// sessions survive a restart/reschedule — without a *stable* key across
+    /// instances, every sealed cookie would be undecryptable after a restart.
+    pub session_key: Option<[u8; 32]>,
 }
 
 #[derive(Debug, Clone)]
@@ -32,7 +37,7 @@ impl ServerConfig {
             Ok("1") | Ok("true") | Ok("yes")
         );
 
-        let base_url = std::env::var("BASE_URL")
+        let base_url = std::env::var("RODER_BASE_URL")
             .unwrap_or_else(|_| "http://0.0.0.0:8080".to_string())
             .trim_end_matches('/')
             .to_string();
@@ -42,18 +47,21 @@ impl ServerConfig {
                 dev_mode,
                 base_url,
                 oidc: None,
+                session_key: None,
             });
         }
 
+        let session_key = Some(parse_session_key(&require_env("RODER_SESSION_KEY")?)?);
+
         let oidc = OidcSettings {
-            issuer_url: require_env("OIDC_ISSUER_URL")?,
-            client_id: require_env("OIDC_CLIENT_ID")?,
-            client_secret: require_env("OIDC_CLIENT_SECRET")?,
-            allowed_groups: std::env::var("OIDC_ALLOWED_GROUPS")
+            issuer_url: require_env("RODER_OIDC_ISSUER_URL")?,
+            client_id: require_env("RODER_OIDC_CLIENT_ID")?,
+            client_secret: require_env("RODER_OIDC_CLIENT_SECRET")?,
+            allowed_groups: std::env::var("RODER_OIDC_ALLOWED_GROUPS")
                 .ok()
                 .map(|s| split_csv(&s))
                 .unwrap_or_default(),
-            groups_claim: std::env::var("OIDC_GROUPS_CLAIM")
+            groups_claim: std::env::var("RODER_OIDC_GROUPS_CLAIM")
                 .unwrap_or_else(|_| "groups".to_string()),
         };
 
@@ -61,6 +69,7 @@ impl ServerConfig {
             dev_mode,
             base_url,
             oidc: Some(oidc),
+            session_key,
         })
     }
 
@@ -90,6 +99,36 @@ impl ServerConfig {
 
 fn require_env(key: &str) -> Result<String, String> {
     std::env::var(key).map_err(|_| format!("missing required env var {key}"))
+}
+
+/// Parse `RODER_SESSION_KEY` into exactly 32 bytes. Accepts 64-char hex or
+/// base64 (standard or URL-safe). Generate one with e.g.
+/// `openssl rand -hex 32` or `head -c32 /dev/urandom | base64`.
+fn parse_session_key(s: &str) -> Result<[u8; 32], String> {
+    use base64::Engine;
+    let s = s.trim();
+    let bytes: Vec<u8> = if s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()) {
+        (0..32)
+            .map(|i| u8::from_str_radix(&s[i * 2..i * 2 + 2], 16))
+            .collect::<Result<_, _>>()
+            .map_err(|e| format!("invalid hex RODER_SESSION_KEY: {e}"))?
+    } else {
+        base64::engine::general_purpose::STANDARD
+            .decode(s)
+            .or_else(|_| base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(s))
+            .map_err(|_| {
+                "RODER_SESSION_KEY must be 32 bytes encoded as hex or base64".to_string()
+            })?
+    };
+    if bytes.len() != 32 {
+        return Err(format!(
+            "RODER_SESSION_KEY must decode to 32 bytes, got {}",
+            bytes.len()
+        ));
+    }
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&bytes);
+    Ok(key)
 }
 
 fn split_csv(s: &str) -> Vec<String> {
@@ -140,18 +179,24 @@ mod tests {
     fn prod_env() -> EnvGuard {
         let g = EnvGuard::new(&[
             "RODER_DEV_MODE",
-            "BASE_URL",
-            "OIDC_ISSUER_URL",
-            "OIDC_CLIENT_ID",
-            "OIDC_CLIENT_SECRET",
-            "OIDC_ALLOWED_GROUPS",
-            "OIDC_GROUPS_CLAIM",
+            "RODER_BASE_URL",
+            "RODER_OIDC_ISSUER_URL",
+            "RODER_OIDC_CLIENT_ID",
+            "RODER_OIDC_CLIENT_SECRET",
+            "RODER_OIDC_ALLOWED_GROUPS",
+            "RODER_OIDC_GROUPS_CLAIM",
+            "RODER_SESSION_KEY",
         ]);
         g.unset("RODER_DEV_MODE");
-        g.set("BASE_URL", "https://roder.example.com");
-        g.set("OIDC_ISSUER_URL", "https://accounts.google.com");
-        g.set("OIDC_CLIENT_ID", "client-123");
-        g.set("OIDC_CLIENT_SECRET", "secret-abc");
+        g.set("RODER_BASE_URL", "https://roder.example.com");
+        g.set("RODER_OIDC_ISSUER_URL", "https://accounts.google.com");
+        g.set("RODER_OIDC_CLIENT_ID", "client-123");
+        g.set("RODER_OIDC_CLIENT_SECRET", "secret-abc");
+        // 64 hex chars = 32 bytes.
+        g.set(
+            "RODER_SESSION_KEY",
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        );
         g
     }
 
@@ -162,14 +207,14 @@ mod tests {
     fn from_env_dev_mode_bypasses_oidc() {
         let g = EnvGuard::new(&[
             "RODER_DEV_MODE",
-            "OIDC_ISSUER_URL",
-            "OIDC_CLIENT_ID",
-            "OIDC_CLIENT_SECRET",
+            "RODER_OIDC_ISSUER_URL",
+            "RODER_OIDC_CLIENT_ID",
+            "RODER_OIDC_CLIENT_SECRET",
         ]);
         g.set("RODER_DEV_MODE", "1");
-        g.unset("OIDC_ISSUER_URL");
-        g.unset("OIDC_CLIENT_ID");
-        g.unset("OIDC_CLIENT_SECRET");
+        g.unset("RODER_OIDC_ISSUER_URL");
+        g.unset("RODER_OIDC_CLIENT_ID");
+        g.unset("RODER_OIDC_CLIENT_SECRET");
 
         let cfg = ServerConfig::from_env().expect("dev mode should not require OIDC vars");
         assert!(cfg.dev_mode);
@@ -201,38 +246,68 @@ mod tests {
 
     #[test]
     #[serial]
+    fn from_env_requires_session_key() {
+        let g = prod_env();
+        g.unset("RODER_SESSION_KEY");
+        let err = ServerConfig::from_env().unwrap_err();
+        assert!(err.contains("RODER_SESSION_KEY"), "got: {err}");
+    }
+
+    #[test]
+    #[serial]
+    fn from_env_rejects_short_session_key() {
+        let g = prod_env();
+        g.set("RODER_SESSION_KEY", "tooshort");
+        let err = ServerConfig::from_env().unwrap_err();
+        assert!(err.contains("RODER_SESSION_KEY"), "got: {err}");
+    }
+
+    #[test]
+    #[serial]
+    fn from_env_accepts_base64_session_key() {
+        use base64::Engine;
+        let key = [7u8; 32];
+        let encoded = base64::engine::general_purpose::STANDARD.encode(key);
+        let g = prod_env();
+        g.set("RODER_SESSION_KEY", &encoded);
+        let cfg = ServerConfig::from_env().expect("valid base64 key");
+        assert_eq!(cfg.session_key, Some(key));
+    }
+
+    #[test]
+    #[serial]
     fn from_env_requires_issuer_url() {
         let g = prod_env();
-        g.unset("OIDC_ISSUER_URL");
+        g.unset("RODER_OIDC_ISSUER_URL");
         let err = ServerConfig::from_env().unwrap_err();
-        assert!(err.contains("OIDC_ISSUER_URL"), "got: {err}");
+        assert!(err.contains("RODER_OIDC_ISSUER_URL"), "got: {err}");
     }
 
     #[test]
     #[serial]
     fn from_env_requires_client_id() {
         let g = prod_env();
-        g.unset("OIDC_CLIENT_ID");
+        g.unset("RODER_OIDC_CLIENT_ID");
         let err = ServerConfig::from_env().unwrap_err();
-        assert!(err.contains("OIDC_CLIENT_ID"), "got: {err}");
+        assert!(err.contains("RODER_OIDC_CLIENT_ID"), "got: {err}");
     }
 
     #[test]
     #[serial]
     fn from_env_requires_client_secret() {
         let g = prod_env();
-        g.unset("OIDC_CLIENT_SECRET");
+        g.unset("RODER_OIDC_CLIENT_SECRET");
         let err = ServerConfig::from_env().unwrap_err();
-        assert!(err.contains("OIDC_CLIENT_SECRET"), "got: {err}");
+        assert!(err.contains("RODER_OIDC_CLIENT_SECRET"), "got: {err}");
     }
 
-    // -------- BASE_URL handling --------
+    // -------- RODER_BASE_URL handling --------
 
     #[test]
     #[serial]
     fn from_env_strips_trailing_slash_from_base_url() {
         let g = prod_env();
-        g.set("BASE_URL", "https://roder.example.com/");
+        g.set("RODER_BASE_URL", "https://roder.example.com/");
         let cfg = ServerConfig::from_env().unwrap();
         assert_eq!(cfg.base_url, "https://roder.example.com");
         assert_eq!(
@@ -245,7 +320,7 @@ mod tests {
     #[serial]
     fn from_env_strips_multiple_trailing_slashes() {
         let g = prod_env();
-        g.set("BASE_URL", "https://roder.example.com///");
+        g.set("RODER_BASE_URL", "https://roder.example.com///");
         let cfg = ServerConfig::from_env().unwrap();
         // trim_end_matches('/') strips all trailing slashes — bare host remains.
         assert_eq!(cfg.base_url, "https://roder.example.com");
@@ -255,7 +330,7 @@ mod tests {
     #[serial]
     fn from_env_defaults_base_url() {
         let g = prod_env();
-        g.unset("BASE_URL");
+        g.unset("RODER_BASE_URL");
         let cfg = ServerConfig::from_env().unwrap();
         assert_eq!(cfg.base_url, "http://0.0.0.0:8080");
         assert_eq!(cfg.redirect_url(), "http://0.0.0.0:8080/auth/callback");
@@ -265,7 +340,7 @@ mod tests {
     #[serial]
     fn from_env_base_url_with_path_preserved() {
         let g = prod_env();
-        g.set("BASE_URL", "https://example.com/roder");
+        g.set("RODER_BASE_URL", "https://example.com/roder");
         let cfg = ServerConfig::from_env().unwrap();
         assert_eq!(cfg.base_url, "https://example.com/roder");
         // NOTE: trim_end_matches('/') only strips trailing slashes, not the
@@ -283,7 +358,7 @@ mod tests {
     #[serial]
     fn from_env_parses_allowed_groups_as_csv() {
         let g = prod_env();
-        g.set("OIDC_ALLOWED_GROUPS", "admins, devs , ,operators");
+        g.set("RODER_OIDC_ALLOWED_GROUPS", "admins, devs , ,operators");
         let cfg = ServerConfig::from_env().unwrap();
         let o = cfg.oidc.unwrap();
         assert_eq!(o.allowed_groups, vec!["admins", "devs", "operators"]);
@@ -293,7 +368,7 @@ mod tests {
     #[serial]
     fn from_env_empty_allowed_groups_means_open() {
         let g = prod_env();
-        g.unset("OIDC_ALLOWED_GROUPS");
+        g.unset("RODER_OIDC_ALLOWED_GROUPS");
         let cfg = ServerConfig::from_env().unwrap();
         let o = cfg.oidc.unwrap();
         assert!(o.allowed_groups.is_empty());
@@ -303,7 +378,7 @@ mod tests {
     #[serial]
     fn from_env_defaults_groups_claim() {
         let g = prod_env();
-        g.unset("OIDC_GROUPS_CLAIM");
+        g.unset("RODER_OIDC_GROUPS_CLAIM");
         let cfg = ServerConfig::from_env().unwrap();
         let o = cfg.oidc.unwrap();
         assert_eq!(o.groups_claim, "groups");
@@ -313,7 +388,7 @@ mod tests {
     #[serial]
     fn from_env_uses_custom_groups_claim() {
         let g = prod_env();
-        g.set("OIDC_GROUPS_CLAIM", "roles");
+        g.set("RODER_OIDC_GROUPS_CLAIM", "roles");
         let cfg = ServerConfig::from_env().unwrap();
         let o = cfg.oidc.unwrap();
         assert_eq!(o.groups_claim, "roles");
@@ -323,9 +398,9 @@ mod tests {
     #[serial]
     fn from_env_propagates_oidc_settings() {
         let g = prod_env();
-        g.set("OIDC_ISSUER_URL", "https://login.example.com");
-        g.set("OIDC_CLIENT_ID", "my-client");
-        g.set("OIDC_CLIENT_SECRET", "my-secret");
+        g.set("RODER_OIDC_ISSUER_URL", "https://login.example.com");
+        g.set("RODER_OIDC_CLIENT_ID", "my-client");
+        g.set("RODER_OIDC_CLIENT_SECRET", "my-secret");
         let cfg = ServerConfig::from_env().unwrap();
         let o = cfg.oidc.unwrap();
         assert_eq!(o.issuer_url, "https://login.example.com");
@@ -348,7 +423,7 @@ mod tests {
     #[serial]
     fn oidc_config_uses_redirect_url() {
         let g = prod_env();
-        g.set("BASE_URL", "https://r.example.com");
+        g.set("RODER_BASE_URL", "https://r.example.com");
         let cfg = ServerConfig::from_env().unwrap();
         let oc = cfg.oidc_config();
         assert_eq!(oc.redirect_url, "https://r.example.com/auth/callback");

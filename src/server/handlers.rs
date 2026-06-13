@@ -1,17 +1,17 @@
 use std::sync::Arc;
-use std::time::Instant;
 
 use axum::extract::{Query, Request, State};
 use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::middleware::Next;
 use axum::response::{AppendHeaders, IntoResponse, Redirect, Response};
 use axum::Json;
-use roder_auth::{AuthError, Identity};
+use roder_auth::{AuthError, Identity, Tokens};
 use roder_k8s::Backend;
 use serde::Deserialize;
 
 use super::session::{
-    cookie_value, random_id, set_cookie, PendingLogin, Session, LOGIN_COOKIE, SESSION_COOKIE,
+    cookie_value, open_pending, open_session, seal_pending, seal_session, set_cookie, PendingLogin,
+    LOGIN_COOKIE, SESSION_COOKIE,
 };
 use super::AppState;
 
@@ -85,54 +85,152 @@ pub async fn security_headers(State(state): State<AppState>, req: Request, next:
     resp
 }
 
-/// Middleware: require a valid session for app pages and `/api/*`. Unauthenticated
-/// browser requests are redirected to `/auth/login`; API requests get 401.
+/// Middleware: require a valid session for app pages and `/api/*`. The session
+/// lives entirely in the sealed `roder_session` cookie (no server-side store),
+/// so it survives roder being restarted/rescheduled: we decrypt the cookie,
+/// (re)establish the cluster backend, refresh the token if it's near expiry, and
+/// re-seal the — possibly rotated — token set back into the cookie. Unauthorized
+/// browser requests redirect to `/auth/login`; API requests get 401.
 pub async fn require_auth(State(state): State<AppState>, req: Request, next: Next) -> Response {
     if state.config.dev_mode {
         return next.run(req).await;
     }
 
-    if let Some(sid) = cookie_value(req.headers(), SESSION_COOKIE) {
-        if state.sessions.contains(&sid).await {
-            return next.run(req).await;
+    let is_api = req.uri().path().starts_with("/api/");
+    let reject = || -> Response {
+        if is_api {
+            StatusCode::UNAUTHORIZED.into_response()
+        } else {
+            Redirect::to("/auth/login").into_response()
         }
-    }
+    };
 
-    if req.uri().path().starts_with("/api/") {
-        StatusCode::UNAUTHORIZED.into_response()
-    } else {
-        Redirect::to("/auth/login").into_response()
+    let key = match state.config.session_key {
+        Some(k) => k,
+        None => return reject(),
+    };
+    let Some(cookie) = cookie_value(req.headers(), SESSION_COOKIE) else {
+        return reject();
+    };
+    let Some(cookie_tokens) = open_session(&cookie, &key) else {
+        return reject();
+    };
+
+    // Ensure the backend is live and the token is fresh (refreshing on the way
+    // through), yielding the token set to re-seal.
+    let fresh = match ensure_session(&state, cookie_tokens).await {
+        Ok(t) => t,
+        Err(()) => return reject(),
+    };
+
+    let mut resp = next.run(req).await;
+    let sealed = seal_session(&fresh, &key);
+    if let Ok(v) = HeaderValue::from_str(&set_cookie(
+        SESSION_COOKIE,
+        &sealed,
+        state.config.secure_cookies(),
+        604_800,
+    )) {
+        resp.headers_mut().append(header::SET_COOKIE, v);
     }
+    resp
 }
 
-/// Begin the OIDC auth-code flow: stash CSRF/nonce/PKCE and redirect to the IdP.
+/// Make the request's session usable: ensure the shared cluster backend exists
+/// and carries a non-expired token, refreshing via the IdP when needed. Returns
+/// the live token set (post-refresh) to re-seal into the cookie. Refreshes are
+/// single-flighted so concurrent requests don't each spend (and rotate away)
+/// the refresh token.
+async fn ensure_session(state: &AppState, cookie_tokens: Tokens) -> Result<Tokens, ()> {
+    // Prefer the in-memory token set (it's the most recently refreshed); fall
+    // back to the cookie's after a restart, when `current` is empty.
+    let working = {
+        let cur = state.current.read().await;
+        cur.clone().unwrap_or(cookie_tokens)
+    };
+
+    if working.needs_refresh() {
+        let _guard = state.refresh_lock.lock().await;
+        // Re-check under the lock: another request may have just refreshed.
+        if let Some(c) = state.current.read().await.clone() {
+            if !c.needs_refresh() {
+                ensure_backend(state, &c.id_token).await;
+                return Ok(c);
+            }
+        }
+        // The token is unusable without a successful refresh — these failures
+        // do reject (→ re-login).
+        let provider = state.provider.clone().ok_or(())?;
+        let rt = working.refresh_token.clone().ok_or(())?;
+        let refreshed = provider.refresh(rt).await.map_err(|_| ())?;
+        ensure_backend(state, &refreshed.id_token).await;
+        *state.current.write().await = Some(refreshed.clone());
+        return Ok(refreshed);
+    }
+
+    // `provider.is_some()` is always true for a real (non-dev) server — it just
+    // keeps us from attempting cluster I/O when there's no provider wired up.
+    if state.provider.is_some() {
+        ensure_backend(state, &working.id_token).await;
+    }
+    // Adopt the cookie's tokens as the live set if we didn't have one.
+    {
+        let mut cur = state.current.write().await;
+        if cur.is_none() {
+            *cur = Some(working.clone());
+        }
+    }
+    Ok(working)
+}
+
+/// Ensure the shared backend exists and uses `id_token`, building it on first
+/// use (e.g. the first authenticated request after a restart). Best-effort: a
+/// cluster that's briefly unreachable must not log the user out — the session
+/// is still valid, and the API handlers already surface "not connected" (503)
+/// until the backend comes up. Returns whether the backend is now ready, which
+/// the login callback uses to report a hard connect failure immediately.
+async fn ensure_backend(state: &AppState, id_token: &str) -> bool {
+    if let Some(backend) = state.backend.read().await.as_ref() {
+        let _ = backend.set_token(id_token);
+        return true;
+    }
+    let new_backend = match Backend::connect_with_token(id_token).await {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::warn!("failed to (re)connect cluster backend: {e}");
+            return false;
+        }
+    };
+    let mut lock = state.backend.write().await;
+    match lock.as_ref() {
+        Some(existing) => {
+            let _ = existing.set_token(id_token);
+        }
+        None => *lock = Some(Arc::new(new_backend)),
+    }
+    true
+}
+
+/// Begin the OIDC auth-code flow. The CSRF/nonce/PKCE state is sealed into the
+/// `roder_login` cookie (not a server-side store), so the callback can recover
+/// it on any replica and after a restart.
 pub async fn login(State(state): State<AppState>) -> Response {
     let Some(provider) = state.provider.clone() else {
         // Dev mode: nothing to log into.
         return Redirect::to("/").into_response();
     };
+    let Some(key) = state.config.session_key else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "missing session key").into_response();
+    };
 
     let start = provider.begin_login();
-    let pending_id = random_id();
-    state
-        .pending
-        .insert(
-            pending_id.clone(),
-            PendingLogin {
-                csrf_state: start.csrf_state,
-                nonce: start.nonce,
-                pkce_verifier: start.pkce_verifier,
-                created: Instant::now(),
-            },
-        )
-        .await;
-
-    let cookie = set_cookie(
-        LOGIN_COOKIE,
-        &pending_id,
-        state.config.secure_cookies(),
-        600,
-    );
+    let pending = PendingLogin {
+        csrf_state: start.csrf_state,
+        nonce: start.nonce,
+        pkce_verifier: start.pkce_verifier,
+    };
+    let sealed = seal_pending(&pending, &key, 600);
+    let cookie = set_cookie(LOGIN_COOKIE, &sealed, state.config.secure_cookies(), 600);
     (
         [(header::SET_COOKIE, cookie)],
         Redirect::to(&start.authorize_url),
@@ -164,10 +262,13 @@ pub async fn callback(
         return (StatusCode::BAD_REQUEST, format!("OIDC error: {err} {desc}")).into_response();
     }
 
-    let Some(pending_id) = cookie_value(&headers, LOGIN_COOKIE) else {
+    let Some(key) = state.config.session_key else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "missing session key").into_response();
+    };
+    let Some(login_cookie) = cookie_value(&headers, LOGIN_COOKIE) else {
         return (StatusCode::BAD_REQUEST, "missing login cookie").into_response();
     };
-    let Some(pending) = state.pending.take(&pending_id).await else {
+    let Some(pending) = open_pending(&login_cookie, &key) else {
         return (StatusCode::BAD_REQUEST, "unknown or expired login").into_response();
     };
 
@@ -181,27 +282,22 @@ pub async fn callback(
                 .await
             {
                 Ok(tokens) => {
-                    if let Err(resp) = establish_cluster(&state, &tokens.id_token).await {
-                        return resp;
-                    }
-                    let sid = random_id();
-                    state
-                        .sessions
-                        .insert(
-                            sid.clone(),
-                            Session {
-                                identity: tokens.identity.clone(),
-                                tokens,
-                            },
+                    if !ensure_backend(&state, &tokens.id_token).await {
+                        return (
+                            StatusCode::BAD_GATEWAY,
+                            "connected to OIDC but failed to reach the cluster",
                         )
-                        .await;
+                            .into_response();
+                    }
+                    let sealed = seal_session(&tokens, &key);
+                    *state.current.write().await = Some(tokens);
 
                     let secure = state.config.secure_cookies();
                     (
                         AppendHeaders([
                             (
                                 header::SET_COOKIE,
-                                set_cookie(SESSION_COOKIE, &sid, secure, 604800),
+                                set_cookie(SESSION_COOKIE, &sealed, secure, 604_800),
                             ),
                             (header::SET_COOKIE, set_cookie(LOGIN_COOKIE, "", secure, 0)),
                         ]),
@@ -221,16 +317,16 @@ pub async fn callback(
     }
 }
 
-/// Clear the session and return to login.
-pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Some(sid) = cookie_value(&headers, SESSION_COOKIE) {
-        state.sessions.remove(&sid).await;
-    }
+/// Clear the live session and the cookie, then return to login.
+pub async fn logout(State(state): State<AppState>, _headers: HeaderMap) -> Response {
+    *state.current.write().await = None;
     let cookie = set_cookie(SESSION_COOKIE, "", state.config.secure_cookies(), 0);
     ([(header::SET_COOKIE, cookie)], Redirect::to("/auth/login")).into_response()
 }
 
-/// Who am I — used by the UI to show the signed-in identity.
+/// Who am I — used by the UI to show the signed-in identity. `require_auth` has
+/// already validated/refreshed the session, so the identity is in `current`;
+/// fall back to decrypting the cookie directly just in case.
 pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if state.config.dev_mode {
         return Json(Identity {
@@ -242,45 +338,19 @@ pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Response {
         .into_response();
     }
 
-    match cookie_value(&headers, SESSION_COOKIE) {
-        Some(sid) => match state.sessions.get(&sid).await {
-            Some(session) => Json(session.identity).into_response(),
+    if let Some(tokens) = state.current.read().await.as_ref() {
+        return Json(tokens.identity.clone()).into_response();
+    }
+    match (
+        state.config.session_key,
+        cookie_value(&headers, SESSION_COOKIE),
+    ) {
+        (Some(key), Some(cookie)) => match open_session(&cookie, &key) {
+            Some(tokens) => Json(tokens.identity).into_response(),
             None => StatusCode::UNAUTHORIZED.into_response(),
         },
-        None => StatusCode::UNAUTHORIZED.into_response(),
+        _ => StatusCode::UNAUTHORIZED.into_response(),
     }
-}
-
-/// Connect (or reconnect) the cluster backend using the passthrough ID token.
-async fn establish_cluster(state: &AppState, id_token: &str) -> Result<(), Response> {
-    // Fast path: an existing backend only needs its token swapped.
-    if let Some(backend) = state.backend.read().await.as_ref() {
-        if backend.set_token(id_token).is_ok() {
-            return Ok(());
-        }
-    }
-    // Slow path: no backend yet. Build it outside the write lock so that
-    // other readers are not blocked during the (potentially slow) cluster probe.
-    let new_backend = match Backend::connect_with_token(id_token).await {
-        Ok(b) => Arc::new(b),
-        Err(e) => {
-            return Err((
-                StatusCode::BAD_GATEWAY,
-                format!("connected to OIDC but failed to reach the cluster: {e}"),
-            )
-                .into_response());
-        }
-    };
-    // Re-check under the write lock to close the TOCTOU window: if another
-    // concurrent login raced us and already wrote a backend, update its token
-    // instead of overwriting it with a potentially different identity.
-    let mut lock = state.backend.write().await;
-    if let Some(existing) = lock.as_ref() {
-        let _ = existing.set_token(id_token);
-    } else {
-        *lock = Some(new_backend);
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -298,7 +368,6 @@ mod tests {
 
     use super::*;
     use crate::server::config::ServerConfig;
-    use crate::server::session::{PendingStore, SessionStore};
     use axum::body::Body;
     use axum::http::header::SET_COOKIE;
     use axum::middleware::from_fn_with_state;
@@ -308,16 +377,19 @@ mod tests {
     use roder_auth::Identity;
     use std::sync::Arc;
     use time::OffsetDateTime;
-    use tokio::sync::RwLock;
+    use tokio::sync::{Mutex, RwLock};
     use tower::ServiceExt;
 
     // -------- helpers --------
+
+    const TEST_KEY: [u8; 32] = [7u8; 32];
 
     fn dev_config() -> Arc<ServerConfig> {
         Arc::new(ServerConfig {
             dev_mode: true,
             base_url: "http://localhost:8080".into(),
             oidc: None,
+            session_key: None,
         })
     }
 
@@ -332,32 +404,41 @@ mod tests {
                 allowed_groups: vec![],
                 groups_claim: "groups".into(),
             }),
+            session_key: Some(TEST_KEY),
         })
     }
 
-    /// Build a dev-mode `AppState` with empty session/pending stores.
-    fn dev_state() -> AppState {
+    fn empty_state(config: Arc<ServerConfig>) -> AppState {
         AppState {
             leptos_options: empty_leptos_options(),
-            config: dev_config(),
+            config,
             provider: None,
-            sessions: Arc::new(SessionStore::default()),
-            pending: Arc::new(PendingStore::default()),
             backend: Arc::new(RwLock::new(None)),
+            current: Arc::new(RwLock::new(None)),
+            refresh_lock: Arc::new(Mutex::new(())),
         }
+    }
+
+    /// Build a dev-mode `AppState`.
+    fn dev_state() -> AppState {
+        empty_state(dev_config())
     }
 
     /// Build a production `AppState` (no real `provider` — tests that don't
     /// need the OIDC exchange just pass through with `provider: None`).
     fn prod_state_without_provider() -> AppState {
-        AppState {
-            leptos_options: empty_leptos_options(),
-            config: prod_config(),
-            provider: None,
-            sessions: Arc::new(SessionStore::default()),
-            pending: Arc::new(PendingStore::default()),
-            backend: Arc::new(RwLock::new(None)),
-        }
+        empty_state(prod_config())
+    }
+
+    /// A `Cookie:` header carrying a validly-sealed session for `tokens`.
+    fn sealed_cookie_header(tokens: &roder_auth::Tokens) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        let sealed = seal_session(tokens, &TEST_KEY);
+        headers.insert(
+            header::COOKIE,
+            HeaderValue::from_str(&format!("{SESSION_COOKIE}={sealed}")).unwrap(),
+        );
+        headers
     }
 
     /// `LeptosOptions` has no public `Default` and is `#[non_exhaustive]`, so
@@ -520,32 +601,11 @@ mod tests {
 
     #[tokio::test]
     async fn logout_clears_session_cookie_and_redirects_to_login() {
-        let state = dev_state();
-        // Plant a session so we can verify it's removed.
-        let sid = "sid-to-remove".to_string();
-        state
-            .sessions
-            .insert(
-                sid.clone(),
-                Session {
-                    identity: Identity {
-                        subject: "sub".into(),
-                        email: None,
-                        name: None,
-                        groups: vec![],
-                    },
-                    tokens: fake_tokens(),
-                },
-            )
-            .await;
+        let state = prod_state_without_provider();
+        // Plant a live session so we can verify it's cleared.
+        *state.current.write().await = Some(fake_tokens());
 
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::COOKIE,
-            HeaderValue::from_str(&format!("{SESSION_COOKIE}={sid}")).unwrap(),
-        );
-
-        let res = logout(State(state.clone()), headers).await;
+        let res = logout(State(state.clone()), HeaderMap::new()).await;
         assert_eq!(res.status(), StatusCode::SEE_OTHER);
         assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/auth/login");
 
@@ -562,8 +622,8 @@ mod tests {
         );
         assert!(cookies[0].contains("Max-Age=0"));
 
-        // Server-side store should no longer have the session.
-        assert!(!state.sessions.contains(&sid).await);
+        // The live session must be gone.
+        assert!(state.current.read().await.is_none());
     }
 
     #[tokio::test]
@@ -597,6 +657,7 @@ mod tests {
     #[tokio::test]
     async fn me_production_with_unknown_session_returns_401() {
         let state = prod_state_without_provider();
+        // A cookie that doesn't decrypt under our key (no live session either).
         let mut headers = HeaderMap::new();
         headers.insert(
             header::COOKIE,
@@ -609,30 +670,12 @@ mod tests {
     #[tokio::test]
     async fn me_production_with_valid_session_returns_identity() {
         let state = prod_state_without_provider();
-        let sid = "valid-sid".to_string();
-        state
-            .sessions
-            .insert(
-                sid.clone(),
-                Session {
-                    identity: Identity {
-                        subject: "user-42".into(),
-                        email: Some("user@x".into()),
-                        name: Some("User Forty-Two".into()),
-                        groups: vec!["g".into()],
-                    },
-                    tokens: fake_tokens(),
-                },
-            )
-            .await;
+        let mut tokens = fake_tokens();
+        tokens.identity.subject = "user-42".into();
+        tokens.identity.name = Some("User Forty-Two".into());
 
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::COOKIE,
-            HeaderValue::from_str(&format!("{SESSION_COOKIE}={sid}")).unwrap(),
-        );
-
-        let res = me(State(state), headers).await;
+        // No live session in memory: `me` must fall back to opening the cookie.
+        let res = me(State(state), sealed_cookie_header(&tokens)).await;
         assert_eq!(res.status(), StatusCode::OK);
         let body = axum::body::to_bytes(res.into_body(), 4096).await.unwrap();
         let id: Identity = serde_json::from_slice(&body).unwrap();
@@ -700,30 +743,18 @@ mod tests {
 
     #[tokio::test]
     async fn require_auth_production_with_valid_session_passes() {
+        // A fresh, validly-sealed cookie passes even with no cluster backend:
+        // backend establishment is best-effort, so an unreachable cluster does
+        // not log the user out (the API handlers surface 503 instead).
         let state = prod_state_without_provider();
-        let sid = "good-sid".to_string();
-        state
-            .sessions
-            .insert(
-                sid.clone(),
-                Session {
-                    identity: Identity {
-                        subject: "u".into(),
-                        email: None,
-                        name: None,
-                        groups: vec![],
-                    },
-                    tokens: fake_tokens(),
-                },
-            )
-            .await;
+        let sealed = seal_session(&fake_tokens(), &TEST_KEY);
 
         let app = make_protected_app(state);
         let res = app
             .oneshot(
                 Request::builder()
                     .uri("/protected")
-                    .header(header::COOKIE, format!("{SESSION_COOKIE}={sid}"))
+                    .header(header::COOKIE, format!("{SESSION_COOKIE}={sealed}"))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -734,7 +765,7 @@ mod tests {
 
     #[tokio::test]
     async fn require_auth_production_with_unknown_session_redirects() {
-        // Cookie present but the session store has never seen this id.
+        // Cookie present but it doesn't decrypt under our key (forged/garbage).
         let app = make_protected_app(prod_state_without_provider());
         let res = app
             .oneshot(

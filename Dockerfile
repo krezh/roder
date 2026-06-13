@@ -32,10 +32,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/app/target,sharing=locked \
     export LEPTOS_ENV=PROD LEPTOS_SITE_ROOT=/app/site-out && \
     if [ "$RELEASE" = "true" ]; then \
-        cargo leptos build --release \
+        cargo leptos build --release --bin-features ssr,jemalloc \
         && cp /app/target/release/roder /app/roder-bin; \
     else \
-        cargo leptos build \
+        cargo leptos build --bin-features ssr,jemalloc \
         && cp /app/target/debug/roder /app/roder-bin; \
     fi
 
@@ -49,7 +49,12 @@ COPY --from=build /app/site-out /app/site
 ENV LEPTOS_SITE_ROOT=/app/site \
     LEPTOS_SITE_PKG_DIR=pkg \
     LEPTOS_SITE_ADDR=0.0.0.0:8080 \
-    RUST_LOG=info
+    RUST_LOG=info \
+    # jemalloc tuning (tikv-jemallocator reads the _RJEM_-prefixed var): a
+    # background thread purges dirty/muzzy pages back to the OS on a short decay
+    # so RSS drops promptly after a watch relist spike instead of staying
+    # resident — the behaviour that was tripping the container memory limit.
+    _RJEM_MALLOC_CONF=background_thread:true,dirty_decay_ms:5000,muzzy_decay_ms:5000
 
 EXPOSE 8080
 USER 65532

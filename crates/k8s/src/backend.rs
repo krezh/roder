@@ -836,7 +836,10 @@ fn spawn_crd_watch(
         loop {
             let client = (*cluster.client()).clone();
             let api: Api<CustomResourceDefinition> = Api::all(client);
-            let stream = watcher::watcher(api, watcher::Config::default());
+            // Metadata-only watch: we just need to know a CRD changed, not its
+            // (potentially megabyte) schema — so this never deserializes the
+            // heavy CRD bodies. The actual column harvest is `printer_columns::load`.
+            let stream = watcher::metadata_watcher(api, watcher::Config::default());
             futures::pin_mut!(stream);
             while let Some(event) = stream.next().await {
                 if let Err(e) = event {

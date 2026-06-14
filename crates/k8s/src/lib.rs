@@ -14,6 +14,9 @@ mod metrics;
 mod printer_columns;
 mod project;
 
+#[cfg(test)]
+mod test_alloc;
+
 pub use backend::Backend;
 pub use client::{ClusterAccess, K8sError};
 pub use informers::WatchHandle;

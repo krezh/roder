@@ -4,11 +4,14 @@
 //! evaluate the jsonPaths against objects already in the informer cache — so any
 //! CRD gets meaningful columns
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
-use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use kube::api::{Api, ListParams};
-use kube::Client;
+use kube::core::ClusterResourceScope;
+use kube::{Client, Resource};
+use serde::Deserialize;
 use serde_json::Value;
 
 /// One declared printer column from a CRD.
@@ -31,47 +34,133 @@ pub fn cols_for<'a>(map: &'a ColumnMap, group: &str, kind: &str) -> &'a [Printer
         .unwrap_or(&[])
 }
 
+/// A `CustomResourceDefinition` deserialized *without* its
+/// `spec.versions[].schema` (the OpenAPI validation schema). That schema is by
+/// far the largest part of a CRD — Rook/Ceph and Prometheus-operator ones run to
+/// megabytes — and deserializing it into the recursive `JSONSchemaProps` tree
+/// spikes memory on startup (the in-memory form is many times the JSON size). We
+/// only need the printer columns, so we drop the schema on the floor simply by
+/// never declaring the field; serde skips it instead of allocating it.
+#[derive(Clone, Debug, Default, Deserialize)]
+struct CrdLite {
+    #[serde(default)]
+    metadata: ObjectMeta,
+    #[serde(default)]
+    spec: CrdLiteSpec,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct CrdLiteSpec {
+    #[serde(default)]
+    group: String,
+    #[serde(default)]
+    names: CrdLiteNames,
+    #[serde(default)]
+    versions: Vec<CrdLiteVersion>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct CrdLiteNames {
+    #[serde(default)]
+    kind: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CrdLiteVersion {
+    #[serde(default)]
+    served: bool,
+    #[serde(default)]
+    storage: bool,
+    #[serde(default)]
+    additional_printer_columns: Vec<CrdLiteCol>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CrdLiteCol {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    json_path: String,
+    #[serde(default, rename = "type")]
+    type_: String,
+}
+
+// Hand-rolled `Resource` so `Api<CrdLite>` lists CRDs via the right URL while
+// deserializing into the lightweight type above.
+impl Resource for CrdLite {
+    type DynamicType = ();
+    type Scope = ClusterResourceScope;
+    fn kind(_: &()) -> Cow<'_, str> {
+        "CustomResourceDefinition".into()
+    }
+    fn group(_: &()) -> Cow<'_, str> {
+        "apiextensions.k8s.io".into()
+    }
+    fn version(_: &()) -> Cow<'_, str> {
+        "v1".into()
+    }
+    fn plural(_: &()) -> Cow<'_, str> {
+        "customresourcedefinitions".into()
+    }
+    fn meta(&self) -> &ObjectMeta {
+        &self.metadata
+    }
+    fn meta_mut(&mut self) -> &mut ObjectMeta {
+        &mut self.metadata
+    }
+}
+
 /// Fetch every CRD and index its served printer columns by (group, kind). We keep
 /// `priority > 0` ("wide") columns — k9s shows them by default, unlike `kubectl get`
 /// — and only drop the redundant Age column (roder renders Age itself). A failure
 /// (e.g. no RBAC to list CRDs) just yields an empty map → hand-written columns only.
 pub async fn load(client: &Client) -> ColumnMap {
-    let api: Api<CustomResourceDefinition> = Api::all(client.clone());
-    let crds = match api.list(&ListParams::default()).await {
-        Ok(l) => l.items,
-        Err(e) => {
-            tracing::debug!("CRD printer-column load skipped: {e}");
-            return ColumnMap::new();
-        }
-    };
-
+    let api: Api<CrdLite> = Api::all(client.clone());
     let mut map = ColumnMap::new();
-    for crd in crds {
-        let group = crd.spec.group;
-        let kind = crd.spec.names.kind;
-        // Prefer the storage version's columns; fall back to the first served one.
-        let version = crd
-            .spec
-            .versions
-            .iter()
-            .find(|v| v.storage)
-            .or_else(|| crd.spec.versions.iter().find(|v| v.served));
-        let Some(version) = version else { continue };
-        let Some(defs) = &version.additional_printer_columns else {
-            continue;
+    // Page the list: a cluster can have hundreds of CRDs and the full response
+    // body runs to tens of MB. CrdLite already drops the (huge) schemas from the
+    // *parsed* structs; paging also bounds the transient *response* body to one
+    // page rather than holding all of them at once.
+    let mut params = ListParams::default().limit(50);
+    loop {
+        let list = match api.list(&params).await {
+            Ok(l) => l,
+            Err(e) => {
+                tracing::debug!("CRD printer-column load skipped: {e}");
+                break;
+            }
         };
+        for crd in list.items {
+            let group = crd.spec.group;
+            let kind = crd.spec.names.kind;
+            // Prefer the storage version's columns; fall back to first served.
+            let version = crd
+                .spec
+                .versions
+                .iter()
+                .find(|v| v.storage)
+                .or_else(|| crd.spec.versions.iter().find(|v| v.served));
+            let Some(version) = version else { continue };
 
-        let cols: Vec<PrinterCol> = defs
-            .iter()
-            .filter(|c| !c.name.eq_ignore_ascii_case("age"))
-            .map(|c| PrinterCol {
-                name: c.name.clone(),
-                json_path: c.json_path.clone(),
-                col_type: c.type_.clone(),
-            })
-            .collect();
-        if !cols.is_empty() {
-            map.insert((group, kind), cols);
+            let cols: Vec<PrinterCol> = version
+                .additional_printer_columns
+                .iter()
+                .filter(|c| !c.name.eq_ignore_ascii_case("age"))
+                .map(|c| PrinterCol {
+                    name: c.name.clone(),
+                    json_path: c.json_path.clone(),
+                    col_type: c.type_.clone(),
+                })
+                .collect();
+            if !cols.is_empty() {
+                map.insert((group, kind), cols);
+            }
+        }
+        match list.metadata.continue_ {
+            Some(token) if !token.is_empty() => params = params.continue_token(&token),
+            _ => break,
         }
     }
     map
@@ -231,8 +320,102 @@ fn render_scalar(v: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::eval;
+    use super::{eval, CrdLite};
+    use crate::test_alloc::min_delta;
+    use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
     use serde_json::json;
+
+    /// One CRD object: tiny `additionalPrinterColumns`, but a large
+    /// `schema.openAPIV3Schema` — mirroring real operators (Rook, Prometheus,
+    /// Crunchy postgres) whose schemas dwarf everything else.
+    fn crd_value(idx: usize, schema_props: usize) -> serde_json::Value {
+        let mut props = serde_json::Map::new();
+        for i in 0..schema_props {
+            props.insert(
+                format!("field{i}"),
+                json!({ "type": "string", "description": "some documentation ".repeat(8) }),
+            );
+        }
+        json!({
+            "apiVersion": "apiextensions.k8s.io/v1",
+            "kind": "CustomResourceDefinition",
+            "metadata": { "name": format!("widget{idx}s.example.com") },
+            "spec": {
+                "group": format!("g{idx}.example.com"),
+                "scope": "Namespaced",
+                "names": { "kind": format!("Widget{idx}"), "plural": format!("widget{idx}s") },
+                "versions": [{
+                    "name": "v1",
+                    "served": true,
+                    "storage": true,
+                    "additionalPrinterColumns": [
+                        { "name": "Phase", "type": "string", "jsonPath": ".status.phase" },
+                        { "name": "Age", "type": "date", "jsonPath": ".metadata.creationTimestamp" }
+                    ],
+                    "schema": { "openAPIV3Schema": {
+                        "type": "object",
+                        "properties": { "spec": { "type": "object", "properties": props } }
+                    }}
+                }]
+            }
+        })
+    }
+
+    /// A `CustomResourceDefinitionList` of `n` big-schema CRDs — the shape the
+    /// apiserver returns to `load()`, and what actually spiked memory: every
+    /// schema deserialised into a `JSONSchemaProps` tree at once.
+    fn crd_list_json(n: usize, schema_props: usize) -> String {
+        let items: Vec<_> = (0..n).map(|i| crd_value(i, schema_props)).collect();
+        json!({
+            "apiVersion": "apiextensions.k8s.io/v1",
+            "kind": "CustomResourceDefinitionList",
+            "items": items,
+        })
+        .to_string()
+    }
+
+    /// Minimal list wrapper so a CRD-list JSON deserialises into `Vec<T>` for any
+    /// `T` (the full CRD or `CrdLite`) — mirroring what `Api::list` does.
+    #[derive(serde::Deserialize)]
+    struct TestList<T> {
+        items: Vec<T>,
+    }
+
+    #[test]
+    fn crdlite_parses_columns_and_skips_the_schema() {
+        let json = crd_value(0, 800).to_string();
+        let lite: CrdLite = serde_json::from_str(&json).unwrap();
+        assert_eq!(lite.spec.group, "g0.example.com");
+        assert_eq!(lite.spec.names.kind, "Widget0");
+        let names: Vec<&str> = lite.spec.versions[0]
+            .additional_printer_columns
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
+        assert_eq!(names, ["Phase", "Age"]);
+    }
+
+    #[test]
+    fn crdlite_list_is_far_lighter_than_full_at_scale() {
+        // Hundreds of CRDs arrive in one list response; deserialising them all
+        // into the recursive `JSONSchemaProps` tree is the >300MB startup spike
+        // (the in-memory tree is many× the JSON). Dropping the schema (CrdLite)
+        // lets the whole list parse for a fraction. A wide margin keeps it robust
+        // against parallel-test allocation noise.
+        let json = crd_list_json(60, 400);
+        // Sanity: the lite list deserialises every item (schema dropped, columns kept).
+        let parsed: TestList<CrdLite> = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.items.len(), 60);
+
+        let full = min_delta(|| {
+            serde_json::from_str::<TestList<CustomResourceDefinition>>(&json).unwrap()
+        });
+        let lite = min_delta(|| serde_json::from_str::<TestList<CrdLite>>(&json).unwrap());
+        assert!(
+            lite.saturating_mul(10) < full,
+            "CrdLite list should allocate <1/10 of the full list: lite={lite} full={full}"
+        );
+    }
 
     #[test]
     fn dot_path() {

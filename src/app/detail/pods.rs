@@ -53,7 +53,7 @@ pub(crate) fn PodsTab(namespace: String, selector: String) -> impl IntoView {
     let removing = RwSignal::new(std::collections::BTreeSet::<String>::new());
 
     let ns = namespace.clone();
-    use_sse_subscription(rows, entering, removing, move || {
+    use_sse_subscription(rows, entering, removing, None, move || {
         rows.set(std::collections::HashMap::new());
         let pk = pod_kind.get()?;
         Some(data::watch_url(&pk.key, Some(&ns), Some(&selector)))

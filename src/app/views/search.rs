@@ -253,11 +253,20 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                             // Snapshot replaces the whole kind: mirror the full rebuild
                             // (otherwise the per-kind buffer's safety-net timeouts for
                             // deletes would orphan entries in the parent).
-                            Snapshot { rows: r } => {
+                            Snapshot { columns, rows: r } => {
                                 if let Some(c) = conn {
                                     c.set(true);
                                 }
-                                apply_event(kr, ent, rm, Snapshot { rows: r.clone() });
+                                apply_event(
+                                    kr,
+                                    ent,
+                                    rm,
+                                    None,
+                                    Snapshot {
+                                        columns,
+                                        rows: r.clone(),
+                                    },
+                                );
                                 mr.update(|m| {
                                     m.retain(|k, _| !k.starts_with(&pfx));
                                     for row in r {
@@ -274,7 +283,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                             }
                             // Applied upserts a single row — no full rebuild needed.
                             Applied { row } => {
-                                apply_event(kr, ent, rm, Applied { row: row.clone() });
+                                apply_event(kr, ent, rm, None, Applied { row: row.clone() });
                                 let merged_key = format!("{}{}", pfx, row.uid);
                                 mr.update(|m| {
                                     m.insert(
@@ -290,7 +299,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                             // `apply_event` already tags it in `removing`; mirror that
                             // tagging for the parent's row.
                             Deleted { uid } => {
-                                apply_event(kr, ent, rm, Deleted { uid: uid.clone() });
+                                apply_event(kr, ent, rm, None, Deleted { uid: uid.clone() });
                                 let merged_key = format!("{}{}", pfx, uid);
                                 rm.update(|s| {
                                     s.insert(merged_key);

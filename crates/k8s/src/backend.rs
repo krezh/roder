@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use std::pin::Pin;
 
+use arc_swap::ArcSwap;
 use futures::future::join_all;
 use futures::io::AsyncBufReadExt;
 use futures::{Stream, StreamExt};
@@ -10,9 +12,11 @@ use k8s_openapi::api::authorization::v1::{
     ResourceAttributes, SelfSubjectAccessReview, SelfSubjectAccessReviewSpec,
 };
 use k8s_openapi::api::core::v1::{Event, Namespace, Node, Pod};
+use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
 use kube::api::{
     Api, DeleteParams, DynamicObject, ListParams, LogParams, Patch, PatchParams, PostParams,
 };
+use kube::runtime::watcher;
 use roder_core::{
     Category, ClusterOverview, HealthRollup, MetricsPoint, NodeSummary, ObjectDetail, ObjectEvent,
     ResourceKind,
@@ -25,14 +29,31 @@ use crate::informers::{InformerRegistry, WatchHandle};
 use crate::metrics::{node_usage, parse_cpu, parse_mem};
 use crate::project::ts_string;
 
+/// The resource catalog, hot-swapped when CRDs change so newly-installed
+/// operators appear (and removed ones disappear) without restarting roder.
+struct CatalogData {
+    entries: Vec<CatalogEntry>,
+    by_key: HashMap<String, CatalogEntry>,
+}
+
+impl CatalogData {
+    fn new(entries: Vec<CatalogEntry>) -> Self {
+        let by_key = entries
+            .iter()
+            .map(|e| (e.kind.key.clone(), e.clone()))
+            .collect();
+        Self { entries, by_key }
+    }
+}
+
 type CanCacheKey = (String, String, Option<String>);
 
 /// The server-side façade over a connected cluster: the token-passthrough client,
 /// the discovered resource catalog, and the shared-informer registry.
 pub struct Backend {
     cluster: Arc<ClusterAccess>,
-    catalog: Vec<CatalogEntry>,
-    by_key: HashMap<String, CatalogEntry>,
+    /// Hot-swappable catalog (entries + by-key index), rebuilt by the CRD watch.
+    catalog: Arc<ArcSwap<CatalogData>>,
     registry: Arc<InformerRegistry>,
     /// Short-lived cache so rapid (re)connects don't each re-LIST the cluster.
     /// RwLock allows concurrent reads when the cache is fresh.
@@ -55,19 +76,19 @@ impl Backend {
 
     async fn build(cluster: Arc<ClusterAccess>) -> Result<Self, K8sError> {
         let client = cluster.client();
-        // Harvest CRD-declared printer columns once; shared by the catalog (headers)
+        // Harvest CRD-declared printer columns; shared by the catalog (headers)
         // and the informers (cell projection). Empty if CRDs aren't listable.
         let columns = Arc::new(crate::printer_columns::load(&client).await);
-        let catalog = build_catalog(&client, &columns).await?;
-        let by_key = catalog
-            .iter()
-            .map(|e| (e.kind.key.clone(), e.clone()))
-            .collect();
+        let entries = build_catalog(&client, &columns).await?;
+        let catalog = Arc::new(ArcSwap::from_pointee(CatalogData::new(entries)));
         let registry = InformerRegistry::new(cluster.clone(), columns);
+        // Keep the catalog + columns live: watch CRDs and rebuild on change, so
+        // new operators show up and changed printer columns reflow without a
+        // restart (active tables re-render in place).
+        spawn_crd_watch(cluster.clone(), registry.clone(), catalog.clone());
         Ok(Self {
             cluster,
             catalog,
-            by_key,
             registry,
             overview_cache: tokio::sync::RwLock::new(None),
             can_cache: tokio::sync::RwLock::new(HashMap::new()),
@@ -86,7 +107,12 @@ impl Backend {
 
     /// The browsable resource catalog as surfaced to the UI.
     pub fn kinds(&self) -> Vec<ResourceKind> {
-        self.catalog.iter().map(|e| e.kind.clone()).collect()
+        self.catalog
+            .load()
+            .entries
+            .iter()
+            .map(|e| e.kind.clone())
+            .collect()
     }
 
     pub async fn namespaces(&self) -> Result<Vec<String>, K8sError> {
@@ -132,7 +158,7 @@ impl Backend {
         let mut obj = match self.registry.cached_object(key, namespace, name).await {
             Some(o) => o,
             None => {
-                let entry = self.entry(key)?.clone();
+                let entry = self.entry(key)?;
                 let api: Api<DynamicObject> = make_api(
                     self.client(),
                     &entry.api_resource,
@@ -336,8 +362,9 @@ impl Backend {
     /// dashboard overview doesn't accumulate per-kind latency.
     async fn rollup(&self, category: Category) -> HealthRollup {
         let client = self.client();
-        let futs = self
-            .catalog
+        let catalog = self.catalog.load();
+        let futs = catalog
+            .entries
             .iter()
             .filter(|e| e.kind.category == category)
             .map(|entry| {
@@ -760,9 +787,14 @@ impl Backend {
         allowed
     }
 
-    fn entry(&self, key: &str) -> Result<&CatalogEntry, K8sError> {
-        self.by_key
+    /// Look up a catalog entry by key. Returns an owned clone because the catalog
+    /// is hot-swappable (the `ArcSwap` guard is only valid transiently).
+    fn entry(&self, key: &str) -> Result<CatalogEntry, K8sError> {
+        self.catalog
+            .load()
+            .by_key
             .get(key)
+            .cloned()
             .ok_or_else(|| K8sError::Api(format!("unknown resource kind: {key}")))
     }
 }
@@ -770,6 +802,59 @@ impl Backend {
 /// Map any displayable error into a generic `K8sError::Api`.
 fn api_err<E: std::fmt::Display>(e: E) -> K8sError {
     K8sError::Api(e.to_string())
+}
+
+/// Re-discover the catalog and re-harvest CRD printer columns, swapping both in
+/// and asking the registry to re-project any active informer whose columns
+/// changed. Best-effort: a failed rebuild leaves the previous catalog in place.
+async fn rebuild_catalog(
+    cluster: &Arc<ClusterAccess>,
+    registry: &Arc<InformerRegistry>,
+    catalog: &Arc<ArcSwap<CatalogData>>,
+) {
+    let client = (*cluster.client()).clone();
+    let columns = Arc::new(crate::printer_columns::load(&client).await);
+    match build_catalog(&client, &columns).await {
+        Ok(entries) => {
+            catalog.store(Arc::new(CatalogData::new(entries)));
+            registry.refresh_columns(columns).await;
+            tracing::debug!("catalog + printer columns refreshed after CRD change");
+        }
+        Err(e) => tracing::debug!("catalog refresh skipped: {e}"),
+    }
+}
+
+/// Watch `CustomResourceDefinition`s and rebuild the catalog/columns on change,
+/// so new operators appear and changed printer columns reflow live — no restart.
+/// Events are debounced (operators often churn CRDs in bursts) into one rebuild.
+fn spawn_crd_watch(
+    cluster: Arc<ClusterAccess>,
+    registry: Arc<InformerRegistry>,
+    catalog: Arc<ArcSwap<CatalogData>>,
+) {
+    tokio::spawn(async move {
+        loop {
+            let client = (*cluster.client()).clone();
+            let api: Api<CustomResourceDefinition> = Api::all(client);
+            let stream = watcher::watcher(api, watcher::Config::default());
+            futures::pin_mut!(stream);
+            while let Some(event) = stream.next().await {
+                if let Err(e) = event {
+                    tracing::debug!("CRD watch error (self-healing): {e}");
+                    continue;
+                }
+                // Coalesce a burst of CRD events: keep draining until the stream
+                // goes quiet for 2s, then rebuild once.
+                while let Ok(Some(_)) =
+                    tokio::time::timeout(Duration::from_secs(2), stream.next()).await
+                {
+                }
+                rebuild_catalog(&cluster, &registry, &catalog).await;
+            }
+            // Stream ended; pause before rebuilding the CRD watch.
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+    });
 }
 
 fn now_rfc3339() -> String {

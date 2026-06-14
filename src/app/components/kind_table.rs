@@ -140,10 +140,16 @@ pub(crate) fn KindTable(
     let ns_list =
         ns_filter.and_then(|_| use_context::<LocalResource<Result<Vec<String>, String>>>());
 
+    // Live column headers: seeded from the catalog, then updated by each snapshot
+    // so the table reflows in place when a CRD's printer columns change. (In
+    // `rows_override`/workspace mode there's no own subscription, so it stays at
+    // the catalog value.)
+    let columns: RwSignal<Vec<String>> = RwSignal::new(kind.columns.clone());
+
     if let Some(ext) = rows_override {
         Effect::new(move |_| t.rows.set(ext.get()));
     } else {
-        use_sse_subscription(t.rows, t.entering, t.removing, move || {
+        use_sse_subscription(t.rows, t.entering, t.removing, Some(columns), move || {
             t.rows.set(Default::default());
             t.selected.set(Default::default());
             t.last_clicked.set(None);
@@ -197,34 +203,40 @@ pub(crate) fn KindTable(
 
     let window = table_window(t, shown_uids);
 
-    // Per-kind column metadata derived once on mount.
-    let cols = kind.columns.clone();
+    // Column metadata derived *reactively* from the live `columns` signal, so the
+    // table reflows in place when a CRD's printer columns change.
     let namespaced = kind.namespaced;
     let key = kind.key.clone();
     let title = kind.kind.clone();
     let is_pod_kind = kind.group.is_empty() && kind.kind == "Pod";
-    let node_col = cols.iter().position(|c| c == "Node");
-    let colored_cols = StoredValue::new(
-        cols.iter()
+    let node_col = Memo::new(move |_| columns.get().iter().position(|c| c == "Node"));
+    let colored_cols = Memo::new(move |_| {
+        columns
+            .get()
+            .iter()
             .enumerate()
             .filter(|(_, c)| matches!(c.as_str(), "Phase" | "Status" | "Ready"))
             .map(|(i, _)| i)
-            .collect::<Vec<usize>>(),
-    );
-    let bool_cols = StoredValue::new(
-        cols.iter()
+            .collect::<Vec<usize>>()
+    });
+    let bool_cols = Memo::new(move |_| {
+        columns
+            .get()
+            .iter()
             .enumerate()
             .filter(|(_, c)| matches!(c.as_str(), "Mount"))
             .map(|(i, _)| i)
-            .collect::<Vec<usize>>(),
-    );
-    let metric_cols = StoredValue::new(
-        cols.iter()
+            .collect::<Vec<usize>>()
+    });
+    let metric_cols = Memo::new(move |_| {
+        columns
+            .get()
+            .iter()
             .enumerate()
             .filter(|(_, c)| c.starts_with("CPU") || c.starts_with("MEM") || c.starts_with("%"))
             .map(|(i, _)| i)
-            .collect::<Vec<usize>>(),
-    );
+            .collect::<Vec<usize>>()
+    });
     let kk = KindKind::new(&kind.group, &kind.kind);
     let bulk_workload = kk.is_workload();
     let bulk_flux = kk.is_flux();
@@ -258,24 +270,29 @@ pub(crate) fn KindTable(
         selected.set(std::collections::BTreeSet::new());
     };
 
-    let n_tracks = cols.len() + 2 + usize::from(namespaced);
-    let tmpl = format!(
-        "grid-template-columns: {};",
-        vec!["max-content"; n_tracks].join(" ")
-    );
+    // Grid track count follows the live column count, so the grid reflows when
+    // columns change.
+    let tmpl = move || {
+        let n = columns.get().len() + 2 + usize::from(namespaced);
+        format!(
+            "grid-template-columns: {};",
+            vec!["max-content"; n].join(" ")
+        )
+    };
     let sizer: RwSignal<Vec<String>> = RwSignal::new(Vec::new());
     {
-        let cols_sz = cols.clone();
         Effect::new(move |_| {
             let _ = shown_uids.with(|v| v.len());
-            let ncells = cols_sz.len();
+            let cols_now = columns.get();
+            let n_tracks = cols_now.len() + 2 + usize::from(namespaced);
+            let ncells = cols_now.len();
             let mut ns_max = if namespaced {
                 "Namespace".to_string()
             } else {
                 String::new()
             };
             let mut name_max = "Name".to_string();
-            let mut cell_maxes: Vec<String> = cols_sz.clone();
+            let mut cell_maxes: Vec<String> = cols_now.clone();
             rows.with_untracked(|m| {
                 for r in m.values() {
                     if namespaced {
@@ -305,13 +322,13 @@ pub(crate) fn KindTable(
         });
     }
 
-    let header = {
-        let cols = cols.clone();
+    // Reactive header: the per-column `<th>`s follow the live `columns` signal.
+    let header = move || {
         view! {
             <div class="grid-row head">
                 {namespaced.then(|| sortable_th("Namespace".to_string(), SortKey::Namespace, sort))}
                 {sortable_th("Name".to_string(), SortKey::Name, sort)}
-                {cols.iter().enumerate().map(|(i, c)| sortable_th(c.clone(), SortKey::Cell(i), sort)).collect_view()}
+                {columns.get().into_iter().enumerate().map(|(i, c)| sortable_th(c, SortKey::Cell(i), sort)).collect_view()}
                 {sortable_th("Age".to_string(), SortKey::Age, sort)}
             </div>
         }
@@ -409,16 +426,24 @@ pub(crate) fn KindTable(
                         format!("grid-column:1/-1;height:{}px", window.get().0 as f64 * row_h.get())
                     }></div>
                     <For
+                        // Key includes the live column count so a CRD column
+                        // change remounts the visible rows — their cell count
+                        // then matches the reflowed header (never misaligned).
                         each=move || {
+                            let ncols = columns.with(|c| c.len());
                             let (first, last) = window.get();
-                            shown_uids.with(|v| v.get(first..last).map(<[String]>::to_vec).unwrap_or_default())
+                            shown_uids
+                                .with(|v| v.get(first..last).map(<[String]>::to_vec).unwrap_or_default())
+                                .into_iter()
+                                .map(move |uid| (ncols, uid))
+                                .collect::<Vec<_>>()
                         }
-                        key=|uid| uid.clone()
-                        let:uid
+                        key=|item| item.clone()
+                        let:item
                     >
                         {
+                            let (ncols, uid) = item;
                             let key = key.clone();
-                            let ncols = cols.len();
                             let uid_row = uid.clone();
                             let row = Memo::new(move |_| rows.with(|m| m.get(&uid_row).cloned()));
 
@@ -454,7 +479,7 @@ pub(crate) fn KindTable(
                                 let r = row;
                                 move || {
                                     if is_pod_kind {
-                                        node_col.and_then(|i| r.get().and_then(|rr| rr.cells.get(i).cloned()))
+                                        node_col.get_untracked().and_then(|i| r.get().and_then(|rr| rr.cells.get(i).cloned()))
                                     } else {
                                         None
                                     }
@@ -499,16 +524,16 @@ pub(crate) fn KindTable(
                                         let val = move || row.get().and_then(|r| r.cells.get(i).cloned()).unwrap_or_default();
                                         let trend_sig = Signal::derive(move || row.get().and_then(|r| r.trends.get(i).copied()).unwrap_or(roder_core::Trend::None));
                                         let flash = Signal::derive(move || flash_bits.get() & (1u64 << (i + 1)) != 0);
-                                        if bool_cols.with_value(|v| v.contains(&i)) {
+                                        if bool_cols.with_untracked(|v| v.contains(&i)) {
                                             view! { <FlashTd value=val no_flash=true
                                                 color=Signal::derive(move || match val().as_str() {
                                                     "true" => "ok",
                                                     "false" => "warn",
                                                     _ => "unknown",
                                                 }) /> }.into_any()
-                                        } else if metric_cols.with_value(|v| v.contains(&i)) {
+                                        } else if metric_cols.with_untracked(|v| v.contains(&i)) {
                                             view! { <FlashTd value=val no_flash=true trend=trend_sig /> }.into_any()
-                                        } else if colored_cols.with_value(|v| v.contains(&i)) {
+                                        } else if colored_cols.with_untracked(|v| v.contains(&i)) {
                                             view! { <FlashTd value=val flash=flash
                                                 color=Signal::derive(move || dot_class(row.get().map(|r| r.status).unwrap_or(RowStatus::Unknown))) /> }.into_any()
                                         } else {

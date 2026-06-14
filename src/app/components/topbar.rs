@@ -145,7 +145,7 @@ fn FailingBadge() -> impl IntoView {
     let entering = RwSignal::new(std::collections::BTreeSet::<String>::new());
     let removing = RwSignal::new(std::collections::BTreeSet::<String>::new());
 
-    use_sse_subscription(rows, entering, removing, move || {
+    use_sse_subscription(rows, entering, removing, None, move || {
         let pk = pod_kind.get()?;
         Some(data::watch_url(&pk.key, None, None))
     });

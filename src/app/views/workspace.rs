@@ -47,7 +47,9 @@ pub(crate) fn WorkspaceView() -> impl IntoView {
                 pane_rows.with_value(|map| {
                     if let Some(&rows) = map.get(&key) {
                         match event {
-                            WatchEvent::Snapshot { rows: r } => {
+                            // Workspace panes keep their catalog headers, so the
+                            // snapshot's columns aren't tracked here.
+                            WatchEvent::Snapshot { rows: r, .. } => {
                                 rows.set(r.into_iter().map(|row| (row.uid.clone(), row)).collect());
                             }
                             WatchEvent::Applied { row } => {

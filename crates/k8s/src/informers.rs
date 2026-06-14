@@ -2,17 +2,18 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use arc_swap::ArcSwap;
 use futures::StreamExt;
 use kube::api::{Api, DynamicObject};
 use kube::core::ApiResource;
 use kube::runtime::watcher::{self, Event};
 use roder_core::{MetricsPoint, ResourceRow, Trend, WatchEvent};
-use tokio::sync::{broadcast, Mutex, RwLock};
+use tokio::sync::{broadcast, Mutex, Notify, RwLock};
 
 use crate::client::{make_api, ClusterAccess};
 use crate::metrics::PvcUsage;
 use crate::printer_columns::{self, ColumnMap, PrinterCol};
-use crate::project::project_row;
+use crate::project::{columns_for, project_row};
 
 /// Broadcast backlog per informer. Each slot can hold a full `Snapshot` (every
 /// row), so a deep buffer multiplies memory on busy kinds. Kept modest: when a
@@ -90,6 +91,13 @@ pub(crate) type MetricsHistory = HashMap<String, PodMetricsHistory>;
 type NameKey = (Option<String>, String);
 type NameIndex = Arc<RwLock<HashMap<NameKey, String>>>;
 
+/// Hot-swappable column state shared between the informer task, the registry's
+/// `refresh_columns`, and the `WatchHandle`: the CRD printer columns used to
+/// project cells, and the matching header names. Swapping both atomically when a
+/// CRD changes is what lets an open table reflow its columns live.
+type Crd = Arc<ArcSwap<Vec<PrinterCol>>>;
+type Headers = Arc<ArcSwap<Vec<String>>>;
+
 struct Active {
     tx: broadcast::Sender<WatchEvent>,
     rows: Arc<RwLock<HashMap<String, ResourceRow>>>,
@@ -104,11 +112,21 @@ struct Active {
     /// the detail handler can locate the right cache.
     resource_key: String,
     namespace: Option<String>,
+    /// (group, kind) for re-deriving columns when CRDs change.
+    group: String,
+    kind: String,
     /// Last-seen full objects by uid, so detail is served from cache (and metric
     /// refreshes re-project pods) without an extra apiserver round-trip.
     objects: Arc<RwLock<HashMap<String, DynamicObject>>>,
     /// Secondary index: (namespace, name) → uid for O(1) object lookup by name.
     by_name: NameIndex,
+    /// Hot-swappable printer columns + header names (see [`Crd`]).
+    crd: Crd,
+    headers: Headers,
+    /// Poked by `refresh_columns` to make the task re-list and re-project with the
+    /// freshly-swapped columns (a fresh `Snapshot` down the live channel — the
+    /// client never reconnects).
+    reproject: Arc<Notify>,
 }
 
 /// What a caller gets when subscribing to a live list: the current contents plus
@@ -118,6 +136,9 @@ pub struct WatchHandle {
     pub rx: broadcast::Receiver<WatchEvent>,
     /// Live row cache (used by the SSE handler to send a re-snapshot on broadcast lag).
     pub rows: Arc<RwLock<HashMap<String, ResourceRow>>>,
+    /// Current column headers, hot-swapped on CRD change — read for the initial
+    /// snapshot and any lag-resync so headers always match the rows' cells.
+    pub columns: Headers,
 }
 
 /// Registry of shared informers. One watch per (resource, namespace) is kept on
@@ -132,8 +153,9 @@ pub struct InformerRegistry {
     metrics_history: Arc<RwLock<MetricsHistory>>,
     /// Shared PVC filesystem usage cache, refreshed once for all PVC informers.
     pvc_usage: Arc<RwLock<PvcUsageMap>>,
-    /// CRD-declared printer columns, indexed by (group, kind), for generic rendering.
-    columns: Arc<ColumnMap>,
+    /// CRD-declared printer columns, indexed by (group, kind). Hot-swapped by
+    /// [`InformerRegistry::refresh_columns`] when CRDs change.
+    columns: ArcSwap<ColumnMap>,
 }
 
 impl InformerRegistry {
@@ -144,7 +166,7 @@ impl InformerRegistry {
             pod_usage: Arc::new(RwLock::new(HashMap::new())),
             metrics_history: Arc::new(RwLock::new(HashMap::new())),
             pvc_usage: Arc::new(RwLock::new(PvcUsageMap::default())),
-            columns,
+            columns: ArcSwap::new(columns),
         });
         spawn_reaper(registry.clone());
         spawn_metrics_refresh(registry.clone());
@@ -169,7 +191,9 @@ impl InformerRegistry {
             selector: selector.clone(),
         };
 
-        let crd = printer_columns::cols_for(&self.columns, group, kind).to_vec();
+        let columns = self.columns.load();
+        let columns_map: &ColumnMap = &columns;
+        let crd = printer_columns::cols_for(columns_map, group, kind).to_vec();
         let mut active = self.active.lock().await;
         let entry = active.entry(key.clone()).or_insert_with(|| {
             start_informer(
@@ -194,7 +218,31 @@ impl InformerRegistry {
             snapshot,
             rx,
             rows: entry.rows.clone(),
+            columns: entry.headers.clone(),
         }
+    }
+
+    /// Swap in a freshly-loaded printer-column map (e.g. after a CRD was
+    /// installed or changed) and, for every active informer whose columns
+    /// actually changed, swap its columns and poke it to re-list + re-project.
+    /// The connected clients keep their streams and just receive a new snapshot.
+    pub async fn refresh_columns(&self, new_columns: Arc<ColumnMap>) {
+        // Collect the pokes under the lock (no awaits), then they fire on the
+        // informer tasks asynchronously.
+        let new_map: &ColumnMap = &new_columns;
+        let active = self.active.lock().await;
+        for entry in active.values() {
+            let new_crd = printer_columns::cols_for(new_map, &entry.group, &entry.kind).to_vec();
+            let new_headers = columns_for(&entry.group, &entry.kind, &new_crd);
+            if **entry.headers.load() == new_headers {
+                continue; // columns unchanged for this kind
+            }
+            entry.crd.store(Arc::new(new_crd));
+            entry.headers.store(Arc::new(new_headers));
+            entry.reproject.notify_one();
+        }
+        // Store after comparing so the comparison saw the old per-informer state.
+        self.columns.store(new_columns);
     }
 
     /// Serve an object from a live informer cache (no apiserver round-trip) when one
@@ -257,6 +305,9 @@ fn start_informer(
     let is_pvc = group.is_empty() && kind == "PersistentVolumeClaim";
     let resource_key = format!("{group}/{}/{kind}", ar.version);
     let active_ns = namespace.clone();
+    // Clones for the `Active` record; the originals are moved into the task.
+    let active_group = group.clone();
+    let active_kind = kind.clone();
     let (tx, _rx) = broadcast::channel(CHANNEL_CAP);
     let rows: Arc<RwLock<HashMap<String, ResourceRow>>> = Arc::new(RwLock::new(HashMap::new()));
     let objects: Arc<RwLock<HashMap<String, DynamicObject>>> =
@@ -267,11 +318,21 @@ fn start_informer(
     // would make the reaper start the eviction clock before any subscription.
     let idle_since: Arc<RwLock<Option<Instant>>> = Arc::new(RwLock::new(None));
 
+    // Hot-swappable columns: derive the initial headers from the starting CRD,
+    // then wrap both so `refresh_columns` can swap them and poke `reproject`.
+    let initial_headers = columns_for(&group, &kind, &crd);
+    let crd: Crd = Arc::new(ArcSwap::from_pointee(crd));
+    let headers: Headers = Arc::new(ArcSwap::from_pointee(initial_headers));
+    let reproject = Arc::new(Notify::new());
+
     let task_tx = tx.clone();
     let task_rows = rows.clone();
     let task_objects = objects.clone();
     let task_by_name = by_name.clone();
     let task_pvc_usage = pvc_usage.clone();
+    let task_crd = crd.clone();
+    let task_headers = headers.clone();
+    let task_reproject = reproject.clone();
     // Only pods and PVCs are re-projected from their full object body (live
     // metrics / filesystem usage) — and only those need cached objects for the
     // detail view. For every other kind we keep just the lightweight rows and
@@ -310,88 +371,113 @@ fn start_informer(
 
             // Set when an auth error means we must rebuild with the refreshed client.
             let mut rebuild_for_auth = false;
-            while let Some(event) = stream.next().await {
-                match event {
-                    Ok(Event::Init) => {
-                        building.clear();
-                        building_objs.clear();
-                    }
-                    Ok(Event::InitApply(mut obj)) => {
-                        obj.metadata.managed_fields = None;
-                        let (usage, pvc_u) = enrichments(
-                            &obj,
-                            is_pod,
-                            is_pvc,
-                            &*pod_usage.read().await,
-                            &*task_pvc_usage.read().await,
-                        );
-                        let row = project_row(&group, &kind, &obj, usage, pvc_u, &crd);
-                        if cache_objects {
-                            building_objs.insert(row.uid.clone(), obj);
-                        }
-                        building.insert(row.uid.clone(), row);
-                    }
-                    Ok(Event::InitDone) => {
-                        let rows_vec: Vec<ResourceRow> = building.values().cloned().collect();
-                        // Rebuild the name index from the full init set.
-                        let mut name_idx: HashMap<NameKey, String> = HashMap::new();
-                        if cache_objects {
-                            for (uid, obj) in building_objs.iter() {
-                                name_idx.insert(name_key(obj), uid.clone());
+            // Set when `refresh_columns` poked us to re-list with new columns.
+            let mut reproject_now = false;
+            loop {
+                tokio::select! {
+                    maybe = stream.next() => {
+                        let Some(event) = maybe else { break };
+                        match event {
+                            Ok(Event::Init) => {
+                                building.clear();
+                                building_objs.clear();
+                            }
+                            Ok(Event::InitApply(mut obj)) => {
+                                obj.metadata.managed_fields = None;
+                                let (usage, pvc_u) = enrichments(
+                                    &obj,
+                                    is_pod,
+                                    is_pvc,
+                                    &*pod_usage.read().await,
+                                    &*task_pvc_usage.read().await,
+                                );
+                                let guard = task_crd.load();
+                                let crd_now: &[PrinterCol] = &guard;
+                                let row = project_row(&group, &kind, &obj, usage, pvc_u, crd_now);
+                                if cache_objects {
+                                    building_objs.insert(row.uid.clone(), obj);
+                                }
+                                building.insert(row.uid.clone(), row);
+                            }
+                            Ok(Event::InitDone) => {
+                                let rows_vec: Vec<ResourceRow> = building.values().cloned().collect();
+                                // Rebuild the name index from the full init set.
+                                let mut name_idx: HashMap<NameKey, String> = HashMap::new();
+                                if cache_objects {
+                                    for (uid, obj) in building_objs.iter() {
+                                        name_idx.insert(name_key(obj), uid.clone());
+                                    }
+                                }
+                                *task_rows.write().await = std::mem::take(&mut building);
+                                *task_objects.write().await = std::mem::take(&mut building_objs);
+                                *task_by_name.write().await = name_idx;
+                                let columns = (**task_headers.load()).clone();
+                                let _ = task_tx.send(WatchEvent::Snapshot { columns, rows: rows_vec });
+                                // A completed (re)list means the stream is healthy
+                                // again; reset the rebuild backoff.
+                                backoff_attempt = 0;
+                            }
+                            Ok(Event::Apply(mut obj)) => {
+                                obj.metadata.managed_fields = None;
+                                let (usage, pvc_u) = enrichments(
+                                    &obj,
+                                    is_pod,
+                                    is_pvc,
+                                    &*pod_usage.read().await,
+                                    &*task_pvc_usage.read().await,
+                                );
+                                let guard = task_crd.load();
+                                let crd_now: &[PrinterCol] = &guard;
+                                let row = project_row(&group, &kind, &obj, usage, pvc_u, crd_now);
+                                let uid = row.uid.clone();
+                                if cache_objects {
+                                    let name_k = name_key(&obj);
+                                    task_objects.write().await.insert(uid.clone(), obj);
+                                    task_by_name.write().await.insert(name_k, uid.clone());
+                                }
+                                task_rows.write().await.insert(uid, row.clone());
+                                let _ = task_tx.send(WatchEvent::Applied { row });
+                            }
+                            Ok(Event::Delete(obj)) => {
+                                let guard = task_crd.load();
+                                let crd_now: &[PrinterCol] = &guard;
+                                let row = project_row(&group, &kind, &obj, None, None, crd_now);
+                                task_rows.write().await.remove(&row.uid);
+                                if cache_objects {
+                                    task_objects.write().await.remove(&row.uid);
+                                    task_by_name.write().await.remove(&name_key(&obj));
+                                }
+                                let _ = task_tx.send(WatchEvent::Deleted { uid: row.uid });
+                            }
+                            Err(e) => {
+                                // A 401 means the token rotated: the watcher would
+                                // keep retrying with the stale client forever, so
+                                // break to rebuild with the hot-swapped one. Every
+                                // other error is transient — let the watcher
+                                // self-heal in place (no LIST, no memory spike).
+                                if is_auth_error(&e) {
+                                    tracing::debug!("watch auth error for {group}/{kind}; rebuilding: {e}");
+                                    rebuild_for_auth = true;
+                                    break;
+                                }
+                                tracing::debug!("watch error for {group}/{kind} (self-healing): {e}");
                             }
                         }
-                        *task_rows.write().await = std::mem::take(&mut building);
-                        *task_objects.write().await = std::mem::take(&mut building_objs);
-                        *task_by_name.write().await = name_idx;
-                        let _ = task_tx.send(WatchEvent::Snapshot { rows: rows_vec });
-                        // A completed (re)list means the stream is healthy again;
-                        // reset the rebuild backoff.
-                        backoff_attempt = 0;
                     }
-                    Ok(Event::Apply(mut obj)) => {
-                        obj.metadata.managed_fields = None;
-                        let (usage, pvc_u) = enrichments(
-                            &obj,
-                            is_pod,
-                            is_pvc,
-                            &*pod_usage.read().await,
-                            &*task_pvc_usage.read().await,
-                        );
-                        let row = project_row(&group, &kind, &obj, usage, pvc_u, &crd);
-                        let uid = row.uid.clone();
-                        if cache_objects {
-                            let name_k = name_key(&obj);
-                            task_objects.write().await.insert(uid.clone(), obj);
-                            task_by_name.write().await.insert(name_k, uid.clone());
-                        }
-                        task_rows.write().await.insert(uid, row.clone());
-                        let _ = task_tx.send(WatchEvent::Applied { row });
-                    }
-                    Ok(Event::Delete(obj)) => {
-                        let row = project_row(&group, &kind, &obj, None, None, &crd);
-                        task_rows.write().await.remove(&row.uid);
-                        if cache_objects {
-                            task_objects.write().await.remove(&row.uid);
-                            task_by_name.write().await.remove(&name_key(&obj));
-                        }
-                        let _ = task_tx.send(WatchEvent::Deleted { uid: row.uid });
-                    }
-                    Err(e) => {
-                        // A 401 means the token rotated: the watcher would keep
-                        // retrying with the now-stale client forever, so break to
-                        // rebuild with the hot-swapped one. Every other error is
-                        // transient — let the watcher self-heal in place (no LIST,
-                        // no memory spike).
-                        if is_auth_error(&e) {
-                            tracing::debug!("watch auth error for {group}/{kind}; rebuilding: {e}");
-                            rebuild_for_auth = true;
-                            break;
-                        }
-                        tracing::debug!("watch error for {group}/{kind} (self-healing): {e}");
+                    _ = task_reproject.notified() => {
+                        // Columns changed: tear the watch down and re-list, so the
+                        // next InitDone emits a fresh Snapshot carrying the new
+                        // columns. The clients keep their streams — no reconnect.
+                        reproject_now = true;
+                        break;
                     }
                 }
             }
 
+            // A reproject re-lists immediately — it isn't a failure, so no backoff.
+            if reproject_now {
+                continue;
+            }
             // We only get here on an auth rebuild or (in practice never) a truly
             // ended stream. Back off — exponentially, with jitter, capped — so a
             // sustained outage or token problem doesn't have every informer
@@ -415,8 +501,13 @@ fn start_informer(
         is_pvc,
         resource_key,
         namespace: active_ns,
+        group: active_group,
+        kind: active_kind,
         objects,
         by_name,
+        crd,
+        headers,
+        reproject,
     }
 }
 

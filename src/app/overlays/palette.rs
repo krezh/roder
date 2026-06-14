@@ -402,7 +402,7 @@ pub(crate) fn CommandPalette() -> impl IntoView {
                 data::subscribe_with_error(
                     &url,
                     move |ev| {
-                        apply_event(rows_copy, entering, removing, ev);
+                        apply_event(rows_copy, entering, removing, None, ev);
                         all_rows_copy.update(|ar| {
                             ar.insert(kind_key_inner.clone(), rows_copy.get_untracked());
                         });

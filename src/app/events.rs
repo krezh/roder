@@ -63,10 +63,26 @@ pub(crate) fn range_select(
 }
 
 /// Apply a live `WatchEvent` to the table's row buffer, tagging uids for the
-/// enter/exit animations.
-pub(crate) fn apply_event(rows: RowMap, entering: UidSet, removing: UidSet, ev: WatchEvent) {
+/// enter/exit animations. `columns`, when provided, receives the snapshot's
+/// current column headers so a table reflows its columns live (CRD changes push
+/// a fresh snapshot with new headers + cells together).
+pub(crate) fn apply_event(
+    rows: RowMap,
+    entering: UidSet,
+    removing: UidSet,
+    columns: Option<RwSignal<Vec<String>>>,
+    ev: WatchEvent,
+) {
     match ev {
-        WatchEvent::Snapshot { rows: r } => {
+        WatchEvent::Snapshot {
+            columns: cols,
+            rows: r,
+        } => {
+            if let Some(sig) = columns {
+                if sig.get_untracked() != cols {
+                    sig.set(cols);
+                }
+            }
             entering.set(std::collections::BTreeSet::new());
             removing.set(std::collections::BTreeSet::new());
             rows.set(r.into_iter().map(|row| (row.uid.clone(), row)).collect());

@@ -18,6 +18,7 @@ pub(crate) fn use_sse_subscription(
     rows: RowMap,
     entering: UidSet,
     removing: UidSet,
+    columns: Option<RwSignal<Vec<String>>>,
     url: impl Fn() -> Option<String> + 'static,
 ) {
     // A counter that the error handler bumps to re-trigger the subscription Effect.
@@ -34,7 +35,7 @@ pub(crate) fn use_sse_subscription(
                         c.set(true);
                     }
                 }
-                apply_event(rows, entering, removing, ev)
+                apply_event(rows, entering, removing, columns, ev)
             },
             move || {
                 if let Some(c) = conn {

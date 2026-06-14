@@ -175,6 +175,26 @@ pub fn App() -> impl IntoView {
         }
     });
 
+    // Periodically re-pull the catalog so newly-installed operators (new CRDs)
+    // appear in the sidebar — and removed ones disappear — without a reload. The
+    // server keeps it current via a CRD watch; this just refreshes the client's
+    // copy. (Open tables get their columns live from the watch snapshots, so
+    // this is only for the sidebar's kind list.)
+    Effect::new(move |_| {
+        set_interval(
+            move || {
+                #[cfg(target_arch = "wasm32")]
+                leptos::task::spawn_local(async move {
+                    if let Ok(list) = data::fetch_json::<Vec<ResourceKind>>("/api/resources").await
+                    {
+                        catalog.set(list);
+                    }
+                });
+            },
+            std::time::Duration::from_secs(30),
+        );
+    });
+
     // Persist UI state on change (only after restore, so we don't clobber it).
     Effect::new(move |_| {
         let kind = selected_kind.get();

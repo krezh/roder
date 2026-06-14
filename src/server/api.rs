@@ -105,7 +105,9 @@ pub async fn watch(State(state): State<AppState>, Query(q): Query<WatchQuery>) -
     };
 
     let rows = handle.rows.clone();
+    let columns = handle.columns.clone();
     let snapshot = WatchEvent::Snapshot {
+        columns: (**columns.load()).clone(),
         rows: handle.snapshot,
     };
     let init = tokio_stream::once(to_event(&snapshot));
@@ -114,6 +116,7 @@ pub async fn watch(State(state): State<AppState>, Query(q): Query<WatchQuery>) -
     // dropping deltas.
     let live = BroadcastStream::new(handle.rx).then(move |res| {
         let rows = rows.clone();
+        let columns = columns.clone();
         async move {
             match res {
                 Ok(ev) => to_event(&ev),
@@ -122,6 +125,7 @@ pub async fn watch(State(state): State<AppState>, Query(q): Query<WatchQuery>) -
                     // gets a consistent view instead of silently dropping deltas.
                     let current = rows.read().await;
                     let resync = WatchEvent::Snapshot {
+                        columns: (**columns.load()).clone(),
                         rows: current.values().cloned().collect(),
                     };
                     to_event(&resync)
@@ -178,7 +182,9 @@ pub async fn watch_multi(
             Err(e) => return bad_gateway(e),
         };
         let rows = handle.rows.clone();
+        let columns = handle.columns.clone();
         let snapshot = WatchEvent::Snapshot {
+            columns: (**columns.load()).clone(),
             rows: handle.snapshot,
         };
         let init = tokio_stream::once(to_multi_event(&MultiWatchEvent {
@@ -188,12 +194,14 @@ pub async fn watch_multi(
         let live = BroadcastStream::new(handle.rx).then(move |res| {
             let key = key.clone();
             let rows = rows.clone();
+            let columns = columns.clone();
             async move {
                 let ev = match res {
                     Ok(ev) => ev,
                     Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(_)) => {
                         let current = rows.read().await;
                         WatchEvent::Snapshot {
+                            columns: (**columns.load()).clone(),
                             rows: current.values().cloned().collect(),
                         }
                     }

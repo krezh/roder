@@ -168,8 +168,14 @@ pub struct ResourceRow {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum WatchEvent {
-    /// Full current contents on (re)connect.
-    Snapshot { rows: Vec<ResourceRow> },
+    /// Full current contents on (re)connect, or a re-projection after the kind's
+    /// columns changed. Carries the current column headers so the table renders
+    /// headers and cells from the same message — they can never disagree, and an
+    /// open table reflows live when a CRD's `additionalPrinterColumns` change.
+    Snapshot {
+        columns: Vec<String>,
+        rows: Vec<ResourceRow>,
+    },
     /// A row was added or changed.
     Applied { row: ResourceRow },
     /// A row was removed (by uid).

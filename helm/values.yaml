@@ -15,6 +15,14 @@ serviceAccount:
   annotations: {}
   name: ""
 
+# ClusterRole + binding for roder's ServiceAccount, granting the read-only
+# cluster metadata roder needs at startup: API discovery and read/watch on CRDs
+# (to harvest additionalPrinterColumns once, up front, instead of on first
+# login). Object data is still read with each user's passthrough OIDC token —
+# this ServiceAccount never reads user data. Disable if you manage RBAC yourself.
+rbac:
+  create: true
+
 # Name of the Secret holding the sensitive env vars — at least
 # RODER_OIDC_CLIENT_SECRET and RODER_SESSION_KEY (a stable 32-byte key, hex or
 # base64, that seals the session cookie; sessions are stateless and survive a

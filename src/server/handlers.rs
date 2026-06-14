@@ -192,6 +192,16 @@ async fn ensure_session(state: &AppState, cookie_tokens: Tokens) -> Result<Token
 /// until the backend comes up. Returns whether the backend is now ready, which
 /// the login callback uses to report a hard connect failure immediately.
 async fn ensure_backend(state: &AppState, id_token: &str) -> bool {
+    // Fast path: the backend already exists (normally built once at startup) —
+    // just swap in this request's token.
+    if let Some(backend) = state.backend.read().await.as_ref() {
+        let _ = backend.set_token(id_token);
+        return true;
+    }
+    // Cold path: startup connect failed and the backend isn't up. Single-flight
+    // the (expensive) discovery + CRD load so concurrent/repeated requests don't
+    // each run it and hammer the apiserver.
+    let _guard = state.backend_build_lock.lock().await;
     if let Some(backend) = state.backend.read().await.as_ref() {
         let _ = backend.set_token(id_token);
         return true;
@@ -203,13 +213,7 @@ async fn ensure_backend(state: &AppState, id_token: &str) -> bool {
             return false;
         }
     };
-    let mut lock = state.backend.write().await;
-    match lock.as_ref() {
-        Some(existing) => {
-            let _ = existing.set_token(id_token);
-        }
-        None => *lock = Some(Arc::new(new_backend)),
-    }
+    *state.backend.write().await = Some(Arc::new(new_backend));
     true
 }
 
@@ -418,6 +422,7 @@ mod tests {
             backend: Arc::new(RwLock::new(None)),
             current: Arc::new(RwLock::new(None)),
             refresh_lock: Arc::new(Mutex::new(())),
+            backend_build_lock: Arc::new(Mutex::new(())),
         }
     }
 

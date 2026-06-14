@@ -1,0 +1,33 @@
+{{- if .Values.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "roder.fullname" . }}
+  labels:
+    {{- include "roder.labels" . | nindent 4 }}
+rules:
+  # Discover the API surface (which kinds exist) at startup.
+  - nonResourceURLs: ["/apis", "/apis/*", "/api", "/api/*"]
+    verbs: ["get"]
+  # Read CRDs to harvest additionalPrinterColumns once at startup and watch for
+  # changes. This is cluster *metadata* only — object data is read with each
+  # user's passthrough OIDC token, never with this ServiceAccount.
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "roder.fullname" . }}
+  labels:
+    {{- include "roder.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "roder.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "roder.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

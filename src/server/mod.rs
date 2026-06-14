@@ -34,6 +34,11 @@ pub struct AppState {
     /// Single-flight guard around token refresh so concurrent requests don't
     /// each call the IdP and invalidate one another's rotated refresh token.
     pub refresh_lock: Arc<Mutex<()>>,
+    /// Single-flight guard around (cold) backend construction, so concurrent
+    /// requests can't each run a full discovery + CRD load and hammer the
+    /// apiserver. Normally the backend is already built at startup, so this is
+    /// only contended if the startup connect failed.
+    pub backend_build_lock: Arc<Mutex<()>>,
 }
 
 // Lets Leptos's axum handlers pull `LeptosOptions` out of our custom state.
@@ -59,17 +64,25 @@ pub async fn build_state(leptos_options: LeptosOptions) -> Result<AppState, Stri
         ))
     };
 
+    // Connect at startup so the catalog + CRD printer columns are discovered
+    // ONCE, up front, and cached — not on the first client login, and never
+    // re-loaded per connection (which is what let a client hammer the apiserver).
+    // Dev uses the inferred kubeconfig; prod uses roder's pod ServiceAccount —
+    // the catalog/columns are cluster metadata, so the SA only needs discovery +
+    // read on `customresourcedefinitions`. Actual object reads still go through
+    // each user's passthrough token, swapped into this same client on login.
+    // Best-effort: if the cluster isn't reachable yet, the first request builds it.
     let backend = Arc::new(RwLock::new(None));
-    if config.dev_mode {
-        match Backend::connect_with_default().await {
-            Ok(b) => {
-                tracing::info!(
-                    "dev mode: connected to cluster, {} kinds discovered",
-                    b.kinds().len()
-                );
-                *backend.write().await = Some(Arc::new(b));
-            }
-            Err(e) => tracing::warn!("dev mode: no cluster connection yet: {e}"),
+    match Backend::connect_with_default().await {
+        Ok(b) => {
+            tracing::info!(
+                "connected to cluster at startup, {} kinds discovered",
+                b.kinds().len()
+            );
+            *backend.write().await = Some(Arc::new(b));
+        }
+        Err(e) => {
+            tracing::warn!("no cluster connection at startup (will connect on first request): {e}")
         }
     }
 
@@ -80,5 +93,6 @@ pub async fn build_state(leptos_options: LeptosOptions) -> Result<AppState, Stri
         backend,
         current: Arc::new(RwLock::new(None)),
         refresh_lock: Arc::new(Mutex::new(())),
+        backend_build_lock: Arc::new(Mutex::new(())),
     })
 }

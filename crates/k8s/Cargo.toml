@@ -17,6 +17,9 @@ arc-swap = "1"
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# Faster (SIMD) JSON parsing for the large, hot metrics / kubelet-stats reads —
+# serde-compatible, so it deserializes into the same typed structs.
+sonic-rs = "0.5"
 serde_yaml = "0.9"
 futures = "0.3"
 time = { version = "0.3", features = ["formatting", "parsing"] }

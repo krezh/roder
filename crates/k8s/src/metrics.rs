@@ -4,92 +4,118 @@
 use std::collections::HashMap;
 
 use kube::Client;
-use serde_json::Value;
+use serde::Deserialize;
+
+/// GET `path` and deserialize the body with sonic-rs (SIMD; faster than
+/// serde_json for these large metrics / kubelet-stats payloads), into a typed
+/// `T`. `None` on any error — request build, transport, non-2xx, or parse — so
+/// every caller degrades gracefully (metrics-server absent, RBAC denied, …).
+async fn get_json<T: serde::de::DeserializeOwned>(client: &Client, path: &str) -> Option<T> {
+    let req = http::Request::get(path).body(Vec::new()).ok()?;
+    let body = client.request_text(req).await.ok()?;
+    sonic_rs::from_str(&body).ok()
+}
+
+// Minimal typed views of the responses, so we never materialise the full (large)
+// metrics-server / kubelet-stats JSON into an untyped `serde_json::Value` tree —
+// the kubelet `/stats/summary` is huge. serde skips every field we don't declare.
+
+#[derive(Deserialize)]
+// Override serde's bound inference: `#[serde(default)]` on a generic field would
+// otherwise demand `T: Default`, which the item types don't (and needn't) impl.
+#[serde(bound(deserialize = "T: Deserialize<'de>"))]
+struct List<T> {
+    #[serde(default)]
+    items: Vec<T>,
+}
+
+#[derive(Deserialize, Default)]
+struct MetaName {
+    #[serde(default)]
+    name: String,
+}
+
+#[derive(Deserialize, Default)]
+struct MetaNameNs {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    namespace: String,
+}
+
+/// metrics-server usage block: cpu/memory as Kubernetes quantity strings.
+#[derive(Deserialize, Default)]
+struct Usage {
+    #[serde(default)]
+    cpu: String,
+    #[serde(default)]
+    memory: String,
+}
+
+#[derive(Deserialize)]
+struct NodeMetric {
+    #[serde(default)]
+    metadata: MetaName,
+    #[serde(default)]
+    usage: Usage,
+}
 
 /// Map node name -> (cpu cores used, memory bytes used) from metrics-server.
 pub async fn node_usage(client: &Client) -> HashMap<String, (f64, f64)> {
-    let req = match http::Request::get("/apis/metrics.k8s.io/v1beta1/nodes").body(Vec::new()) {
-        Ok(r) => r,
-        Err(_) => return HashMap::new(),
-    };
-    let body: Value = match client.request::<Value>(req).await {
-        Ok(v) => v,
-        Err(_) => return HashMap::new(), // metrics-server not installed
+    let list: List<NodeMetric> = match get_json(client, "/apis/metrics.k8s.io/v1beta1/nodes").await
+    {
+        Some(v) => v,
+        None => return HashMap::new(), // metrics-server not installed
     };
 
     let mut out = HashMap::new();
-    if let Some(items) = body.get("items").and_then(|i| i.as_array()) {
-        for item in items {
-            let name = item
-                .get("metadata")
-                .and_then(|m| m.get("name"))
-                .and_then(|n| n.as_str())
-                .unwrap_or_default()
-                .to_string();
-            let usage = item.get("usage");
-            let cpu = usage
-                .and_then(|u| u.get("cpu"))
-                .and_then(|c| c.as_str())
-                .map(parse_cpu)
-                .unwrap_or(0.0);
-            let mem = usage
-                .and_then(|u| u.get("memory"))
-                .and_then(|m| m.as_str())
-                .map(parse_mem)
-                .unwrap_or(0.0);
-            if !name.is_empty() {
-                out.insert(name, (cpu, mem));
-            }
+    for item in list.items {
+        if item.metadata.name.is_empty() {
+            continue;
         }
+        // parse_* return 0.0 for empty/invalid, so unconditional calls are safe.
+        let usage = (parse_cpu(&item.usage.cpu), parse_mem(&item.usage.memory));
+        out.insert(item.metadata.name, usage);
     }
     out
+}
+
+#[derive(Deserialize)]
+struct PodMetric {
+    #[serde(default)]
+    metadata: MetaNameNs,
+    #[serde(default)]
+    containers: Vec<Container>,
+}
+
+#[derive(Deserialize)]
+struct Container {
+    #[serde(default)]
+    usage: Usage,
 }
 
 /// Map "namespace/pod" -> (cpu cores used, memory bytes used), summed across the
 /// pod's containers. Empty if metrics-server isn't installed.
 pub async fn pod_usage(client: &Client) -> HashMap<String, (f64, f64)> {
-    let req = match http::Request::get("/apis/metrics.k8s.io/v1beta1/pods").body(Vec::new()) {
-        Ok(r) => r,
-        Err(_) => return HashMap::new(),
-    };
-    let body: Value = match client.request::<Value>(req).await {
-        Ok(v) => v,
-        Err(_) => return HashMap::new(),
+    let list: List<PodMetric> = match get_json(client, "/apis/metrics.k8s.io/v1beta1/pods").await {
+        Some(v) => v,
+        None => return HashMap::new(),
     };
 
     let mut out = HashMap::new();
-    if let Some(items) = body.get("items").and_then(|i| i.as_array()) {
-        for item in items {
-            let meta = item.get("metadata");
-            let ns = meta
-                .and_then(|m| m.get("namespace"))
-                .and_then(|n| n.as_str())
-                .unwrap_or_default();
-            let name = meta
-                .and_then(|m| m.get("name"))
-                .and_then(|n| n.as_str())
-                .unwrap_or_default();
-            if name.is_empty() {
-                continue;
-            }
-            let (mut cpu, mut mem) = (0.0, 0.0);
-            if let Some(conts) = item.get("containers").and_then(|c| c.as_array()) {
-                for c in conts {
-                    let u = c.get("usage");
-                    cpu += u
-                        .and_then(|u| u.get("cpu"))
-                        .and_then(|c| c.as_str())
-                        .map(parse_cpu)
-                        .unwrap_or(0.0);
-                    mem += u
-                        .and_then(|u| u.get("memory"))
-                        .and_then(|m| m.as_str())
-                        .map(parse_mem)
-                        .unwrap_or(0.0);
-                }
-            }
-            out.insert(format!("{ns}/{name}"), (cpu, mem));
+    for item in list.items {
+        if item.metadata.name.is_empty() {
+            continue;
         }
+        let (mut cpu, mut mem) = (0.0, 0.0);
+        for c in &item.containers {
+            cpu += parse_cpu(&c.usage.cpu);
+            mem += parse_mem(&c.usage.memory);
+        }
+        out.insert(
+            format!("{}/{}", item.metadata.namespace, item.metadata.name),
+            (cpu, mem),
+        );
     }
     out
 }
@@ -114,35 +140,52 @@ pub struct PvcUsage {
     pub used: f64,
 }
 
+// Minimal view of a kubelet `/stats/summary`: we only need each pod's volumes
+// that carry a `pvcRef` and their `usedBytes`. Everything else (node stats,
+// per-container cpu/mem, network, ephemeral storage, …) is skipped.
+#[derive(Deserialize)]
+struct StatsSummary {
+    #[serde(default)]
+    pods: Vec<PodStats>,
+}
+
+#[derive(Deserialize)]
+struct PodStats {
+    #[serde(default)]
+    volume: Vec<VolumeStats>,
+}
+
+#[derive(Deserialize)]
+struct VolumeStats {
+    #[serde(default, rename = "pvcRef")]
+    pvc_ref: Option<MetaNameNs>,
+    #[serde(default, rename = "usedBytes")]
+    used_bytes: f64,
+}
+
+#[derive(Deserialize)]
+struct NodeItem {
+    #[serde(default)]
+    metadata: MetaName,
+}
+
 /// Map "namespace/name" of a bound PVC to its current filesystem usage, by
 /// scraping each node's kubelet stats summary. Each volume entry in the
 /// summary already carries a `pvcRef`, so we never need to walk pod specs.
 /// Empty if the API server can't be reached, kubelet's `VolumeStats` is
 /// disabled, or the service account lacks `nodes/proxy` RBAC.
 pub async fn pvc_usage(client: &Client) -> HashMap<String, PvcUsage> {
-    // List nodes first; one cheap LIST, then a per-node proxy GET in parallel.
-    let nodes_req = match http::Request::get("/api/v1/nodes").body(Vec::new()) {
-        Ok(r) => r,
-        Err(_) => return HashMap::new(),
+    // List nodes first (names only); one cheap LIST, then a per-node proxy GET.
+    let nodes: List<NodeItem> = match get_json(client, "/api/v1/nodes").await {
+        Some(v) => v,
+        None => return HashMap::new(),
     };
-    let body: Value = match client.request::<Value>(nodes_req).await {
-        Ok(v) => v,
-        Err(_) => return HashMap::new(),
-    };
-    let names: Vec<String> = body
-        .get("items")
-        .and_then(|i| i.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|n| {
-                    n.get("metadata")
-                        .and_then(|m| m.get("name"))
-                        .and_then(|n| n.as_str())
-                        .map(String::from)
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let names: Vec<String> = nodes
+        .items
+        .into_iter()
+        .map(|n| n.metadata.name)
+        .filter(|n| !n.is_empty())
+        .collect();
 
     // Fetch every node's stats summary concurrently. The kube proxy path is
     // /api/v1/nodes/{name}/proxy/stats/summary. Any 403/404 just yields an
@@ -152,37 +195,27 @@ pub async fn pvc_usage(client: &Client) -> HashMap<String, PvcUsage> {
         let name = name.clone();
         async move {
             let path = format!("/api/v1/nodes/{}/proxy/stats/summary", name);
-            let req = match http::Request::get(&path).body(Vec::new()) {
-                Ok(r) => r,
-                Err(_) => return Vec::new(),
-            };
-            let body: Value = match client.request::<Value>(req).await {
-                Ok(v) => v,
-                Err(_) => return Vec::new(),
+            let summary: StatsSummary = match get_json(&client, &path).await {
+                Some(v) => v,
+                None => return Vec::new(),
             };
             let mut out = Vec::new();
-            if let Some(pods) = body.get("pods").and_then(|p| p.as_array()) {
-                for pod in pods {
-                    let Some(volumes) = pod.get("volume").and_then(|v| v.as_array()) else {
+            for pod in &summary.pods {
+                for vol in &pod.volume {
+                    let Some(pvc) = &vol.pvc_ref else { continue };
+                    if pvc.name.is_empty() {
                         continue;
-                    };
-                    for vol in volumes {
-                        let Some(pvc_ref) = vol.get("pvcRef") else {
-                            continue;
-                        };
-                        let Some(pvc_ns) = pvc_ref.get("namespace").and_then(|n| n.as_str()) else {
-                            continue;
-                        };
-                        let Some(pvc_name) = pvc_ref.get("name").and_then(|n| n.as_str()) else {
-                            continue;
-                        };
-                        let used = vol.get("usedBytes").and_then(|n| n.as_f64()).unwrap_or(0.0);
-                        // `capacityBytes` from kubelet is the *filesystem* size
-                        // (excludes reserved blocks, journal, inode tables) — it
-                        // doesn't match the user's mental model of "150Gi".
-                        // The row UI uses the PVC's bound capacity as the % base.
-                        out.push((format!("{pvc_ns}/{pvc_name}"), PvcUsage { used }));
                     }
+                    // `capacityBytes` from kubelet is the *filesystem* size
+                    // (excludes reserved blocks, journal, inode tables) — it
+                    // doesn't match the user's mental model of "150Gi". The row
+                    // UI uses the PVC's bound capacity as the % base instead.
+                    out.push((
+                        format!("{}/{}", pvc.namespace, pvc.name),
+                        PvcUsage {
+                            used: vol.used_bytes,
+                        },
+                    ));
                 }
             }
             out
@@ -222,4 +255,65 @@ pub fn parse_mem(s: &str) -> f64 {
         }
     }
     s.parse::<f64>().unwrap_or(0.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_alloc::min_delta;
+    use serde_json::json;
+
+    /// A synthetic kubelet `/stats/summary`: many pods, each with the usual
+    /// container / cpu / memory / network stats plus one PVC volume. roder needs
+    /// only the volume's `pvcRef` + `usedBytes`; everything else is the bloat the
+    /// typed `StatsSummary` skips.
+    fn stats_summary_json(pods: usize) -> String {
+        let cont = json!({
+            "name": "c",
+            "cpu": { "usageNanoCores": 1, "usageCoreNanoSeconds": 1 },
+            "memory": { "usageBytes": 1, "workingSetBytes": 1, "rssBytes": 1 },
+            "rootfs": { "availableBytes": 1, "capacityBytes": 1, "usedBytes": 1, "inodes": 1, "inodesFree": 1, "inodesUsed": 1 },
+            "logs": { "availableBytes": 1, "capacityBytes": 1, "usedBytes": 1 },
+        });
+        let pod_arr: Vec<_> = (0..pods)
+            .map(|i| {
+                json!({
+                    "podRef": { "name": format!("pod{i}"), "namespace": "default", "uid": "u" },
+                    "cpu": { "usageNanoCores": 1, "usageCoreNanoSeconds": 1 },
+                    "memory": { "usageBytes": 1, "workingSetBytes": 1, "rssBytes": 1, "pageFaults": 1 },
+                    "network": { "name": "eth0", "rxBytes": 1, "txBytes": 1, "interfaces": [{ "name": "eth0", "rxBytes": 1, "txBytes": 1 }] },
+                    "containers": [cont.clone(), cont.clone(), cont.clone()],
+                    "volume": [{
+                        "name": "data",
+                        "pvcRef": { "name": format!("pvc{i}"), "namespace": "default" },
+                        "usedBytes": 1024, "capacityBytes": 2048, "availableBytes": 1024,
+                        "inodes": 1, "inodesFree": 1, "inodesUsed": 1
+                    }],
+                })
+            })
+            .collect();
+        json!({ "node": { "nodeName": "n1" }, "pods": pod_arr }).to_string()
+    }
+
+    #[test]
+    fn stats_summary_typed_is_far_lighter_than_value() {
+        let json = stats_summary_json(200);
+        // Sanity: the typed view extracts exactly the volumes we need.
+        let s: StatsSummary = serde_json::from_str(&json).unwrap();
+        assert_eq!(s.pods.len(), 200);
+        let pvc = s.pods[0].volume[0].pvc_ref.as_ref().unwrap();
+        assert_eq!(pvc.name, "pvc0");
+        assert_eq!(s.pods[0].volume[0].used_bytes, 1024.0);
+
+        // The kubelet summary was the top memory consumer in the heaptrack
+        // profile. Parsing it into the minimal `StatsSummary` (volumes only)
+        // allocates a small fraction of parsing the full `serde_json::Value`
+        // tree. Same parser both sides, so this isolates the typed-struct win.
+        let full = min_delta(|| serde_json::from_str::<serde_json::Value>(&json).unwrap());
+        let typed = min_delta(|| serde_json::from_str::<StatsSummary>(&json).unwrap());
+        assert!(
+            typed.saturating_mul(6) < full,
+            "typed StatsSummary should allocate <1/6 of the full Value: typed={typed} full={full}"
+        );
+    }
 }

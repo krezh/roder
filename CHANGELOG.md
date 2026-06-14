@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.15](https://github.com/krezh/roder/compare/0.1.14...0.1.15) (2026-06-14)
+
+
+### Features
+
+* **cargo:** update rust crate tikv-jemallocator (0.6.1 ➔ 0.7.0) ([#39](https://github.com/krezh/roder/issues/39)) ([b6242a5](https://github.com/krezh/roder/commit/b6242a59ae55ea77180706299aae6a5b4bcb1e08))
+* **crd:** live-refresh catalog & printer columns via a CRD watch ([a51b14d](https://github.com/krezh/roder/commit/a51b14dadf43092a8dd80cea0b87b3b4cd6947f8))
+
+
+### Bug Fixes
+
+* add container image info to details ([01ce136](https://github.com/krezh/roder/commit/01ce13674feda7e797a4afe65422fbd62cae3be5))
+
 ## [0.1.14](https://github.com/krezh/roder/compare/0.1.13...0.1.14) (2026-06-13)
 
 

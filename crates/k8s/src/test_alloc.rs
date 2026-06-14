@@ -3,23 +3,25 @@
 //! define one global allocator, so it lives here and the tests reuse it.
 
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Mutex;
+use std::cell::Cell;
 
-/// Serialises allocation measurements: the counter is process-global, so two
-/// memory tests measuring at once would each count the other's allocations.
-static MEASURE_LOCK: Mutex<()> = Mutex::new(());
-
-static ALLOCATED: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    // Per-thread, not a process-global atomic: `cargo test` runs tests in
+    // parallel, and a global counter would fold other tests' allocations into
+    // our measurement window. Each test parses on its own thread, so a
+    // thread-local isolates exactly the allocations we care about.
+    static ALLOCATED: Cell<usize> = const { Cell::new(0) };
+}
 
 struct Counting;
 
 // Only `alloc` is counted; the default `GlobalAlloc::realloc` routes growth back
-// through `alloc`, so Vec/String growth is reflected. Atomic adds don't allocate,
-// so there's no reentrancy.
+// through `alloc`, so Vec/String growth is reflected. A `Cell<usize>` update
+// doesn't allocate, so there's no reentrancy; `try_with` tolerates the TLS not
+// being live yet (very early allocations) or being torn down.
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        ALLOCATED.fetch_add(layout.size(), Ordering::Relaxed);
+        let _ = ALLOCATED.try_with(|c| c.set(c.get() + layout.size()));
         System.alloc(layout)
     }
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
@@ -30,21 +32,17 @@ unsafe impl GlobalAlloc for Counting {
 #[global_allocator]
 static GLOBAL: Counting = Counting;
 
-/// Bytes allocated while running `f`.
+/// Bytes allocated on the current thread while running `f`.
 fn alloc_delta(f: impl FnOnce()) -> usize {
-    let before = ALLOCATED.load(Ordering::Relaxed);
+    let before = ALLOCATED.with(Cell::get);
     f();
-    ALLOCATED.load(Ordering::Relaxed).saturating_sub(before)
+    ALLOCATED.with(Cell::get).saturating_sub(before)
 }
 
-/// Allocation cost of `parse`, taken as the minimum over several runs so other
-/// (parallel) tests' allocations — which only ever inflate a sample — don't make
-/// it flaky.
+/// Allocation cost of `parse`, taken as the minimum over several runs so
+/// allocator/measurement jitter — which only ever inflates a sample — doesn't
+/// make it flaky.
 pub(crate) fn min_delta<T>(parse: impl Fn() -> T) -> usize {
-    // Hold the lock across all runs so a concurrent memory test's allocations
-    // can't land inside our measurement window. (Recover a poisoned lock — a
-    // panicking test elsewhere shouldn't fail every other memory test.)
-    let _guard = MEASURE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     (0..6)
         .map(|_| {
             alloc_delta(|| {

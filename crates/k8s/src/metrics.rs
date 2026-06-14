@@ -312,8 +312,8 @@ mod tests {
         let full = min_delta(|| serde_json::from_str::<serde_json::Value>(&json).unwrap());
         let typed = min_delta(|| serde_json::from_str::<StatsSummary>(&json).unwrap());
         assert!(
-            typed.saturating_mul(6) < full,
-            "typed StatsSummary should allocate <1/6 of the full Value: typed={typed} full={full}"
+            typed.saturating_mul(8) < full,
+            "typed StatsSummary should allocate a small fraction of the full Value: typed={typed} full={full}"
         );
     }
 }

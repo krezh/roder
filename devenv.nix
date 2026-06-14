@@ -5,6 +5,8 @@
     pkgs.openssl
     pkgs.pkg-config
     pkgs.dart-sass
+    pkgs.infisical
+    pkgs.heaptrack
   ];
 
   claude.code.enable = true;
@@ -25,6 +27,17 @@
   scripts = {
     check.exec = "cargo check --workspace --features ssr";
     fmt.exec = "cargo fmt --all";
+    # Run roder with real OIDC auth (not dev-bypass) for testing the OAuth flow.
+    # Needs RODER_OIDC_* + RODER_SESSION_KEY in the env — `enterShell` loads them
+    # from Infisical (see below); without them roder hard-fails at startup.
+    dev-auth.exec = ''
+      if [ -z "''${RODER_OIDC_CLIENT_ID:-}" ] || [ -z "''${RODER_SESSION_KEY:-}" ]; then
+        echo "Missing OIDC secrets. Run: infisical login && direnv reload" >&2
+        exit 1
+      fi
+      echo "Starting roder in real-auth (OIDC) mode…"
+      env -u RODER_DEV_MODE cargo leptos watch
+    '';
     lint.exec = ''
       cargo clippy --workspace --features ssr -- -D warnings
       cargo clippy -p roder --no-default-features --features hydrate -- -D warnings
@@ -120,6 +133,23 @@
     };
   };
   enterShell = ''
+    # Load roder's OIDC secrets from Infisical so `dev-auth` can run the real
+    # OAuth flow locally — mirroring the cluster ExternalSecret: the OAuth client
+    # lives at /Kubernetes/DexTek/Kubernetes, the session key at
+    # /Kubernetes/DexTek/Roder, and the issuer is fixed. Best-effort: normal dev
+    # (`dev`) needs none of this.
+    ig() { timeout 10 infisical secrets get "$1" --path="$2" --env=default --plain 2>/dev/null; }
+    if roder_cid=$(ig KUBERNETES_OAUTH_CLIENT_ID /Kubernetes/DexTek/Kubernetes) && [ -n "$roder_cid" ]; then
+      export RODER_OIDC_CLIENT_ID="$roder_cid"
+      export RODER_OIDC_CLIENT_SECRET="$(ig KUBERNETES_OAUTH_CLIENT_SECRET /Kubernetes/DexTek/Kubernetes)"
+      export RODER_SESSION_KEY="$(ig RODER_SESSION_KEY /Kubernetes/DexTek/Roder)"
+      export RODER_OIDC_ISSUER_URL="https://sso.plexuz.xyz/application/o/kubernetes/"
+      export RODER_BASE_URL="''${RODER_BASE_URL:-http://localhost:8080}"
+      echo "infisical: roder OIDC secrets loaded — 'dev-auth' ready"
+    else
+      echo "infisical: not loaded (dev-bypass mode). For OAuth: infisical login && direnv reload"
+    fi
+
     echo "roder dev environment"
     echo "  rustc: $(rustc --version)"
     echo "  cargo-leptos: $(cargo-leptos --version)"
@@ -127,7 +157,8 @@
     echo "  sass: $(sass --version)"
     echo ""
     echo "Available commands:"
-    echo "  dev          - Start dev server with hot-reload"
+    echo "  dev          - Start dev server with hot-reload (auth bypassed)"
+    echo "  dev-auth     - Start dev server with real OIDC auth (needs Infisical)"
     echo "  check        - Type-check the workspace (ssr)"
     echo "  fmt          - Format all code"
     echo "  lint         - Lint (ssr + hydrate)"

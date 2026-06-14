@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.1.16](https://github.com/krezh/roder/compare/0.1.15...0.1.16) (2026-06-14)
+
+
+### Features
+
+* **server:** load the catalog at startup (pod SA) + single-flight the build ([8d05d10](https://github.com/krezh/roder/commit/8d05d1091217b412266959bc66094c6ce9958f60))
+
+
+### Bug Fixes
+
+* **style:** split the large main.scss into smaller files ([ebf42f2](https://github.com/krezh/roder/commit/ebf42f238b5053946be84024e032bfa377a71041))
+* **test:** isolate memory measurements with a thread-local counter ([ce89af0](https://github.com/krezh/roder/commit/ce89af0efcb9355a0a371648dc2a619d1a3b670e))
+* **test:** serialize memory-test measurements ([2b244f5](https://github.com/krezh/roder/commit/2b244f549df9ebef99ff7ee16133307014a2c02a))
+
+
+### Performance Improvements
+
+* **crd:** skip CRD schemas + page the list — kill the startup OOM ([6dd2742](https://github.com/krezh/roder/commit/6dd274278df2da8bc4ec1065347f8f99a799eb78))
+* **metrics:** typed structs + sonic-rs for the metrics/kubelet reads ([6859b35](https://github.com/krezh/roder/commit/6859b357917d694f2cc10acf3591f69732c54629))
+
+
+### Miscellaneous Chores
+
+* **devenv:** infisical OIDC for dev-auth, heaptrack, ignore recordings ([0b35309](https://github.com/krezh/roder/commit/0b3530997c7fb171c176f9aa372668fb8099c055))
+
 ## [0.1.15](https://github.com/krezh/roder/compare/0.1.14...0.1.15) (2026-06-14)
 
 

@@ -4,6 +4,11 @@
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
+
+/// Serialises allocation measurements: the counter is process-global, so two
+/// memory tests measuring at once would each count the other's allocations.
+static MEASURE_LOCK: Mutex<()> = Mutex::new(());
 
 static ALLOCATED: AtomicUsize = AtomicUsize::new(0);
 
@@ -36,6 +41,10 @@ fn alloc_delta(f: impl FnOnce()) -> usize {
 /// (parallel) tests' allocations — which only ever inflate a sample — don't make
 /// it flaky.
 pub(crate) fn min_delta<T>(parse: impl Fn() -> T) -> usize {
+    // Hold the lock across all runs so a concurrent memory test's allocations
+    // can't land inside our measurement window. (Recover a poisoned lock — a
+    // panicking test elsewhere shouldn't fail every other memory test.)
+    let _guard = MEASURE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     (0..6)
         .map(|_| {
             alloc_delta(|| {

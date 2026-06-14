@@ -6,10 +6,8 @@ metadata:
     {{- include "roder.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
-  # Per-pod informer cache: never run two pods of the same generation watching in
-  # parallel during a rollout longer than necessary.
   strategy:
-    type: Recreate
+    {{- toYaml .Values.strategy | nindent 4 }}
   selector:
     matchLabels:
       {{- include "roder.selectorLabels" . | nindent 6 }}

@@ -222,6 +222,37 @@ fn decode_secret(raw: &str) -> String {
     }
 }
 
+/// Extract container images from a Pod spec (direct or via template).
+pub(crate) fn container_images(o: &Value) -> Vec<(String, String)> {
+    let spec = o
+        .get("spec")
+        .and_then(|s| s.get("template"))
+        .and_then(|t| t.get("spec"))
+        .or_else(|| o.get("spec"));
+    let Some(spec) = spec else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (key, label) in [("containers", ""), ("initContainers", "(init) ")] {
+        if let Some(arr) = spec.get(key).and_then(|c| c.as_array()) {
+            for c in arr {
+                let name = c
+                    .get("name")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("?")
+                    .to_string();
+                let image = c
+                    .get("image")
+                    .and_then(|i| i.as_str())
+                    .unwrap_or("?")
+                    .to_string();
+                out.push((format!("{label}{name}"), image));
+            }
+        }
+    }
+    out
+}
+
 /// Build a `k=v,k2=v2` label selector from a workload's `spec.selector.matchLabels`.
 pub(crate) fn selector_from(o: &Value) -> String {
     o.get("spec")

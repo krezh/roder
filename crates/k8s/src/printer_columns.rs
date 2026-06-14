@@ -1,9 +1,8 @@
-//! Generic CRD columns, the way `kubectl get` and k9s do it: every
+//! Generic CRD columns
 //! `CustomResourceDefinition` declares `additionalPrinterColumns` (a `name` + a
 //! `jsonPath` into the object). We harvest those once from the installed CRDs and
 //! evaluate the jsonPaths against objects already in the informer cache — so any
-//! CRD gets meaningful columns with no per-kind code, and without a single extra
-//! API-server LIST (the watch we already hold feeds it).
+//! CRD gets meaningful columns
 
 use std::collections::HashMap;
 

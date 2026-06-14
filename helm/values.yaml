@@ -83,11 +83,11 @@ httpRoute:
             value: /
 
 resources:
-  limits:
-    memory: 400Mi
   requests:
     cpu: 50m
-    memory: 400Mi
+    memory: 128Mi
+  limits:
+    memory: 128Mi
 
 livenessProbe:
   httpGet:
@@ -101,6 +101,12 @@ readinessProbe:
     port: http
   initialDelaySeconds: 1
   periodSeconds: 5
+
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 0
+    maxSurge: 1
 
 nodeSelector: {}
 affinity: {}

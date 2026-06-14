@@ -6,8 +6,8 @@ use roder_core::ObjectDetail;
 
 use crate::app::util::format::camel_label;
 use crate::app::util::json::{
-    conditions, data_entries, json_map, json_str, owner_refs, rbac_rules, section_scalars,
-    status_scalars,
+    conditions, container_images, data_entries, json_map, json_str, owner_refs, rbac_rules,
+    section_scalars, status_scalars,
 };
 use crate::data;
 
@@ -31,6 +31,7 @@ pub(crate) fn info_view(d: ObjectDetail, kind: String) -> impl IntoView {
     } else {
         Vec::new()
     };
+    let images = container_images(o);
 
     view! {
         <div class="info">
@@ -54,6 +55,15 @@ pub(crate) fn info_view(d: ObjectDetail, kind: String) -> impl IntoView {
                 <div class="kv-cols">
                     {spec.into_iter().map(|(k, v)| view! {
                         <div class="kvc"><span class="kvc-k">{camel_label(&k)}</span><span class="kvc-v">{v}</span></div>
+                    }).collect_view()}
+                </div>
+            })}
+
+            {(!images.is_empty()).then(|| view! {
+                <h4>"Containers"</h4>
+                <div class="kv-cols">
+                    {images.into_iter().map(|(name, image)| view! {
+                        <div class="kvc"><span class="kvc-k">{name}</span><span class="kvc-v">{image}</span></div>
                     }).collect_view()}
                 </div>
             })}

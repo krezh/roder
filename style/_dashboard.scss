@@ -1,0 +1,250 @@
+/* ---- dashboard ---- */
+.dashboard {
+  padding: 1rem 1.1rem;
+}
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 0.8rem;
+}
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.8rem 0.9rem;
+}
+.stat {
+  .stat-num {
+    font-size: 1.7rem;
+    font-weight: 700;
+  }
+  .stat-label {
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+  .stat-sub {
+    margin-top: 0.3rem;
+    font-size: 0.8rem;
+    .ok {
+      color: var(--ok);
+    }
+    .pending {
+      color: var(--pending);
+    }
+    .warn {
+      color: var(--warn);
+    }
+    .error {
+      color: var(--error);
+    }
+  }
+}
+.section {
+  margin: 1.4rem 0 0.6rem;
+  font-size: 0.95rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+.nodes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 0.8rem;
+}
+.node {
+  .node-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+  .meter {
+    margin: 0.35rem 0;
+    .meter-label {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-bottom: 0.2rem;
+    }
+    .bar {
+      height: 6px;
+      background: var(--panel-2);
+      border-radius: 4px;
+      overflow: hidden;
+      .fill {
+        height: 100%;
+        background: var(--accent);
+      }
+    }
+  }
+  .node-ver {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-bottom: 0.5rem;
+  }
+}
+.ver-chip {
+  font-size: 0.68rem;
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+}
+/* Dashboard cluster-usage card (no tooltip). */
+.usage .usage-meter {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.45rem;
+  .um-label {
+    font-size: 0.72rem;
+    color: var(--muted);
+    width: 2.2rem;
+  }
+  .bar {
+    flex: 1;
+    height: 7px;
+    background: var(--panel-2);
+    border-radius: 4px;
+    overflow: hidden;
+    .fill {
+      height: 100%;
+      background: var(--accent);
+    }
+  }
+  .um-pct {
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+    width: 2.6rem;
+    text-align: right;
+  }
+}
+
+/* Top-bar cluster usage with hover tooltip of per-node usage. */
+.topusage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  cursor: default;
+  white-space: nowrap;
+  .tu-stat {
+    font-size: 0.8rem;
+    color: var(--muted);
+    b {
+      color: var(--fg);
+      font-variant-numeric: tabular-nums;
+    }
+  }
+  .tu-nodes {
+    cursor: pointer;
+    &:hover { color: var(--fg); }
+    &.tu-nodes-warn { color: var(--error); b { color: var(--error); } }
+  }
+  .tip-node-warn { color: var(--error) !important; }
+  &:hover .usage-tip {
+    display: block;
+  }
+}
+/* The one reusable tooltip look — used by the global hover tooltip and by any
+   bespoke tooltip bubble (e.g. the cluster-usage per-node popover). */
+.tooltip {
+  position: fixed;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.45rem 0.7rem;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  font-size: 0.9rem;
+  color: var(--fg);
+  white-space: nowrap;
+  max-width: 40rem;
+  z-index: 9999;
+  pointer-events: none;
+}
+.tip-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  li {
+    padding: 0.05rem 0;
+  }
+}
+/* Positioning only — visuals come from `.tooltip`. */
+.usage-tip {
+  display: none;
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 6px;
+}
+.tip-row {
+  display: flex;
+  gap: 0.9rem;
+  font-size: 0.75rem;
+  padding: 0.12rem 0;
+  .tip-node {
+    color: var(--muted);
+    flex: 1;
+  }
+}
+.warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  .warn-line {
+    font-size: 0.82rem;
+    color: var(--muted);
+    border-left: 2px solid var(--warn);
+    padding-left: 0.5rem;
+  }
+}
+
+/* ---- metrics chart ---- */
+.metrics-chart {
+  padding: 1rem;
+}
+.chart-container {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+}
+.chart-svg {
+  width: 100%;
+  height: auto;
+  max-height: 200px;
+}
+.chart-label {
+  font-size: 9px;
+  fill: var(--muted);
+  font-family: inherit;
+}
+.chart-cpu {
+  fill: #58a6ff;
+}
+.chart-mem {
+  fill: #3fb950;
+}
+.chart-legend {
+  display: flex;
+  justify-content: center;
+  gap: 1.5rem;
+  margin-top: 0.75rem;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}

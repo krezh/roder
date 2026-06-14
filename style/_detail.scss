@@ -1,0 +1,442 @@
+/* ---- inline row detail ---- */
+.grid-row.row.active .cell {
+  background: var(--panel-2);
+}
+.grid-row.row.active {
+  border-bottom-color: transparent;
+}
+.rd {
+  display: flex;
+  flex-direction: column;
+  animation: rd-in 0.18s ease;
+  transform-origin: top;
+}
+.rd-body {
+  padding: 0.5rem 0.9rem 0.9rem;
+  h4 {
+    margin: 0.7rem 0 0.4rem;
+    color: var(--muted);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+}
+/* Pods listed under the tabs for workloads. */
+.rd-pods {
+  border-bottom: 1px solid var(--border);
+  > h4 {
+    margin: 0.6rem 0.9rem 0;
+    color: var(--muted);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .rd-body {
+    padding-top: 0.2rem;
+  }
+}
+.yaml-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.yaml-edit {
+  width: 100%;
+  min-height: 320px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem;
+  color: var(--fg);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  white-space: pre;
+  resize: vertical;
+}
+.logs {
+  background: #000;
+  color: #d6e2ef;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin: 0 0.9rem 0.5rem;
+  padding: 0.6rem 0.75rem;
+  font-family: "JetBrainsMono Nerd Font Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 280px;
+  overflow: auto;
+  .log-line {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  &.nowrap .log-line {
+    white-space: pre;
+    word-break: normal;
+  }
+  .log-pod {
+    display: inline-block;
+    white-space: nowrap;
+    border-radius: 4px;
+    padding: 0 0.4rem;
+    margin-right: 0.45rem;
+    color: #e6edf3;
+    font-size: 0.92em;
+  }
+  .log-error {
+    color: #ff6b6b;
+  }
+  .log-warn {
+    color: #f0c674;
+  }
+  .log-info {
+    color: #b5c9e0;
+  }
+  .log-debug {
+    color: #7d8a99;
+  }
+  // Standard 16 ANSI foreground colours against black log background.
+  .ansi-0   { color: #4e4e4e; }  // black → dark gray
+  .ansi-1   { color: #ff6b6b; }  // red
+  .ansi-2   { color: #69db7c; }  // green
+  .ansi-3   { color: #f0c674; }  // yellow
+  .ansi-4   { color: #6699cc; }  // blue
+  .ansi-5   { color: #c678dd; }  // magenta
+  .ansi-6   { color: #56b6c2; }  // cyan
+  .ansi-7   { color: #d6e2ef; }  // white (light gray)
+  .ansi-8   { color: #6e7681; }  // bright black (gray)
+  .ansi-9   { color: #ff8787; }  // bright red
+  .ansi-10  { color: #8bdb8b; }  // bright green
+  .ansi-11  { color: #f5d8a0; }  // bright yellow
+  .ansi-12  { color: #79b8ff; }  // bright blue
+  .ansi-13  { color: #d2a8ff; }  // bright magenta
+  .ansi-14  { color: #7ee8e8; }  // bright cyan
+  .ansi-15  { color: #ffffff; }  // bright white
+  .ansi-bold { font-weight: 700; }
+  .ansi-ext  { color: var(--ansi-256, #d6e2ef); } // 256-color / 24-bit fallback
+}
+.logs-ctl {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0.9rem 0.3rem;
+}
+.logs-title {
+  font-weight: 600;
+  font-size: 0.82rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.logs-filter {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 5px;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.72rem;
+  width: 120px;
+  &:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+}
+.logs-level-filter {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 5px;
+  padding: 0.15rem 0.4rem;
+  font-size: 0.72rem;
+  cursor: pointer;
+  &:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+}
+.log-ts {
+  color: var(--muted);
+  font-size: 0.85em;
+  margin-right: 0.5em;
+  opacity: 0.7;
+}
+.logs-ctl-spacer {
+  flex: 1;
+}
+.logtog {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 5px;
+  padding: 0.1rem 0.55rem;
+  font-size: 0.72rem;
+  cursor: pointer;
+  &:hover {
+    color: var(--fg);
+  }
+  &.on {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+}
+.events .event {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.2rem 0;
+  border-bottom: 1px solid var(--border);
+  .ev-reason {
+    color: var(--accent);
+    flex: 0 0 auto;
+  }
+  .ev-msg {
+    color: var(--muted);
+  }
+  &.ev-warning .ev-reason {
+    color: var(--warn);
+  }
+}
+
+/* ---- detail tabs + info view ---- */
+.rd-tabs {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.4rem 0.9rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.rd-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  padding: 0.35rem 0.6rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  &:hover {
+    color: var(--fg);
+  }
+  &.active {
+    color: var(--fg);
+    border-bottom-color: var(--accent);
+  }
+}
+.info {
+  padding: 0.6rem 0.9rem 1rem;
+  h4 {
+    margin: 0.9rem 0 0.4rem;
+    color: var(--muted);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+}
+/* One key/value pair per row (single column) — a long value can't overlap a
+   neighbouring column because there isn't one. Value sits after the key and
+   takes the rest of the row, wrapping (and breaking unbreakable tokens like a
+   64-char digest) within its own space. */
+.kv-grid {
+  display: flex;
+  flex-direction: column;
+}
+.kv {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 0.8rem;
+  align-items: baseline;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid var(--border);
+  .k {
+    color: var(--muted);
+    flex: 0 0 auto;
+    min-width: 11rem;
+  }
+  .v {
+    flex: 1 1 11rem;
+    min-width: 0;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+  }
+}
+/* Spec: multi-column grid of stacked key/value pairs (compact for many fields). */
+.kv-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.3rem 1.2rem;
+}
+.kvc {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.kvc-k {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.kvc-v {
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+table.cond {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  th {
+    text-align: left;
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    padding: 0.25rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+  td {
+    padding: 0.25rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .cond-msg {
+    color: var(--muted);
+  }
+  .cond-ok {
+    color: var(--ok);
+  }
+  .cond-error {
+    color: var(--error);
+  }
+  .cond-pending {
+    color: var(--pending);
+  }
+}
+table.rules {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.78rem;
+  .rule-verbs {
+    color: var(--accent);
+  }
+  td {
+    white-space: normal;
+    word-break: break-word;
+  }
+}
+/* Labels + Annotations: one shared key/value list. The value takes the rest of
+   the line and drops to its own full-width line when it doesn't fit beside the
+   key — words stay whole (break-word only splits a token longer than the line). */
+.kvlist {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.kvl {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 0.6rem;
+  align-items: baseline;
+  font-size: 0.78rem;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+.kvl-k {
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+.kvl-v {
+  flex: 1 1 auto;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.hint {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin-bottom: 0.4rem;
+}
+.data {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.data-row {
+  .data-key {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.8rem;
+    color: var(--accent);
+    margin-bottom: 0.2rem;
+  }
+  .data-val {
+    margin: 0;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.5rem 0.6rem;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 240px;
+    overflow: auto;
+    &.secret {
+      filter: blur(5px);
+      cursor: pointer;
+      user-select: none;
+      transition: filter 0.12s ease;
+    }
+    &.secret.revealed {
+      filter: none;
+      user-select: text;
+    }
+  }
+}
+
+/* ---- workload "Pods" tab (mini live list) ---- */
+.pods-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.pm-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 9rem 4.5rem 4.5rem 5rem;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  &:hover {
+    background: var(--panel-2);
+  }
+}
+.pm-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--unknown);
+  &.ok {
+    background: var(--ok);
+  }
+  &.warn {
+    background: var(--warn);
+  }
+  &.error {
+    background: var(--error);
+  }
+  &.pending {
+    background: var(--pending);
+  }
+}
+.pm-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pm-phase {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pm-num {
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}

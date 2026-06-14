@@ -1,0 +1,119 @@
+/* ---- sidebar filter + view head ---- */
+.side-filter,
+.row-filter {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 6px;
+  padding: 0.3rem 0.5rem;
+  outline: none;
+}
+.side-filter {
+  width: calc(100% - 1.2rem);
+  margin: 0.4rem 0.6rem 0.5rem;
+}
+.view-head {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.6rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 1;
+  .view-title {
+    margin: 0;
+    font-size: 1.05rem;
+  }
+  .row-filter {
+    margin-left: auto;
+    width: 200px;
+  }
+  .count {
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+  .view-filter {
+    flex: 1;
+    max-width: 14rem;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    outline: none;
+    color: var(--fg);
+    font-size: 0.8rem;
+    padding: 0.1rem 0.3rem;
+    &::placeholder { color: var(--muted); }
+  }
+  .view-close {
+    margin-left: auto;
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 1.1rem;
+    line-height: 1;
+    padding: 0 2px;
+    flex-shrink: 0;
+    &:hover { color: var(--error); }
+  }
+}
+
+/* ---- workspace ---- */
+.workspace {
+  display: grid;
+  /* grid-template-columns/rows set inline from pane count */
+  gap: 8px;
+  padding: 8px;
+  height: 100%;
+  box-sizing: border-box;
+}
+.workspace-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--muted);
+  font-size: 0.875rem;
+  text-align: center;
+  p { margin: 0; line-height: 1.6; }
+  kbd { background: var(--surface); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; font-size: 0.8em; }
+}
+.pane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg);
+  > .resource-view {
+    height: auto;
+    flex: 1;
+    min-height: 0;
+  }
+}
+// Badges used in the pane's view-head (namespace + selector).
+.pane-badge {
+  font-size: 0.7rem;
+  padding: 1px 6px;
+  border-radius: 10px;
+  white-space: nowrap;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pane-badge-ns  { background: #1f3a5f; color: #79c0ff; }
+.pane-badge-sel { background: #1f3b2b; color: #3fb950; }
+// Per-pane namespace dropdown in the view-head — same appearance as the topbar selector.
+.pane-ns-select {
+  background: var(--panel-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+  &:focus { outline: none; border-color: var(--accent); }
+}

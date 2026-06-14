@@ -1,5 +1,5 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = ["crates/core", "crates/k8s", "crates/auth"]
 
 # Shared by the workspace member crates (roder-core, roder-k8s, roder-auth).
@@ -47,7 +47,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [package]
 name = "roder"
-# Inline (not .workspace) so release-please can rewrite this value directly.
 version = "0.1.15"
 edition.workspace = true
 license.workspace = true
@@ -82,11 +81,13 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 base64 = "0.22"
 rand = { version = "0.10", optional = true }
-# Stateless session cookie: AES-256-GCM seal of the token set, keyed by
-# RODER_SESSION_KEY, so a session survives roder being restarted/rescheduled.
 aes-gcm = { version = "0.10", optional = true }
 time = { version = "0.3", optional = true }
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
+rustls = { version = "0.23", default-features = false, features = [
+    "ring",
+    "std",
+    "tls12",
+], optional = true }
 tokio-stream = { version = "0.1", features = ["sync"], optional = true }
 futures = { version = "0.3", optional = true }
 
@@ -162,8 +163,8 @@ ssr = [
     "dep:aes-gcm",
     "dep:time",
 ]
-# Use jemalloc for the server allocator. Off by default (jemalloc builds from C
-# source and won't compile on a NixOS dev host); enabled only in the production
+# Use jemalloc for the server allocator. Off by default
+# enabled only in the production
 # image via `cargo leptos build --bin-features ssr,jemalloc`.
 jemalloc = ["dep:tikv-jemallocator"]
 
@@ -176,8 +177,6 @@ assets-dir = "public"
 site-addr = "0.0.0.0:8080"
 reload-port = 8081
 browserquery = "defaults"
-watch = true
-env = "DEV"
 bin-features = ["ssr"]
 bin-default-features = false
 lib-features = ["hydrate"]

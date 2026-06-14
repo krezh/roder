@@ -1,0 +1,222 @@
+/* ---- resource table ---- */
+/* A flex column: the head + bulk bar are fixed, and `.table-wrap` is the single
+   bounded scroller (flex:1 + min-height:0). Without this, table-wrap's height:100%
+   overflowed past the head and the real scroller became `.main`, so the scrollbar
+   never matched the list. */
+.resource-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.resource-view > .view-head,
+.resource-view > .bulkbar-wrap {
+  flex: 0 0 auto;
+}
+.table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* The resource list is a CSS grid (not an HTML <table>): a <table>'s collapsing
+   row/border layout fights per-row height animation, so removals stuttered. With
+   a grid + subgrid rows, each row is a real box whose height animates cleanly and
+   cheaply, while subgrid keeps every column aligned across rows like a table. */
+.grid-table {
+  display: grid;
+  /* grid-template-columns is set inline per kind (column count varies). */
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+  align-content: start;
+  /* Fixed row height. The collapse animation interpolates the cell track between
+     this and 0 — both *definite* lengths, which animate smoothly in both
+     directions (unlike `fr`, whose indefinite-height resolution shrinks jankily).
+     `.cwi` uses the same value for line-height so content fills the row exactly. */
+  --row-h: 2.2rem;
+}
+.grid-row {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  border-bottom: 1px solid var(--border);
+}
+.grid-row.head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel);
+  .cell {
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.5rem 0.75rem;
+  }
+}
+.grid-row.row {
+  cursor: pointer;
+  &:hover .cell {
+    background: var(--panel-2);
+  }
+}
+.cell {
+  /* Vertical padding lives on .cwi so rows can fully collapse during animations. */
+  padding: 0 0.75rem;
+  white-space: nowrap;
+  min-width: 0;
+  align-self: stretch;
+  font-weight: 500;
+}
+.cw {
+  display: grid;
+  grid-template-rows: var(--row-h);
+}
+.cwi {
+  min-height: 0;
+  overflow: hidden;
+  line-height: var(--row-h);
+}
+/* Name text truncates with an ellipsis when its column is squeezed. */
+.cell-name .nm {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.cell-name {
+  font-weight: 500;
+  .cwi {
+    display: flex;
+    align-items: center;
+    /* No fixed gap: the hidden checkbox reserves zero space; its own animated
+       margin provides the gap only once multi-select is active. */
+    gap: 0;
+  }
+}
+.cell-age {
+  color: var(--muted);
+}
+@keyframes trend-fade {
+  0% { opacity: 1; }
+  70% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.trend-arrow.trend-up {
+  color: var(--error);
+  font-weight: 700;
+  margin-left: 1px;
+  animation: trend-fade 2s ease forwards;
+}
+.trend-arrow.trend-down {
+  color: var(--ok);
+  font-weight: 700;
+  margin-left: 1px;
+  animation: trend-fade 2s ease forwards;
+}
+.cell:has(.trend-arrow) .cwi {
+  overflow: visible;
+  text-overflow: clip;
+}
+
+// Mount indicator on PVC rows: "true" when a pod is currently using the
+// volume, "false" when idle. Right-aligned so it sits next to the Age column
+// the way kubectl aligns booleans.
+.cell-mount {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  padding-right: 0.5em;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--unknown);
+  transition: background 0.3s ease;
+  &.dot-ok {
+    background: var(--ok);
+  }
+  &.dot-warn {
+    background: var(--warn);
+  }
+  &.dot-error {
+    background: var(--error);
+  }
+  &.dot-pending {
+    background: var(--pending);
+  }
+}
+
+/* ---- animations ---- */
+@keyframes cell-flash {
+  0% {
+    background: var(--flash-bg, rgba(76, 139, 245, 0.45));
+  }
+  100% {
+    background: transparent;
+  }
+}
+.cell.flash {
+  animation: cell-flash 1.5s ease;
+  border-radius: 4px;
+}
+/* Hidden anchor row: always in the DOM, holds max-content text per column so
+   max-content track widths stay stable while virtualized rows scroll in/out. */
+.grid-row.sizer {
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+  .cell { visibility: hidden; }
+}
+/* New/removed rows smoothly grow/collapse their cell height (grid-rows between
+   var(--row-h) and 0 — definite lengths) so neighbours reflow ("push"). */
+@keyframes cw-grow {
+  from {
+    grid-template-rows: 0;
+  }
+}
+.grid-row.entering > .cell > .cw {
+  animation: cw-grow 0.24s ease;
+}
+/* Removal is a one-way CSS transition (not a keyframe + JS timer): the browser
+   owns the interpolation and tells us, via `transitionend`, exactly when the
+   collapse has finished — only then does the row unmount. No timer can cut it
+   off mid-animation. */
+.grid-row.removing > .cell > .cw {
+  grid-template-rows: 0;
+  transition: grid-template-rows 0.26s ease;
+  will-change: grid-template-rows;
+}
+.grid-row.removing {
+  pointer-events: none;
+}
+@keyframes rd-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ---- sortable headers ---- */
+.grid-row.head .cell.sortable {
+  cursor: pointer;
+  user-select: none;
+  &:hover {
+    color: var(--fg);
+  }
+  &.active {
+    color: var(--accent);
+  }
+  .sort-arrow {
+    font-size: 0.85em;
+  }
+}
+.cell-ns {
+  color: var(--muted);
+}

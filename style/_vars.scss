@@ -1,0 +1,59 @@
+/* Self-hosted (CSP font-src 'self', no external CDN). Inter is the UI font, the
+   Nerd Font is for logs. `just fonts` regenerates the smaller woff2 versions. */
+@font-face {
+  font-family: "Rubik";
+  src:
+    url("/fonts/rubik.woff2") format("woff2"),
+    url("/fonts/rubik.ttf") format("truetype");
+  font-weight: 300 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrainsMono Nerd Font Mono";
+  src:
+    url("/fonts/jetbrains-mono-nerd.woff2") format("woff2"),
+    url("/fonts/jetbrains-mono-nerd.ttf") format("truetype");
+  font-weight: 100 800;
+  font-display: swap;
+}
+
+:root {
+  --bg: #0e1116;
+  --panel: #161b22;
+  --panel-2: #1b212b;
+  --border: #232b36;
+  --fg: #e6edf3;
+  --muted: #8b949e;
+  --accent: #4c8bf5;
+  --ok: #3fb950;
+  --warn: #d29922;
+  --error: #f85149;
+  --pending: #58a6ff;
+  --unknown: #6e7681;
+  color-scheme: dark light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+input,
+button,
+select,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "Rubik", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+}

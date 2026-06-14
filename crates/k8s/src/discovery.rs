@@ -31,8 +31,7 @@ pub async fn build_catalog(
         for (ar, caps) in group.recommended_resources() {
             // Only types we can list AND watch. Skipping subresources,
             // write-only resources, and metrics-style resources (e.g. PodMetrics
-            // from metrics-server) that list but don't watch — otherwise the
-            // informer would spam "does resource support watch?" errors.
+            // from metrics-server) that list but don't watch
             let ops = &caps.operations;
             if !ops.iter().any(|op| op == "list") || !ops.iter().any(|op| op == "watch") {
                 continue;

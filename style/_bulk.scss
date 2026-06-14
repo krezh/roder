@@ -1,0 +1,179 @@
+/* ---- errors quick filter ---- */
+.errfilter {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+  &:hover {
+    color: var(--fg);
+  }
+  &.active {
+    color: var(--error);
+    border-color: var(--error);
+  }
+}
+.failbadge {
+  background: color-mix(in srgb, var(--error) 16%, transparent);
+  border: 1px solid var(--error);
+  color: var(--error);
+  border-radius: 6px;
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+  font-weight: 600;
+  white-space: nowrap;
+  &:hover {
+    background: color-mix(in srgb, var(--error) 26%, transparent);
+  }
+}
+.conn-dot-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  cursor: default;
+  &:hover .conn-dot-tip { display: block; }
+}
+.conn-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warn);
+  flex-shrink: 0;
+  animation: conn-pulse 1.4s ease-in-out infinite;
+  &.conn-dot-ok {
+    background: var(--ok);
+    animation: none;
+  }
+}
+.conn-dot-tip {
+  display: none;
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 6px;
+  white-space: nowrap;
+}
+@keyframes conn-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* ---- multiselect ---- */
+.check {
+  width: 0;
+  height: 13px;
+  border: 1.5px solid var(--muted);
+  border-width: 0;
+  border-radius: 3px;
+  flex: 0 0 auto;
+  cursor: pointer;
+  opacity: 0;
+  margin-right: 0;
+  overflow: hidden;
+  // Hidden (zero-width) until multi-select is active; then the whole checkbox
+  // column animates open at once — a single mode toggle, never per-row hover.
+  transition:
+    width 0.16s ease,
+    border-width 0.16s ease,
+    margin-right 0.16s ease,
+    opacity 0.16s ease,
+    background 0.12s ease;
+  position: relative;
+}
+.grid-table.selecting .check,
+.grid-row.row.selected .check {
+  width: 13px;
+  border-width: 1.5px;
+  margin-right: 0.5rem;
+  opacity: 1;
+}
+.grid-row.row.selected .check {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.grid-row.row.selected .check::after {
+  content: "✓";
+  position: absolute;
+  inset: 0;
+  font-size: 9px;
+  line-height: 11px;
+  color: #fff;
+  text-align: center;
+}
+.grid-row.row.selected .cell {
+  background: rgba(76, 139, 245, 0.1);
+}
+.bulkbar-wrap {
+  --bulk-h: 2.75rem;
+  height: 0;
+  overflow: hidden;
+  transition: height 0.2s ease;
+  flex: 0 0 auto;
+  &.open {
+    height: var(--bulk-h);
+  }
+}
+
+.bulkbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: var(--bulk-h);
+  padding: 0 0.9rem;
+  white-space: nowrap;
+  overflow-x: auto;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+  .bulk-count {
+    font-weight: 600;
+    margin-right: 0.5rem;
+  }
+}
+
+/* ---- actions ---- */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+.act {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 6px;
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+  font-size: 0.82rem;
+  &:hover {
+    border-color: var(--accent);
+  }
+  &.danger:hover {
+    border-color: var(--error);
+    color: var(--error);
+  }
+}
+.scale {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: center;
+  .scale-input {
+    width: 56px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--fg);
+    border-radius: 6px;
+    padding: 0.2rem 0.35rem;
+  }
+}
+.act-ok {
+  color: var(--ok);
+  font-size: 0.8rem;
+}
+.act-err {
+  color: var(--error);
+  font-size: 0.8rem;
+}

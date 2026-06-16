@@ -79,11 +79,27 @@ async fn main() {
             state.clone(),
             handlers::security_headers,
         ))
-        .with_state(state);
+        .with_state(state.clone());
 
     log!("roder listening on http://{addr}");
+
+    // Shutdown coordination: when SIGTERM arrives (K8s pod termination), cancel
+    // all background tasks (informers, metrics refresh, CRD watch) and drain
+    // in-flight HTTP requests gracefully instead of waiting for SIGKILL.
+    // Required because this binary is PID 1 in the container — Linux ignores
+    // SIGTERM for PID 1 unless an explicit handler is registered.
+    let shutdown = async move {
+        let sigterm = tokio::signal::unix::SignalKind::terminate();
+        tokio::signal::unix::signal(sigterm).unwrap().recv().await;
+        tracing::info!("SIGTERM received — shutting down");
+        // Drop the backend (informers + watchers) so long-lived SSE connections
+        // can drain; the runtime will cancel remaining tasks on `main` exit.
+        state.backend.write().await.take();
+    };
+
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app.into_make_service())
+        .with_graceful_shutdown(shutdown)
         .await
         .unwrap();
 }

@@ -95,6 +95,7 @@ fn classify(group: &str, kind: &str) -> Category {
         || group.ends_with(".rook.io")
         || group == "objectbucket.io"
         || group.ends_with(".objectbucket.io")
+        || group.ends_with(".ceph.io")
     {
         return Category::Rook;
     }

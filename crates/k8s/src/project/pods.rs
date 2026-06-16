@@ -210,17 +210,17 @@ pub(crate) fn pod_cells(
         .unwrap_or_else(|| "n/a".into());
 
     let trends = vec![
-        Trend::None, // Ready
-        Trend::None, // Status
-        Trend::None, // Restarts
-        cpu_trend,   // CPU
-        Trend::None, // %CPU/R
-        Trend::None, // %CPU/L
-        mem_trend,   // MEM
-        Trend::None, // %MEM/R
-        Trend::None, // %MEM/L
-        Trend::None, // IP
-        Trend::None, // Node
+        Trend::None,                                       // Ready
+        Trend::None,                                       // Status
+        Trend::None,                                       // Restarts
+        cpu_trend,                                         // CPU
+        if cpu_r > 0.0 { cpu_trend } else { Trend::None }, // %CPU/R
+        if cpu_l > 0.0 { cpu_trend } else { Trend::None }, // %CPU/L
+        mem_trend,                                         // MEM
+        if mem_r > 0.0 { mem_trend } else { Trend::None }, // %MEM/R
+        if mem_l > 0.0 { mem_trend } else { Trend::None }, // %MEM/L
+        Trend::None,                                       // IP
+        Trend::None,                                       // Node
     ];
 
     (

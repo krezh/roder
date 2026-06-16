@@ -1,5 +1,5 @@
 use leptos::prelude::*;
-use roder_core::{ResourceKind, ResourceRow, RowStatus};
+use roder_core::{ResourceKind, ResourceRow, RowStatus, Trend};
 
 use crate::app::components::table::{cmp_cell, sortable_th, FlashTd};
 use crate::app::components::table_row::{NameCell, ResourceRow as ResourceRowView};
@@ -8,10 +8,10 @@ use crate::app::events::RowMap;
 use crate::app::hooks::{table_window, use_sse_subscription, use_table_state};
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::state::{
-    open_logs, CtxMenu, DetailTarget, LogPods, LogTarget, OnlyProblems, ResourceFilter, SortKey,
-    TableRows, TableSelected, Tick,
+    open_logs, CtxMenu, DetailTarget, FilterFocus, LogPods, LogTarget, OnlyProblems,
+    ResourceFilter, SortKey, TableRows, TableSelected, Tick,
 };
-use crate::app::util::color::dot_class;
+use crate::app::util::color::{dot_class, pct_thresh_color};
 use crate::app::util::format::parse_key;
 use crate::app::util::predicate::KindKind;
 use crate::data;
@@ -237,6 +237,17 @@ pub(crate) fn KindTable(
             .map(|(i, _)| i)
             .collect::<Vec<usize>>()
     });
+    // Saturation-style columns whose value is a percentage of the pod's
+    // request/limit: red at 90+, yellow at 70+ (see `pct_thresh_color`).
+    let pct_thresh_cols = Memo::new(move |_| {
+        columns
+            .get()
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| matches!(c.as_str(), "%CPU/R" | "%CPU/L" | "%MEM/R" | "%MEM/L"))
+            .map(|(i, _)| i)
+            .collect::<std::collections::HashSet<usize>>()
+    });
     let kk = KindKind::new(&kind.group, &kind.kind);
     let bulk_workload = kk.is_workload();
     let bulk_flux = kk.is_flux();
@@ -275,7 +286,7 @@ pub(crate) fn KindTable(
     let tmpl = move || {
         let n = columns.get().len() + 2 + usize::from(namespaced);
         format!(
-            "grid-template-columns: {};",
+            "grid-template-columns: {} 1fr;",
             vec!["max-content"; n].join(" ")
         )
     };
@@ -283,6 +294,9 @@ pub(crate) fn KindTable(
     {
         Effect::new(move |_| {
             let _ = shown_uids.with(|v| v.len());
+            // Also track raw row data so cell value changes (live metrics) trigger
+            // a sizer update — shown_uids only fires when UIDs change, not values.
+            rows.track();
             let cols_now = columns.get();
             let n_tracks = cols_now.len() + 2 + usize::from(namespaced);
             let ncells = cols_now.len();
@@ -293,6 +307,7 @@ pub(crate) fn KindTable(
             };
             let mut name_max = "Name".to_string();
             let mut cell_maxes: Vec<String> = cols_now.clone();
+            let mut col_has_trend = vec![false; ncells];
             rows.with_untracked(|m| {
                 for r in m.values() {
                     if namespaced {
@@ -308,17 +323,46 @@ pub(crate) fn KindTable(
                         if c.len() > cell_maxes[i].len() {
                             cell_maxes[i] = c.clone();
                         }
+                        if matches!(r.trends.get(i), Some(Trend::Up | Trend::Down)) {
+                            col_has_trend[i] = true;
+                        }
                     }
                 }
             });
-            let mut vals: Vec<String> = Vec::with_capacity(n_tracks);
+            // Pre-widen sizer for columns that carry trend arrows so the grid
+            // track doesn't shift when the arrow appears or disappears.
+            let cell_maxes: Vec<String> = cell_maxes
+                .into_iter()
+                .enumerate()
+                .map(|(i, s)| {
+                    if col_has_trend[i] {
+                        format!("{s} ↑")
+                    } else {
+                        s
+                    }
+                })
+                .collect();
+            let mut new_vals: Vec<String> = Vec::with_capacity(n_tracks);
             if namespaced {
-                vals.push(ns_max);
+                new_vals.push(ns_max);
             }
-            vals.push(name_max);
-            vals.extend(cell_maxes);
-            vals.push("000d00h".to_string());
-            sizer.set(vals);
+            new_vals.push(name_max);
+            new_vals.extend(cell_maxes);
+            new_vals.push("000d00h".to_string());
+            // Sticky: columns only ever widen within a kind; reset when the column
+            // set changes (kind switch). This prevents metric values bouncing
+            // between wide ("100%") and narrow ("5%") from jittering the layout.
+            sizer.update(|old| {
+                if old.len() != n_tracks {
+                    *old = new_vals;
+                } else {
+                    for (o, n) in old.iter_mut().zip(new_vals.iter()) {
+                        if n.len() > o.len() {
+                            *o = n.clone();
+                        }
+                    }
+                }
+            });
         });
     }
 
@@ -375,9 +419,55 @@ pub(crate) fn KindTable(
                     ns_sv.get_value().map(|ns| view! { <span class="pane-badge pane-badge-ns">{ns}</span> }).into_any()
                 }}
                 {sel_sv.get_value().map(|sel| view! { <span class="pane-badge pane-badge-sel">{sel}</span> })}
-                {text_filter.map(|tf| view! {
-                    <input class="view-filter" placeholder="filter…"
-                        on:input=move |e| tf.set(event_target_value(&e)) />
+                {text_filter.map(|tf| {
+                    let filter_ref = NodeRef::<leptos::html::Input>::new();
+                    let expanded = RwSignal::new(false);
+
+                    let do_expand = move || {
+                        expanded.set(true);
+                        if let Some(el) = filter_ref.get_untracked() {
+                            let _ = el.focus();
+                        }
+                    };
+                    let do_collapse = move || {
+                        expanded.set(false);
+                        if let Some(el) = filter_ref.get_untracked() {
+                            let _ = el.blur();
+                        }
+                    };
+
+                    // Focus + expand when `/` is pressed globally.
+                    if let Some(ff) = use_context::<FilterFocus>().map(|f| f.0) {
+                        Effect::new(move |prev: Option<u32>| {
+                            let v = ff.get();
+                            if prev.is_some() {
+                                do_expand();
+                            }
+                            v
+                        });
+                    }
+
+                    view! {
+                        <div class="view-filter-wrap"
+                             class:vfw-expanded=move || expanded.get()
+                             class:vfw-active=move || !tf.get().is_empty()
+                             on:click=move |_| { if !expanded.get() { do_expand(); } }>
+                            <input class="view-filter" node_ref=filter_ref placeholder="filter…"
+                                prop:value=move || tf.get()
+                                on:input=move |e| tf.set(event_target_value(&e))
+                                on:blur=move |_| expanded.set(false)
+                                on:keydown=move |e| {
+                                    match e.key().as_str() {
+                                        "Escape" => {
+                                            tf.set(String::new());
+                                            do_collapse();
+                                        }
+                                        "Enter" => do_collapse(),
+                                        _ => {}
+                                    }
+                                } />
+                        </div>
+                    }
                 })}
                 <span class="count">{move || format!("{} items", shown_uids.with(|v| v.len()))}</span>
                 {on_close.map(|cb| view! {
@@ -531,6 +621,9 @@ pub(crate) fn KindTable(
                                                     "false" => "warn",
                                                     _ => "unknown",
                                                 }) /> }.into_any()
+                                        } else if pct_thresh_cols.with_untracked(|s| s.contains(&i)) {
+                                            view! { <FlashTd value=val no_flash=true trend=trend_sig
+                                                color=Signal::derive(move || pct_thresh_color(&val())) /> }.into_any()
                                         } else if metric_cols.with_untracked(|v| v.contains(&i)) {
                                             view! { <FlashTd value=val no_flash=true trend=trend_sig /> }.into_any()
                                         } else if colored_cols.with_untracked(|v| v.contains(&i)) {

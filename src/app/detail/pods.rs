@@ -15,15 +15,18 @@ use super::RowDetail;
 #[component]
 pub(crate) fn PodModal() -> impl IntoView {
     let pod_modal = expect_context::<PodModalTarget>().0;
+    let (snapshot, closing, do_close) = crate::app::overlays::use_option_overlay(pod_modal);
+
     view! {
-        {move || pod_modal.get().map(|target| {
+        {move || snapshot.get().map(|target| {
             let name = target.name.clone();
             view! {
-                <div class="pmodal-scrim" on:click=move |_| pod_modal.set(None)></div>
-                <div class="pmodal">
+                <div class="pmodal-scrim" class:closing=move || closing.get()
+                    on:click=move |_| do_close()></div>
+                <div class="pmodal" class:closing=move || closing.get()>
                     <div class="pmodal-head">
                         <span class="pmodal-title">{name}</span>
-                        <button class="pmodal-close" on:click=move |_| pod_modal.set(None)>"✕"</button>
+                        <button class="pmodal-close" on:click=move |_| do_close()>"✕"</button>
                     </div>
                     <RowDetail target=target />
                 </div>

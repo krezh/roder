@@ -87,6 +87,26 @@ pub async fn fetch_json<T: DeserializeOwned>(_url: &str) -> Result<T, String> {
     Err("fetch is only available in the browser".to_string())
 }
 
+/// Probe `url` with a GET to extract a human-readable error (e.g. "401 Unauthorized").
+/// Used when an SSE stream closes unexpectedly — the `onerror` event carries no message.
+#[cfg(target_arch = "wasm32")]
+pub async fn probe_error(url: String) -> String {
+    use gloo_net::http::Request;
+    match Request::get(&url).send().await {
+        Err(e) => e.to_string(),
+        Ok(resp) if resp.ok() => "Connection lost".to_string(),
+        Ok(resp) => {
+            redirect_to_login_if_unauthorized(resp.status());
+            format!("{} {}", resp.status(), resp.status_text())
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn probe_error(_url: String) -> String {
+    "Connection lost".to_string()
+}
+
 // ---- POST (mutations) -----------------------------------------------------
 
 #[cfg(target_arch = "wasm32")]
@@ -311,6 +331,16 @@ pub fn storage_get(_key: &str) -> Option<String> {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn storage_set(_key: &str, _value: &str) {}
+
+#[cfg(target_arch = "wasm32")]
+pub fn storage_remove(key: &str) {
+    if let Some(Ok(Some(store))) = web_sys::window().map(|w| w.local_storage()) {
+        let _ = store.remove_item(key);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn storage_remove(_key: &str) {}
 
 // ---- sessionStorage (persist within a browser tab, cleared on tab close) ---
 

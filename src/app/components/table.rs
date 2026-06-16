@@ -72,28 +72,36 @@ pub(crate) fn FlashTd<F>(
 where
     F: Fn() -> String + Copy + Send + Sync + 'static,
 {
+    let value_changed = RwSignal::new(false);
+    Effect::new(move |prev: Option<String>| {
+        let v = value();
+        if let Some(p) = prev {
+            if p != v {
+                value_changed.set(true);
+                set_timeout(
+                    move || value_changed.set(false),
+                    std::time::Duration::from_millis(1500),
+                );
+            }
+        }
+        v
+    });
+
     let flash_state: Signal<bool> = if let Some(sig) = flash {
         sig
     } else if no_flash {
         Signal::derive(|| false)
     } else {
-        let cell_flash = RwSignal::new(false);
-        Effect::new(move |prev: Option<String>| {
-            let v = value();
-            if let Some(p) = prev {
-                if p != v {
-                    cell_flash.set(true);
-                    set_timeout(
-                        move || cell_flash.set(false),
-                        std::time::Duration::from_millis(1500),
-                    );
-                }
-            }
-            v
-        });
-        cell_flash.into()
+        value_changed.into()
     };
-    let trend_arrow = move || trend.and_then(|t| t.get().arrow());
+
+    let trend_arrow = move || {
+        if value_changed.get() {
+            trend.and_then(|t| t.get().arrow())
+        } else {
+            None
+        }
+    };
     let trend_class = move || {
         trend
             .map(|t| match t.get() {

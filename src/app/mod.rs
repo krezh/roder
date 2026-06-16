@@ -28,12 +28,13 @@ use detail::Tab;
 use logs::LogSidebar;
 use overlays::confirm::{Confirm, ConfirmDialog};
 use overlays::context_menu::ContextMenu;
+use overlays::ns_palette::NsPalette;
 use overlays::palette::CommandPalette;
 use overlays::shortcuts::ShortcutsHelp;
 use state::{
-    Catalog, ConnectionState, CtxMenu, LogPods, LogTarget, NavOpen, OnlyProblems, PaletteOpen,
-    PodModalTarget, ResourceFilter, ShortcutsOpen, TableRows, TableSelected, Tick, WorkspaceConf,
-    WorkspaceConfig,
+    Catalog, ConnectionState, CtxMenu, FilterFocus, LogPods, LogTarget, NavOpen, NsPaletteOpen,
+    OnlyProblems, PaletteOpen, PodModalTarget, ResourceFilter, ShortcutsOpen, TableRows,
+    TableSelected, Tick, WorkspaceConf, WorkspaceConfig,
 };
 use views::resource::ResourceView;
 use views::search::SearchResultsView;
@@ -70,6 +71,8 @@ pub fn App() -> impl IntoView {
     let detail = RwSignal::new(None::<DetailTarget>);
     let nav_open = RwSignal::new(false);
     let palette_open = RwSignal::new(false);
+    let ns_palette_open = RwSignal::new(false);
+    provide_context(NsPaletteOpen(ns_palette_open));
     let catalog = RwSignal::new(Vec::<ResourceKind>::new());
     let ctx_menu = RwSignal::new(None::<CtxMenu>);
     let requested_tab = RwSignal::new(None::<Tab>);
@@ -82,6 +85,7 @@ pub fn App() -> impl IntoView {
     provide_context(ShortcutsOpen(shortcuts_open));
     let resource_filter = RwSignal::new(String::new());
     provide_context(ResourceFilter(resource_filter));
+    provide_context(FilterFocus(RwSignal::new(0u32)));
     let log_pods = RwSignal::new(Vec::<LogTarget>::new());
     provide_context(LogPods(log_pods));
     provide_context(Tick(tick));
@@ -95,7 +99,7 @@ pub fn App() -> impl IntoView {
     provide_context(Catalog(catalog));
     provide_context(ctx_menu);
     provide_context(requested_tab);
-    provide_context(ConnectionState(RwSignal::new(false)));
+    provide_context(ConnectionState(RwSignal::new(None::<String>)));
     provide_context(TableSelected(StoredValue::new(None)));
     provide_context(TableRows(StoredValue::new(None)));
 
@@ -130,15 +134,38 @@ pub fn App() -> impl IntoView {
         }
     });
 
-    // Restore UI state from a previous session so a page reload stays put.
+    // Namespace has its own persist/restore lifecycle independent of the catalog.
+    // Using a ready guard (same pattern as workspace) ensures we never clobber
+    // the stored value on startup before the restore effect has run.
+    let ns_ready = RwSignal::new(false);
+    Effect::new(move |_| {
+        // Prefer roder.ns; fall back to roder.nav for backwards compat.
+        let ns = data::storage_get("roder.ns")
+            .and_then(|s| serde_json::from_str::<Option<String>>(&s).ok())
+            .flatten()
+            .or_else(|| {
+                data::storage_get("roder.nav")
+                    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                    .and_then(|v| v.get("ns").and_then(|x| x.as_str()).map(String::from))
+            });
+        if let Some(n) = ns {
+            selected_ns.set(Some(n));
+        }
+        ns_ready.set(true);
+    });
+    Effect::new(move |_| {
+        if !ns_ready.get() {
+            return;
+        }
+        let ns = selected_ns.get();
+        if let Ok(s) = serde_json::to_string(&ns) {
+            data::storage_set("roder.ns", &s);
+        }
+    });
+
+    // Restore kind/detail from a previous session.
     let saved = data::storage_get("roder.nav")
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
-    if let Some(ns) = saved
-        .as_ref()
-        .and_then(|v| v.get("ns").and_then(|x| x.as_str()))
-    {
-        selected_ns.set(Some(ns.to_string()));
-    }
     let saved_kind = saved
         .as_ref()
         .and_then(|v| v.get("kind").and_then(|x| x.as_str()).map(String::from));
@@ -195,40 +222,42 @@ pub fn App() -> impl IntoView {
         );
     });
 
-    // Persist UI state on change (only after restore, so we don't clobber it).
+    // Persist kind/detail on change (only after restore, so we don't clobber them).
     Effect::new(move |_| {
         let kind = selected_kind.get();
-        let ns = selected_ns.get();
         let det = detail.get();
         if !restored.get() {
             return;
         }
         let blob = serde_json::json!({
             "kind": kind.map(|k| k.key),
-            "ns": ns,
             "detail": det.map(|t| serde_json::json!({ "key": t.key, "ns": t.namespace, "name": t.name })),
         });
         data::storage_set("roder.nav", &blob.to_string());
     });
 
-    // Global keyboard: ⌘/Ctrl-K toggles the palette, Esc closes overlays.
+    // Global keyboard shortcuts.
+    let filter_focus = expect_context::<FilterFocus>().0;
     Effect::new(move |_| {
         let handle = window_event_listener(ev::keydown, move |e| {
             let key = e.key();
-            if (e.meta_key() || e.ctrl_key()) && key.eq_ignore_ascii_case("k") {
+            if key == "K" && !data::is_text_input_focused() {
                 e.prevent_default();
                 palette_open.update(|o| *o = !*o);
-            } else if e.ctrl_key()
-                && key.eq_ignore_ascii_case("z")
-                && !data::is_text_input_focused()
-            {
-                // k9s-style quick filter: only problem rows.
+            } else if key == "N" && !data::is_text_input_focused() {
+                e.prevent_default();
+                ns_palette_open.update(|o| *o = !*o);
+            } else if key == "E" && !data::is_text_input_focused() {
                 e.prevent_default();
                 only_problems.update(|o| *o = !*o);
+            } else if key == "/" && !data::is_text_input_focused() {
+                e.prevent_default();
+                filter_focus.update(|n| *n += 1);
             } else if key == "?" && !data::is_text_input_focused() {
                 shortcuts_open.update(|o| *o = !*o);
             } else if key == "Escape" {
                 palette_open.set(false);
+                ns_palette_open.set(false);
                 shortcuts_open.set(false);
                 ctx_menu.set(None);
                 detail.set(None);
@@ -277,6 +306,7 @@ pub fn App() -> impl IntoView {
                     </main>
                 </div>
                 <CommandPalette />
+                <NsPalette />
                 <ContextMenu />
                 <ConfirmDialog />
                 <PodModal />

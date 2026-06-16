@@ -17,7 +17,6 @@
   align-items: center;
   gap: 0.8rem;
   padding: 0.6rem 0.9rem;
-  border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
   background: var(--bg);
@@ -34,16 +33,50 @@
     color: var(--muted);
     font-size: 0.8rem;
   }
+  .view-filter-wrap {
+    display: flex;
+    align-items: center;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 0.15rem 0.6rem;
+    gap: 0.3rem;
+    overflow: hidden;
+    cursor: pointer;
+    // Collapsed: just wide enough for the "/" label.
+    width: 1.8rem;
+    transition: width 0.2s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    &::before {
+      content: "/";
+      color: var(--muted);
+      font-size: 0.75rem;
+      font-weight: 600;
+      flex-shrink: 0;
+      transition: color 0.15s ease;
+    }
+    // Has active filter text but collapsed — wider preview, no border highlight.
+    &.vfw-active:not(.vfw-expanded) {
+      width: 7rem;
+    }
+    // Expanded (focused) — full width, accent border + glow.
+    &.vfw-expanded {
+      width: 14rem;
+      cursor: text;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
+      &::before { color: var(--accent); }
+    }
+  }
   .view-filter {
     flex: 1;
-    max-width: 14rem;
+    min-width: 0;
     background: transparent;
     border: none;
-    border-bottom: 1px solid var(--border);
     outline: none;
     color: var(--fg);
     font-size: 0.8rem;
-    padding: 0.1rem 0.3rem;
+    padding: 0;
+    cursor: inherit;
     &::placeholder { color: var(--muted); }
   }
   .view-close {

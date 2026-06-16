@@ -2,6 +2,7 @@
 
 use leptos::html::Div;
 use leptos::prelude::*;
+use leptos::task::spawn_local;
 
 use roder_core::WatchEvent;
 
@@ -27,19 +28,27 @@ pub(crate) fn use_sse_subscription(
     Effect::new(move |_prev: Option<Option<data::SseHandle>>| {
         reconnect.track();
         let url = url()?;
+        let probe_url = url.clone();
         data::subscribe_with_error(
             &url,
             move |ev| {
                 if matches!(ev, WatchEvent::Snapshot { .. }) {
                     if let Some(c) = conn {
-                        c.set(true);
+                        c.set(None);
                     }
                 }
                 apply_event(rows, entering, removing, columns, ev)
             },
             move || {
+                // Probe the SSE endpoint with a normal GET to capture the HTTP
+                // status (e.g. "401 Unauthorized"). The EventSource onerror event
+                // carries no message, so a side-channel fetch is the only way.
                 if let Some(c) = conn {
-                    c.set(false);
+                    let url = probe_url.clone();
+                    spawn_local(async move {
+                        let msg = data::probe_error(url).await;
+                        c.set(Some(msg));
+                    });
                 }
                 set_timeout(
                     move || reconnect.update(|n| *n += 1),

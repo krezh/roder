@@ -146,7 +146,8 @@
     &:hover { color: var(--fg); }
     &.tu-nodes-warn { color: var(--error); b { color: var(--error); } }
   }
-  .tip-node-warn { color: var(--error) !important; }
+  .tip-node-ok  { color: var(--ok); }
+  .tip-node-err { color: var(--error); }
   &:hover .usage-tip {
     display: block;
   }
@@ -164,7 +165,7 @@
   color: var(--fg);
   white-space: nowrap;
   max-width: 40rem;
-  z-index: 9999;
+  z-index: 80;
   pointer-events: none;
 }
 .tip-list {

@@ -26,16 +26,19 @@ pub(crate) fn ask_confirm(
 #[component]
 pub(crate) fn ConfirmDialog() -> impl IntoView {
     let confirm = expect_context::<RwSignal<Option<Confirm>>>();
+    let (snapshot, closing, do_close) = super::use_option_overlay(confirm);
+
     view! {
-        {move || confirm.get().map(|c| {
+        {move || snapshot.get().map(|c| {
             let on_ok = c.on_ok.clone();
             view! {
-                <div class="modal-scrim" on:click=move |_| confirm.set(None)></div>
-                <div class="modal">
+                <div class="modal-scrim" class:closing=move || closing.get()
+                    on:click=move |_| do_close()></div>
+                <div class="modal" class:closing=move || closing.get()>
                     <div class="modal-msg">{c.message.clone()}</div>
                     <div class="modal-actions">
-                        <button class="act" on:click=move |_| confirm.set(None)>"Cancel"</button>
-                        <button class="act danger" on:click=move |_| { on_ok(); confirm.set(None); }>"Delete"</button>
+                        <button class="act" on:click=move |_| do_close()>"Cancel"</button>
+                        <button class="act danger" on:click=move |_| { on_ok(); do_close(); }>"Delete"</button>
                     </div>
                 </div>
             }

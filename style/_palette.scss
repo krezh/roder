@@ -1,22 +1,4 @@
 /* ---- command palette ---- */
-.palette-btn {
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  color: var(--muted);
-  border-radius: 6px;
-  padding: 0.25rem 0.6rem;
-  cursor: pointer;
-  display: flex;
-  gap: 0.4rem;
-  align-items: center;
-  kbd {
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 0 0.3rem;
-    font-size: 0.72rem;
-  }
-}
 .palette-scrim {
   position: fixed;
   inset: 0;
@@ -25,11 +7,11 @@
 }
 .palette {
   position: fixed;
-  top: 12vh;
-  left: 50%;
-  transform: translateX(-50%);
+  inset: 0;
+  margin: auto;
   width: min(560px, 92vw);
-  max-height: 70vh;
+  height: fit-content;
+  max-height: 35vh;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -38,6 +20,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  animation: overlay-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .palette-input-wrap {
   position: relative;
@@ -52,49 +35,10 @@
   outline: none;
   width: 100%;
 }
-.autocomplete-list {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  list-style: none;
-  margin: 0;
-  padding: 0.3rem;
-  max-height: 200px;
-  overflow-y: auto;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-top: none;
-  border-radius: 0 0 10px 10px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-  z-index: 32;
-}
-.autocomplete-item {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.4rem 0.6rem;
-  border-radius: 6px;
-  cursor: pointer;
-  &:hover, &.selected {
-    background: var(--panel);
-  }
-  .autocomplete-text {
-    font-weight: 600;
-  }
-  .autocomplete-type {
-    color: var(--muted);
-    font-size: 0.75rem;
-    padding: 0.1rem 0.4rem;
-    border-radius: 4px;
-    background: var(--panel);
-  }
-}
+
 .highlight {
   color: var(--accent);
   font-weight: 700;
-  text-decoration: underline;
-  text-underline-offset: 2px;
 }
 .palette-list {
   list-style: none;
@@ -104,13 +48,16 @@
 }
 .palette-item {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 0.6rem;
   padding: 0.4rem 0.6rem;
   border-radius: 6px;
   cursor: pointer;
   &:hover {
     background: var(--panel-2);
+  }
+  &.palette-item-active {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
   }
   .pi-kind {
     font-weight: 600;
@@ -123,37 +70,6 @@
     margin-left: auto;
     color: var(--muted);
     font-size: 0.72rem;
-  }
-  // Resource search result styles
-  .pi-name {
-    font-weight: 600;
-  }
-  .pi-ns {
-    color: var(--muted);
-    font-size: 0.8rem;
-  }
-  .pi-status {
-    margin-left: auto;
-    font-size: 0.75rem;
-    padding: 0.1rem 0.4rem;
-    border-radius: 4px;
-    background: var(--panel-2);
-  }
-  .pi-status.status-ok {
-    color: var(--ok);
-  }
-  .pi-status.status-warn {
-    color: var(--warn);
-  }
-  .pi-status.status-error {
-    color: var(--error);
-  }
-  &.muted {
-    color: var(--muted);
-    cursor: default;
-    &:hover {
-      background: transparent;
-    }
   }
 }
 .palette-hints {

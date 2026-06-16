@@ -16,6 +16,7 @@
     {
       matchPackageNames: ["kube", "k8s-openapi"],
       groupName: "kube",
+      minimumGroupSize: 2,
     },
   ],
 }

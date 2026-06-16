@@ -4,29 +4,25 @@
 FROM ghcr.io/rust-lang/rust:1.96.0-trixie@sha256:4fd8406017c992f7b8ab55a2f99a1d56aeb1d7ecd255850dfa04239a88601f73 AS build
 
 # cargo-leptos + the wasm target.
-# binaryen is not installed from apt: Debian bookworm ships a version that
-# corrupts the externref table wasm-bindgen 0.2.92+ uses. cargo-leptos
-# downloads the correct wasm-opt version itself at build time.
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
-    rustup target add wasm32-unknown-unknown \
-    && cargo install cargo-leptos --locked
+    rustup target add wasm32-unknown-unknown
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    cargo install cargo-leptos --locked
 
+RUN wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq &&\
+    chmod +x /usr/local/bin/yq
 WORKDIR /app
 COPY . .
 
 # Derive the wasm-bindgen CLI version directly from Cargo.lock so it always
-# matches the compiled crate. There is no ARG to keep in sync — when Renovate
-# bumps the crate, Cargo.lock changes, this layer is invalidated, and the new
-# CLI is installed automatically.
-#
-# The shim the CLI emits and the wasm the crate produces must be identical or
-# hydration throws "failed to grow table" on __wbindgen_init_externref_table.
+# matches the compiled crate.
+# The shim the CLI emits and the wasm the crate produces must be identical
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
-    WB=$(awk '/^name = "wasm-bindgen"$/{f=1} f && /^version/{gsub(/"/, "", $3); print $3; exit}' Cargo.lock) \
+    WB=$(yq .workspace.dependencies.wasm-bindgen Cargo.toml) \
     && cargo install -f wasm-bindgen-cli --version "$WB"
 
-# RELEASE=true  → optimised release binary (CI/production, slow to link)
-# RELEASE=false → debug binary (local dev, no LTO, fast incremental builds)
+# RELEASE=true  → optimised release binary
+# RELEASE=false → debug binary
 ARG RELEASE=true
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/app/target,sharing=locked \
@@ -50,10 +46,7 @@ ENV LEPTOS_SITE_ROOT=/app/site \
     LEPTOS_SITE_PKG_DIR=pkg \
     LEPTOS_SITE_ADDR=0.0.0.0:8080 \
     RUST_LOG=info \
-    # jemalloc tuning (tikv-jemallocator reads the _RJEM_-prefixed var): a
-    # background thread purges dirty/muzzy pages back to the OS on a short decay
-    # so RSS drops promptly after a watch relist spike instead of staying
-    # resident — the behaviour that was tripping the container memory limit.
+    # jemalloc tuning (tikv-jemallocator reads the _RJEM_-prefixed var)
     _RJEM_MALLOC_CONF=background_thread:true,dirty_decay_ms:5000,muzzy_decay_ms:5000
 
 EXPOSE 8080

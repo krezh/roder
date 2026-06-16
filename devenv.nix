@@ -1,12 +1,12 @@
-{ pkgs, ... }:
+{ pkgs, ... }: {
 
-{
   packages = [
     pkgs.openssl
     pkgs.pkg-config
     pkgs.dart-sass
     pkgs.infisical
     pkgs.heaptrack
+    pkgs.cargo-leptos
   ];
 
   claude.code.enable = true;
@@ -14,6 +14,8 @@
   languages.rust = {
     enable = true;
     channel = "stable";
+    wild.enable = true;
+    lsp.enable = true;
     components = [
       "rustc"
       "cargo"
@@ -25,32 +27,25 @@
   };
 
   scripts = {
-    check.exec = "cargo check --workspace --features ssr";
-    fmt.exec = "cargo fmt --all";
     # Run roder with real OIDC auth (not dev-bypass) for testing the OAuth flow.
     # Needs RODER_OIDC_* + RODER_SESSION_KEY in the env — `enterShell` loads them
     # from Infisical (see below); without them roder hard-fails at startup.
     dev-auth.exec = ''
-      if [ -z "''${RODER_OIDC_CLIENT_ID:-}" ] || [ -z "''${RODER_SESSION_KEY:-}" ]; then
-        echo "Missing OIDC secrets. Run: infisical login && direnv reload" >&2
-        exit 1
+      ig() { timeout 10 infisical secrets get "$1" --path="$2" --env=default --plain 2>/dev/null; }
+      if roder_cid=$(ig KUBERNETES_OAUTH_CLIENT_ID /Kubernetes/DexTek/Kubernetes) && [ -n "$roder_cid" ]; then
+        export RODER_OIDC_CLIENT_ID="$roder_cid"
+        export RODER_OIDC_CLIENT_SECRET="$(ig KUBERNETES_OAUTH_CLIENT_SECRET /Kubernetes/DexTek/Kubernetes)"
+        export RODER_SESSION_KEY="$(ig RODER_SESSION_KEY /Kubernetes/DexTek/Roder)"
+        export RODER_OIDC_ISSUER_URL="https://sso.plexuz.xyz/application/o/kubernetes/"
+        export RODER_BASE_URL="''${RODER_BASE_URL:-http://localhost:8080}"
+        echo "infisical: roder OIDC secrets loaded — 'dev-auth' ready"
+      else
+        echo "infisical: not loaded (dev-bypass mode). For OAuth: infisical login && direnv reload"
       fi
       echo "Starting roder in real-auth (OIDC) mode…"
       env -u RODER_DEV_MODE cargo leptos watch
     '';
-    lint.exec = ''
-      cargo clippy --workspace --features ssr -- -D warnings
-      cargo clippy -p roder --no-default-features --features hydrate -- -D warnings
-    '';
-    test.exec = "cargo test --workspace --features ssr";
-    docker-build.exec = ''
-      TAG="''${1:-roder:dev}"
-      docker build --build-arg RELEASE=false -t "$TAG" .
-    '';
-    docker-release.exec = ''
-      TAG="''${1:-roder:release}"
-      docker build -t "$TAG" .
-    '';
+
     docker-run.exec = ''
       TAG="''${2:-roder:dev}"
       name="roder-docker-test"
@@ -70,28 +65,9 @@
   env.RODER_DEV_MODE = "1";
   env.RUST_LOG = "info";
 
-  processes.dev = {
-    exec = "cargo leptos watch";
-    process-compose.environment = {
-      RODER_DEV_MODE = "1";
-      RUST_LOG = "info";
-    };
-  };
+  processes.dev.exec = "cargo leptos watch";
 
   tasks = {
-    "tools:cargo-leptos" = {
-      exec = ''
-        if ! command -v cargo-leptos &> /dev/null; then
-          echo "Installing cargo-leptos..."
-          cargo install cargo-leptos --locked --quiet
-        fi
-      '';
-      before = [
-        "devenv:enterShell"
-        "devenv:processes:dev"
-      ];
-    };
-
     "tools:wasm-bindgen" = {
       exec = ''
         WBG_VER=$(grep -E '^wasm-bindgen\s*=' Cargo.toml | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
@@ -128,28 +104,11 @@
     };
 
     "test:docker" = {
-      exec = "docker build -t roder:test .";
+      exec = "docker buildx build -t roder:test .";
       before = [ "devenv:enterTest" ];
     };
   };
   enterShell = ''
-    # Load roder's OIDC secrets from Infisical so `dev-auth` can run the real
-    # OAuth flow locally — mirroring the cluster ExternalSecret: the OAuth client
-    # lives at /Kubernetes/DexTek/Kubernetes, the session key at
-    # /Kubernetes/DexTek/Roder, and the issuer is fixed. Best-effort: normal dev
-    # (`dev`) needs none of this.
-    ig() { timeout 10 infisical secrets get "$1" --path="$2" --env=default --plain 2>/dev/null; }
-    if roder_cid=$(ig KUBERNETES_OAUTH_CLIENT_ID /Kubernetes/DexTek/Kubernetes) && [ -n "$roder_cid" ]; then
-      export RODER_OIDC_CLIENT_ID="$roder_cid"
-      export RODER_OIDC_CLIENT_SECRET="$(ig KUBERNETES_OAUTH_CLIENT_SECRET /Kubernetes/DexTek/Kubernetes)"
-      export RODER_SESSION_KEY="$(ig RODER_SESSION_KEY /Kubernetes/DexTek/Roder)"
-      export RODER_OIDC_ISSUER_URL="https://sso.plexuz.xyz/application/o/kubernetes/"
-      export RODER_BASE_URL="''${RODER_BASE_URL:-http://localhost:8080}"
-      echo "infisical: roder OIDC secrets loaded — 'dev-auth' ready"
-    else
-      echo "infisical: not loaded (dev-bypass mode). For OAuth: infisical login && direnv reload"
-    fi
-
     echo "roder dev environment"
     echo "  rustc: $(rustc --version)"
     echo "  cargo-leptos: $(cargo-leptos --version)"

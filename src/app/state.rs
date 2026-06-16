@@ -56,6 +56,8 @@ pub(crate) struct NavOpen(pub(crate) RwSignal<bool>);
 #[derive(Clone, Copy)]
 pub(crate) struct PaletteOpen(pub(crate) RwSignal<bool>);
 #[derive(Clone, Copy)]
+pub(crate) struct NsPaletteOpen(pub(crate) RwSignal<bool>);
+#[derive(Clone, Copy)]
 pub(crate) struct Catalog(pub(crate) RwSignal<Vec<ResourceKind>>);
 /// A pod to show in the centered pod-info modal (opened from a workload's Pods tab).
 #[derive(Clone, Copy)]
@@ -65,13 +67,18 @@ pub(crate) struct PodModalTarget(pub(crate) RwSignal<Option<DetailTarget>>);
 #[derive(Clone, Copy)]
 pub(crate) struct ShortcutsOpen(pub(crate) RwSignal<bool>);
 
-/// Whether the SSE data stream is currently live (`true`) or reconnecting (`false`).
+/// `None` = SSE stream is live. `Some(msg)` = disconnected, with the HTTP status
+/// or network error that caused it (e.g. "401 Unauthorized", "Network error").
 #[derive(Clone, Copy)]
-pub(crate) struct ConnectionState(pub(crate) RwSignal<bool>);
+pub(crate) struct ConnectionState(pub(crate) RwSignal<Option<String>>);
 
-/// Global text filter for resource search (set by command palette).
+/// Global text filter for resource search (used by search view).
 #[derive(Clone)]
 pub(crate) struct ResourceFilter(pub(crate) RwSignal<String>);
+
+/// Incrementing token; pressing `/` bumps this so KindTable can focus its filter input.
+#[derive(Clone, Copy)]
+pub(crate) struct FilterFocus(pub(crate) RwSignal<u32>);
 
 /// Multi-kind search query (stored in session storage for the search results view).
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -323,11 +323,18 @@ pub async fn callback(
     }
 }
 
-/// Clear the live session and the cookie, then return to login.
+/// Clear the live session and the cookie, then redirect. If `signout_redirect_url`
+/// is configured the browser is sent there (so the OIDC provider can end the SSO
+/// session too); otherwise falls back to `/auth/login`.
 pub async fn logout(State(state): State<AppState>, _headers: HeaderMap) -> Response {
     *state.current.write().await = None;
     let cookie = set_cookie(SESSION_COOKIE, "", state.config.secure_cookies(), 0);
-    ([(header::SET_COOKIE, cookie)], Redirect::to("/auth/login")).into_response()
+    let dest = state
+        .config
+        .signout_redirect_url
+        .as_deref()
+        .unwrap_or("/auth/login");
+    ([(header::SET_COOKIE, cookie)], Redirect::to(dest)).into_response()
 }
 
 /// Who am I — used by the UI to show the signed-in identity. `require_auth` has
@@ -396,6 +403,7 @@ mod tests {
             base_url: "http://localhost:8080".into(),
             oidc: None,
             session_key: None,
+            signout_redirect_url: None,
         })
     }
 
@@ -411,6 +419,7 @@ mod tests {
                 groups_claim: "groups".into(),
             }),
             session_key: Some(TEST_KEY),
+            signout_redirect_url: None,
         })
     }
 
@@ -640,6 +649,24 @@ mod tests {
         assert_eq!(res.status(), StatusCode::SEE_OTHER);
         assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/auth/login");
         assert_eq!(collect_set_cookies(&res).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn logout_with_signout_redirect_url_uses_configured_url() {
+        let mut config = (*prod_config()).clone();
+        config.signout_redirect_url =
+            Some("https://sso.example.com/application/o/roder/end-session/".into());
+        let state = empty_state(Arc::new(config));
+
+        let res = logout(State(state), HeaderMap::new()).await;
+        assert_eq!(res.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            res.headers().get(header::LOCATION).unwrap(),
+            "https://sso.example.com/application/o/roder/end-session/"
+        );
+        let cookies = collect_set_cookies(&res);
+        assert_eq!(cookies.len(), 1);
+        assert!(cookies[0].contains(&format!("{SESSION_COOKIE}=;")));
     }
 
     // -------- me --------

@@ -1,6 +1,6 @@
-use std::cmp::Ordering;
 use leptos::prelude::*;
 use roder_core::{ResourceKind, ResourceRow, RowStatus, Trend};
+use std::cmp::Ordering;
 
 use crate::app::components::table::{cmp_cell, sortable_th, FlashTd};
 use crate::app::components::table_row::{NameCell, ResourceRow as ResourceRowView};

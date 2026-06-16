@@ -116,6 +116,7 @@ where
             data-tip=value
             style=move || color.map(|c| {
                 let v = c.get();
+                if v.is_empty() { return String::new(); }
                 format!("color:var(--{v});--flash-bg:color-mix(in srgb, var(--{v}) 45%, transparent)")
             }).unwrap_or_default()>
             // Newlines mark a list value; collapse to a compact inline form for the

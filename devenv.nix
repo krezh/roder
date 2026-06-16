@@ -14,7 +14,6 @@
   languages.rust = {
     enable = true;
     channel = "stable";
-    wild.enable = true;
     lsp.enable = true;
     components = [
       "rustc"

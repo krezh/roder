@@ -197,6 +197,13 @@ pub(crate) fn LogsView(
                     // Extract timestamp if present (ISO 8601 format at start of line)
                     let (timestamp, content) = extract_timestamp(&msg);
                     let msg_html = ansi_to_html(&content);
+                    let lvl_label = match lvl {
+                        "error" => Some("ERR"),
+                        "warn"  => Some("WRN"),
+                        "info"  => Some("INF"),
+                        "debug" => Some("DBG"),
+                        _       => None,
+                    };
                     view! {
                         <div class="log-line">
                             {pod.map(|p| {
@@ -204,7 +211,8 @@ pub(crate) fn LogsView(
                                 view! { <span class="log-pod" style=style>{p}</span> }
                             })}
                             {move || show_timestamps.get().then(|| timestamp.clone().map(|ts| view! { <span class="log-ts">{ts}</span> }))}
-                            <span class=format!("log-msg log-{lvl}") inner_html=msg_html></span>
+                            {lvl_label.map(|label| view! { <span class=format!("log-lvl log-lvl-{lvl}")>{label}</span> })}
+                            <span class="log-msg" inner_html=msg_html></span>
                         </div>
                     }
                 }

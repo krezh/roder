@@ -39,7 +39,6 @@
   display: grid;
   grid-template-columns: subgrid;
   grid-column: 1 / -1;
-  border-bottom: 1px solid var(--border);
 }
 .grid-row.head {
   position: sticky;

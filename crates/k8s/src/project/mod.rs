@@ -285,12 +285,8 @@ fn project_cells(
 /// internal bookkeeping, never useful to browse, and typically outnumber real secrets
 /// by an order of magnitude in Flux-managed clusters.
 pub fn should_hide(group: &str, kind: &str, obj: &DynamicObject) -> bool {
-    if group == "" && kind == "Secret" {
-        let ty = obj
-            .data
-            .get("type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+    if group.is_empty() && kind == "Secret" {
+        let ty = obj.data.get("type").and_then(|v| v.as_str()).unwrap_or("");
         return ty == "helm.sh/release.v1";
     }
     false

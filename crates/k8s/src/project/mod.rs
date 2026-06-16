@@ -279,6 +279,23 @@ fn project_cells(
     (cells, vec![], status)
 }
 
+/// Returns true for objects that should be hidden from the default view.
+///
+/// Helm stores each release revision as a `helm.sh/release.v1` Secret; these are
+/// internal bookkeeping, never useful to browse, and typically outnumber real secrets
+/// by an order of magnitude in Flux-managed clusters.
+pub fn should_hide(group: &str, kind: &str, obj: &DynamicObject) -> bool {
+    if group == "" && kind == "Secret" {
+        let ty = obj
+            .data
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        return ty == "helm.sh/release.v1";
+    }
+    false
+}
+
 /// Project an object into a row for the given (group, kind). `usage` carries the
 /// pod's live metrics entry (current + previous) from metrics-server, when available;
 /// `pvc_usage` carries the live kubelet-reported filesystem usage for PVCs; `crd`

@@ -16,6 +16,7 @@ use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomRe
 use kube::api::{
     Api, DeleteParams, DynamicObject, ListParams, LogParams, Patch, PatchParams, PostParams,
 };
+use kube::core::PartialObjectMeta;
 use kube::runtime::watcher;
 use roder_core::{
     Category, ClusterOverview, HealthRollup, MetricsPoint, NodeSummary, ObjectDetail, ObjectEvent,
@@ -835,11 +836,11 @@ fn spawn_crd_watch(
     tokio::spawn(async move {
         loop {
             let client = (*cluster.client()).clone();
-            let api: Api<CustomResourceDefinition> = Api::all(client);
+            let api: Api<PartialObjectMeta<CustomResourceDefinition>> = Api::all(client);
             // Metadata-only watch: we just need to know a CRD changed, not its
             // (potentially megabyte) schema — so this never deserializes the
             // heavy CRD bodies. The actual column harvest is `printer_columns::load`.
-            let stream = watcher::metadata_watcher(api, watcher::Config::default());
+            let stream = watcher::watcher(api, watcher::Config::default());
             futures::pin_mut!(stream);
             while let Some(event) = stream.next().await {
                 if let Err(e) = event {

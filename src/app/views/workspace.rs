@@ -15,9 +15,14 @@ pub(crate) fn WorkspaceView() -> impl IntoView {
     // One row signal per pane (keyed by kind_key). Non-reactive storage so the
     // multi-watch Effect can write into individual signals without loops.
     let pane_rows: StoredValue<HashMap<String, RowMap>> = StoredValue::new(HashMap::new());
+    // False until the first SSE Snapshot arrives for each pane. Prevents KindTable
+    // from mounting with empty rows on SPA navigation (where catalog is already loaded
+    // so KindTable would otherwise appear before the SSE snapshot lands).
+    let pane_loaded: StoredValue<HashMap<String, RwSignal<bool>>> =
+        StoredValue::new(HashMap::new());
 
     // Single SSE connection for all workspace panes. Reconnects whenever the
-    // pane set changes (add/remove/namespace change), replacing the old handle.
+    // pane set or any pane's namespace changes (both are stored in ws.panes).
     let reconnect = RwSignal::new(0u32);
     Effect::new(move |_prev: Option<Option<data::SseHandle>>| {
         reconnect.track();
@@ -26,14 +31,18 @@ pub(crate) fn WorkspaceView() -> impl IntoView {
             return None;
         }
 
+        // Remove stale entries for panes that were closed. Signals for remaining
+        // panes were created by the For item body (stable scope) — never here.
         pane_rows.update_value(|map| {
             map.retain(|k, _| panes.iter().any(|p| &p.kind_key == k));
-            for p in &panes {
-                map.entry(p.kind_key.clone())
-                    .or_insert_with(|| RwSignal::new(HashMap::new()));
-            }
+        });
+        pane_loaded.update_value(|map| {
+            map.retain(|k, _| panes.iter().any(|p| &p.kind_key == k));
         });
 
+        // Build the watch URL from ws.panes directly. Namespace changes arrive
+        // here because on_ns_persist uses ws.update (tracked), so changing a
+        // pane's namespace re-runs this Effect and reconnects the SSE stream.
         let url = data::watch_multi_url(
             &panes
                 .iter()
@@ -44,6 +53,7 @@ pub(crate) fn WorkspaceView() -> impl IntoView {
         data::subscribe_multi(
             &url,
             move |key, event| {
+                let is_snapshot = matches!(event, WatchEvent::Snapshot { .. });
                 pane_rows.with_value(|map| {
                     if let Some(&rows) = map.get(&key) {
                         match event {
@@ -65,6 +75,13 @@ pub(crate) fn WorkspaceView() -> impl IntoView {
                         }
                     }
                 });
+                if is_snapshot {
+                    pane_loaded.with_value(|map| {
+                        if let Some(&loaded) = map.get(&key) {
+                            loaded.set(true);
+                        }
+                    });
+                }
             },
             move || {
                 set_timeout(
@@ -89,24 +106,41 @@ pub(crate) fn WorkspaceView() -> impl IntoView {
                 let:cfg
             >
                 {
+                    // Signals are created here (stable For-item scope) so they are
+                    // never owned by the SSE Effect scope and survive Effect re-runs.
                     pane_rows.update_value(|map| {
                         map.entry(cfg.kind_key.clone())
                             .or_insert_with(|| RwSignal::new(HashMap::new()));
                     });
                     let rows_sig = pane_rows
                         .with_value(|map| *map.get(&cfg.kind_key).expect("just inserted"));
+                    pane_loaded.update_value(|map| {
+                        map.entry(cfg.kind_key.clone())
+                            .or_insert_with(|| RwSignal::new(false));
+                    });
+                    let loaded_sig = pane_loaded
+                        .with_value(|map| *map.get(&cfg.kind_key).expect("just inserted"));
+                    // Local namespace signal — drives the KindTable dropdown and is
+                    // persisted to ws (which re-triggers the SSE Effect) on change.
+                    let pane_ns = RwSignal::new(cfg.namespace.clone());
                     let close_key = cfg.kind_key.clone();
-                    let ns_key = cfg.kind_key.clone();
+                    let persist_key = cfg.kind_key.clone();
                     view! {
                         <PaneView
                             config=cfg
                             rows_sig=rows_sig
+                            loaded_sig=loaded_sig
+                            pane_ns=pane_ns
                             on_close=Callback::new(move |_| {
                                 ws.update(|w| w.panes.retain(|p| p.kind_key != close_key));
                             })
-                            on_ns_change=Callback::new(move |ns: Option<String>| {
+                            on_ns_persist=Callback::new(move |ns: Option<String>| {
+                                // Persist namespace to ws. Using update (not update_untracked)
+                                // so the SSE Effect re-runs and reconnects with the new namespace.
                                 ws.update(|w| {
-                                    if let Some(p) = w.panes.iter_mut().find(|p| p.kind_key == ns_key) {
+                                    if let Some(p) =
+                                        w.panes.iter_mut().find(|p| p.kind_key == persist_key)
+                                    {
                                         p.namespace = ns;
                                     }
                                 });
@@ -131,8 +165,13 @@ pub(crate) fn WorkspaceView() -> impl IntoView {
 fn PaneView(
     config: PaneConfig,
     rows_sig: RowMap,
+    loaded_sig: RwSignal<bool>,
+    /// Local namespace signal shared with KindTable for the dropdown. Writing
+    /// triggers on_ns_persist → ws.update → SSE Effect reconnects.
+    pane_ns: RwSignal<Option<String>>,
     on_close: Callback<()>,
-    on_ns_change: Callback<Option<String>>,
+    /// Persists the namespace to ws (triggers SSE reconnect via ws.update).
+    on_ns_persist: Callback<Option<String>>,
 ) -> impl IntoView {
     let catalog = expect_context::<Catalog>().0;
     let _detail = expect_context::<RwSignal<Option<DetailTarget>>>();
@@ -143,33 +182,36 @@ fn PaneView(
 
     let text_filter = RwSignal::new(String::new());
     let cfg_sv = StoredValue::new(config.clone());
-    let pane_ns: RwSignal<Option<String>> = RwSignal::new(config.namespace);
 
-    // Skip the first run (initial mount) to avoid a spurious ws.update.
     Effect::new(move |prev: Option<()>| {
         let ns = pane_ns.get();
         if prev.is_some() {
-            on_ns_change.run(ns);
+            on_ns_persist.run(ns);
         }
     });
 
     view! {
         <div class="pane">
-            {move || kind.get().map(|k| {
-                let sel = cfg_sv.get_value().selector.clone();
-                view! {
-                    <KindTable
-                        kind=k
-                        url_fn=move || None
-                        rows_override=rows_sig
-                        on_close=on_close
-                        namespace=None
-                        selector=sel
-                        text_filter=text_filter
-                        ns_filter=pane_ns
-                        keyboard=false />
-                }
-            })}
+            {move || {
+                let k = kind.get();
+                let loaded = loaded_sig.get();
+                k.and_then(|k| {
+                    if !loaded { return None; }
+                    let sel = cfg_sv.get_value().selector.clone();
+                    Some(view! {
+                        <KindTable
+                            kind=k
+                            url_fn=move || None
+                            rows_override=rows_sig
+                            on_close=on_close
+                            namespace=None
+                            selector=sel
+                            text_filter=text_filter
+                            ns_filter=pane_ns
+                            keyboard=false />
+                    })
+                })
+            }}
         </div>
     }
 }

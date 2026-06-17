@@ -31,3 +31,15 @@ pub(crate) fn dot_class(status: RowStatus) -> &'static str {
         RowStatus::Done | RowStatus::Unknown => "unknown",
     }
 }
+
+/// Color threshold for the CPU/MEM percentage cells (%CPU/R, %CPU/L, %MEM/R,
+/// %MEM/L): red at 90+, yellow at 70+, default for `n/a` or below 70. The cell
+/// text is the rounded integer percentage produced by the projector (e.g.
+/// "75") so a plain `parse::<i64>` is enough.
+pub(crate) fn pct_thresh_color(value: &str) -> &'static str {
+    match value.parse::<i64>() {
+        Ok(n) if n >= 90 => "error",
+        Ok(n) if n >= 70 => "warn",
+        _ => "",
+    }
+}

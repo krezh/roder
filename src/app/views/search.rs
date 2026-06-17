@@ -43,6 +43,10 @@ struct UnifiedColumn {
     /// coloured by the value itself — green for "true", amber for "false" —
     /// rather than by the row's status. Used for PVC Mount, etc.
     bool_colored: bool,
+    /// Whether this column holds a saturation percentage and should be tinted
+    /// by its value (red at 90+, yellow at 70+). Used for %CPU/R, %CPU/L,
+    /// %MEM/R, %MEM/L.
+    pct_thresh: bool,
 }
 
 /// Build unified column schema from multiple resource kinds.
@@ -61,6 +65,7 @@ fn build_unified_columns(kinds: &[Arc<ResourceKind>]) -> Vec<UnifiedColumn> {
             colored: false,
             is_metric: false,
             bool_colored: false,
+            pct_thresh: false,
         });
         seen.insert("Namespace".to_string());
     }
@@ -71,6 +76,7 @@ fn build_unified_columns(kinds: &[Arc<ResourceKind>]) -> Vec<UnifiedColumn> {
         colored: false,
         is_metric: false,
         bool_colored: false,
+        pct_thresh: false,
     });
     seen.insert("Name".to_string());
 
@@ -82,12 +88,14 @@ fn build_unified_columns(kinds: &[Arc<ResourceKind>]) -> Vec<UnifiedColumn> {
                 let is_metric =
                     col.starts_with("CPU") || col.starts_with("MEM") || col.starts_with("%");
                 let bool_colored = matches!(col.as_str(), "Mount");
+                let pct_thresh = matches!(col.as_str(), "%CPU/R" | "%CPU/L" | "%MEM/R" | "%MEM/L");
                 unified.push(UnifiedColumn {
                     name: col.clone(),
                     kind_column_idx: Some(idx),
                     colored,
                     is_metric,
                     bool_colored,
+                    pct_thresh,
                 });
             }
         }
@@ -99,6 +107,7 @@ fn build_unified_columns(kinds: &[Arc<ResourceKind>]) -> Vec<UnifiedColumn> {
         colored: false,
         is_metric: false,
         bool_colored: false,
+        pct_thresh: false,
     });
 
     unified
@@ -245,6 +254,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                 let ent = entering;
                 let rm = removing;
                 let pfx = prefix.clone();
+                let probe_url = url.clone();
                 data::subscribe_with_error(
                     &url,
                     move |ev| {
@@ -255,7 +265,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                             // deletes would orphan entries in the parent).
                             Snapshot { columns, rows: r } => {
                                 if let Some(c) = conn {
-                                    c.set(true);
+                                    c.set(None);
                                 }
                                 apply_event(
                                     kr,
@@ -309,7 +319,11 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                     },
                     move || {
                         if let Some(c) = conn {
-                            c.set(false);
+                            let probe = probe_url.clone();
+                            leptos::task::spawn_local(async move {
+                                let msg = data::probe_error(probe).await;
+                                c.set(Some(msg));
+                            });
                         }
                         set_timeout(
                             move || reconnect.update(|n| *n += 1),
@@ -413,7 +427,10 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
             return;
         }
         let _ = shown_uids.with(|v| v.len());
+        merged_rows.track();
+        let ncols = cols.len();
         let mut col_maxes: Vec<String> = cols.iter().map(|c| c.name.clone()).collect();
+        let mut col_has_trend = vec![false; ncols];
         merged_rows.with_untracked(|m| {
             for mr in m.values() {
                 for (i, col) in cols.iter().enumerate() {
@@ -421,10 +438,35 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                     if val.len() > col_maxes[i].len() {
                         col_maxes[i] = val.to_string();
                     }
+                    if matches!(mr.row.trends.get(i), Some(Trend::Up | Trend::Down)) {
+                        col_has_trend[i] = true;
+                    }
                 }
             }
         });
-        sizer.set(col_maxes);
+        let col_maxes: Vec<String> = col_maxes
+            .into_iter()
+            .enumerate()
+            .map(|(i, s)| {
+                if col_has_trend[i] {
+                    format!("{s} ↑")
+                } else {
+                    s
+                }
+            })
+            .collect();
+        let n = col_maxes.len();
+        sizer.update(|old| {
+            if old.len() != n {
+                *old = col_maxes;
+            } else {
+                for (o, n) in old.iter_mut().zip(col_maxes.iter()) {
+                    if n.len() > o.len() {
+                        *o = n.clone();
+                    }
+                }
+            }
+        });
     });
 
     // Bulk action helper
@@ -570,6 +612,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                                             let col_colored = col.colored;
                                             let col_is_metric = col.is_metric;
                                             let col_bool_colored = col.bool_colored;
+                                            let col_pct_thresh = col.pct_thresh;
                                             match col.name.as_str() {
                                                 "Name" => {
                                                     view! {
@@ -629,6 +672,42 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                                                                     } else {
                                                                         crate::app::util::color::dot_class(merged.get().map(|mr| mr.row.status).unwrap_or(RowStatus::Unknown))
                                                                     }
+                                                                }) />
+                                                        }.into_any()
+                                                    } else if col_pct_thresh {
+                                                        // Saturation percentage: red at 90+, yellow at 70+.
+                                                        // `is_metric` is true (starts with %), so we keep
+                                                        // `no_flash` and forward the trend arrow.
+                                                        let trend_sig = Signal::derive(move || {
+                                                            let cn = col_name_sv.get_value();
+                                                            merged.get().and_then(|mr| {
+                                                                let i = mr.kind.columns.iter().position(|c| c.as_str() == cn.as_str())?;
+                                                                mr.row.trends.get(i).copied()
+                                                            }).unwrap_or(Trend::None)
+                                                        });
+                                                        view! {
+                                                            <FlashTd value=move || {
+                                                                let cn = col_name_sv.get_value();
+                                                                merged.get()
+                                                                    .and_then(|mr| {
+                                                                        let i = mr.kind.columns.iter().position(|c| c.as_str() == cn.as_str())?;
+                                                                        mr.row.cells.get(i).cloned()
+                                                                    })
+                                                                    .unwrap_or_default()
+                                                            } no_flash=true trend=trend_sig
+                                                                color=Signal::derive(move || {
+                                                                    // `merged.get()` yields an owned
+                                                                    // `Option<MergedRow>`, so we clone the
+                                                                    // cell into a local `String` and pass a
+                                                                    // `&str` view of it to `pct_thresh_color`.
+                                                                    let cn = col_name_sv.get_value();
+                                                                    let v = merged.get()
+                                                                        .and_then(|mr| {
+                                                                            let i = mr.kind.columns.iter().position(|c| c.as_str() == cn.as_str())?;
+                                                                            mr.row.cells.get(i).cloned()
+                                                                        })
+                                                                        .unwrap_or_default();
+                                                                    crate::app::util::color::pct_thresh_color(&v)
                                                                 }) />
                                                         }.into_any()
                                                     } else {

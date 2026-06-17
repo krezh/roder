@@ -13,7 +13,7 @@ use tokio::sync::{broadcast, Mutex, Notify, RwLock};
 use crate::client::{make_api, ClusterAccess};
 use crate::metrics::PvcUsage;
 use crate::printer_columns::{self, ColumnMap, PrinterCol};
-use crate::project::{columns_for, project_row};
+use crate::project::{columns_for, project_row, should_hide};
 
 /// Broadcast backlog per informer. Each slot can hold a full `Snapshot` (every
 /// row), so a deep buffer multiplies memory on busy kinds. Kept modest: when a
@@ -384,6 +384,9 @@ fn start_informer(
                             }
                             Ok(Event::InitApply(mut obj)) => {
                                 obj.metadata.managed_fields = None;
+                                if should_hide(&group, &kind, &obj) {
+                                    continue;
+                                }
                                 let (usage, pvc_u) = enrichments(
                                     &obj,
                                     is_pod,
@@ -419,6 +422,9 @@ fn start_informer(
                             }
                             Ok(Event::Apply(mut obj)) => {
                                 obj.metadata.managed_fields = None;
+                                if should_hide(&group, &kind, &obj) {
+                                    continue;
+                                }
                                 let (usage, pvc_u) = enrichments(
                                     &obj,
                                     is_pod,

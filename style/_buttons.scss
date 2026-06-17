@@ -1,0 +1,105 @@
+/* ---- buttons ---- */
+
+// Base for topbar chip buttons (Search, Errors, Namespace).
+%chip-btn {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  &:hover { color: var(--fg); }
+  kbd {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0 0.3rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+}
+
+// Inline SVG shift-key icon used inside kbd elements.
+.key-shift {
+  width: 0.8em;
+  height: 0.72em;
+  flex-shrink: 0;
+}
+
+.palette-btn { @extend %chip-btn; }
+
+.errfilter {
+  @extend %chip-btn;
+  &.active {
+    color: var(--error);
+    border-color: var(--error);
+  }
+}
+
+.ns-palette-btn {
+  @extend %chip-btn;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// Topbar mobile menu toggle.
+.hamburger {
+  display: none;
+  background: none;
+  border: none;
+  color: var(--fg);
+  font-size: 1.2rem;
+  cursor: pointer;
+}
+
+// Cluster-wide failing-pod count; clicking jumps to the filtered pods view.
+.failbadge {
+  background: color-mix(in srgb, var(--error) 16%, transparent);
+  border: 1px solid var(--error);
+  color: var(--error);
+  border-radius: 6px;
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+  font-weight: 600;
+  white-space: nowrap;
+  &:hover {
+    background: color-mix(in srgb, var(--error) 26%, transparent);
+  }
+}
+
+// Resource detail action bar buttons.
+.act {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 6px;
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+  font-size: 0.82rem;
+  &:hover { border-color: var(--accent); }
+  &.danger:hover {
+    border-color: var(--error);
+    color: var(--error);
+  }
+}
+.scale {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: center;
+  .scale-input {
+    width: 56px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--fg);
+    border-radius: 6px;
+    padding: 0.2rem 0.35rem;
+  }
+}
+.act-ok { color: var(--ok); font-size: 0.8rem; }
+.act-err { color: var(--error); font-size: 0.8rem; }

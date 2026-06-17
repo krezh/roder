@@ -17,6 +17,11 @@ pub struct ServerConfig {
     /// sessions survive a restart/reschedule — without a *stable* key across
     /// instances, every sealed cookie would be undecryptable after a restart.
     pub session_key: Option<[u8; 32]>,
+    /// Optional URL to redirect to after logout (`RODER_SIGNOUT_REDIRECT_URL`).
+    /// When set, the logout handler redirects here instead of `/auth/login` so
+    /// the OIDC provider can also end the SSO session (RP-initiated logout).
+    /// Example: `https://sso.example.com/application/o/roder/end-session/`
+    pub signout_redirect_url: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -42,12 +47,15 @@ impl ServerConfig {
             .trim_end_matches('/')
             .to_string();
 
+        let signout_redirect_url = std::env::var("RODER_SIGNOUT_REDIRECT_URL").ok();
+
         if dev_mode {
             return Ok(Self {
                 dev_mode,
                 base_url,
                 oidc: None,
                 session_key: None,
+                signout_redirect_url,
             });
         }
 
@@ -70,6 +78,7 @@ impl ServerConfig {
             base_url,
             oidc: Some(oidc),
             session_key,
+            signout_redirect_url,
         })
     }
 
@@ -186,6 +195,7 @@ mod tests {
             "RODER_OIDC_ALLOWED_GROUPS",
             "RODER_OIDC_GROUPS_CLAIM",
             "RODER_SESSION_KEY",
+            "RODER_SIGNOUT_REDIRECT_URL",
         ]);
         g.unset("RODER_DEV_MODE");
         g.set("RODER_BASE_URL", "https://roder.example.com");

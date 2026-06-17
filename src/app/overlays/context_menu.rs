@@ -25,8 +25,10 @@ pub(crate) fn ContextMenu() -> impl IntoView {
     let table_selected = expect_context::<TableSelected>().0;
     let table_rows = expect_context::<TableRows>().0;
 
+    let (snapshot, closing, do_close) = super::use_option_overlay(ctx);
+
     view! {
-        {move || ctx.get().map(|m| {
+        {move || snapshot.get().map(|m| {
             let (group, kind) = parse_key(&m.target.key);
             let kk = KindKind::new(&group, &kind);
             let is_pod = kk.is_pod();
@@ -61,7 +63,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             };
             let is_bulk = targets.len() > 1;
 
-            let open = { let t = m.target.clone(); move |_| { detail.set(Some(t.clone())); ctx.set(None); } };
+            let open = { let t = m.target.clone(); move |_| { detail.set(Some(t.clone())); do_close(); } };
             let has_logs = is_pod || is_workload || kk.is_job();
             let logs = {
                 let ts = targets.clone();
@@ -71,10 +73,10 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                         open_logs(log_pods, LogTarget::from_detail(t, agg));
                     }
                     if let Some(sel) = table_selected.get_value() { sel.set(Default::default()); }
-                    ctx.set(None);
+                    do_close();
                 }
             };
-            let goto_ns = { let ns = m.target.namespace.clone(); move |_| { selected_ns.set(ns.clone()); ctx.set(None); } };
+            let goto_ns = { let ns = m.target.namespace.clone(); move |_| { selected_ns.set(ns.clone()); do_close(); } };
             let goto_node = {
                 let node = m.node.clone();
                 move |_| {
@@ -86,12 +88,12 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                             detail.set(Some(DetailTarget { key, namespace: None, name: node }));
                         }
                     }
-                    ctx.set(None);
+                    do_close();
                 }
             };
             let copy = {
                 let names: Vec<String> = targets.iter().map(|t| t.name.clone()).collect();
-                move |_| { copy_to_clipboard(&names.join("\n")); ctx.set(None); }
+                move |_| { copy_to_clipboard(&names.join("\n")); do_close(); }
             };
             // Bulk-aware single-action closures — each captures its own clone of targets.
             macro_rules! bulk_act {
@@ -100,7 +102,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                     move |_| {
                         for t in &ts { fire_action($action, t); }
                         if let Some(sel) = table_selected.get_value() { sel.set(Default::default()); }
-                        ctx.set(None);
+                        do_close();
                     }
                 }};
             }
@@ -121,7 +123,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                         for t in &ts { fire_action("delete", t); }
                         if let Some(sel) = table_selected.get_value() { sel.set(Default::default()); }
                     });
-                    ctx.set(None);
+                    do_close();
                 }
             };
 
@@ -131,9 +133,9 @@ pub(crate) fn ContextMenu() -> impl IntoView {
 
             view! {
                 <div class="ctx-scrim"
-                    on:click=move |_| ctx.set(None)
-                    on:contextmenu=move |e: leptos::ev::MouseEvent| { e.prevent_default(); ctx.set(None); }></div>
-                <div class="ctx-menu" style=style>
+                    on:click=move |_| do_close()
+                    on:contextmenu=move |e: leptos::ev::MouseEvent| { e.prevent_default(); do_close(); }></div>
+                <div class="ctx-menu" class:closing=move || closing.get() style=style>
                     {is_bulk.then(|| view! {
                         <div class="ctx-item ctx-bulk-header">{targets.len()}" resources"</div>
                     })}
@@ -158,7 +160,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                                     } />
                                 <button on:click=move |_| {
                                     fire_action_with("scale", &t, serde_json::json!({ "replicas": scale_n.get_untracked() }));
-                                    ctx.set(None);
+                                    do_close();
                                 }>"→"</button>
                             </div>
                         }

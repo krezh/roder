@@ -5,55 +5,37 @@
 use leptos::prelude::*;
 use roder_core::{ResourceKind, ResourceRow, RowStatus};
 
+use crate::app::components::icons::ShiftIcon;
 use crate::app::hooks::use_sse_subscription;
-use crate::app::state::{Catalog, ConnectionState, NavOpen, OnlyProblems, PaletteOpen};
+use crate::app::state::{
+    Catalog, ConnectionState, NavOpen, NsPaletteOpen, OnlyProblems, PaletteOpen,
+};
 use crate::app::util::format::pct;
 use crate::data;
 
 #[component]
 pub(crate) fn Topbar() -> impl IntoView {
     let selected_ns = expect_context::<RwSignal<Option<String>>>();
-    let selected_kind = expect_context::<RwSignal<Option<ResourceKind>>>();
     let nav_open = expect_context::<NavOpen>().0;
     let palette_open = expect_context::<PaletteOpen>().0;
+    let ns_palette_open = expect_context::<NsPaletteOpen>().0;
     let only_problems = expect_context::<OnlyProblems>().0;
-    let namespaces = expect_context::<LocalResource<Result<Vec<String>, String>>>();
 
     view! {
         <header class="topbar">
             <button class="hamburger" on:click=move |_| nav_open.update(|o| *o = !*o)>"☰"</button>
-            <span class="brand" on:click=move |_| selected_kind.set(None)>"Roder"</span>
-            <ConnectionDot />
+            <Brand />
             <button class="palette-btn" on:click=move |_| palette_open.set(true)>
-                "Search " <kbd>"⌘K"</kbd>
+                "Search " <kbd><ShiftIcon />"K"</kbd>
             </button>
             <button class="errfilter" class:active=move || only_problems.get()
-                title="Show only problems (Ctrl+Z)"
                 on:click=move |_| only_problems.update(|o| *o = !*o)>
-                "⚠ Errors"
+                "Errors " <kbd><ShiftIcon />"E"</kbd>
             </button>
-            <div class="ns-select">
-                <select on:change=move |ev| {
-                    let v = event_target_value(&ev);
-                    selected_ns.set(if v.is_empty() { None } else { Some(v) });
-                }>
-                    <option value="" prop:selected=move || selected_ns.get().is_none()>"All namespaces"</option>
-                    <Suspense>
-                        {move || namespaces.get().map(|res| match res {
-                            Ok(list) => list.into_iter().map(|ns| {
-                                let label = ns.clone();
-                                let ns_sel = ns.clone();
-                                view! {
-                                    <option value=ns prop:selected=move || selected_ns.get().as_deref() == Some(ns_sel.as_str())>
-                                        {label}
-                                    </option>
-                                }
-                            }).collect_view().into_any(),
-                            Err(_) => ().into_any(),
-                        })}
-                    </Suspense>
-                </select>
-            </div>
+            <button class="ns-palette-btn" on:click=move |_| ns_palette_open.set(true)>
+                {move || selected_ns.get().unwrap_or_else(|| "All namespaces".to_string())}
+                " " <kbd><ShiftIcon />"N"</kbd>
+            </button>
             <FailingBadge />
             <TopUsage />
             <Identity />
@@ -106,12 +88,13 @@ fn TopUsage() -> impl IntoView {
                             {nodes.into_iter().map(|n| {
                                 let c = pct(n.cpu_used, n.cpu_cores);
                                 let m = pct(n.mem_used, n.mem_bytes);
-                                let ready_label = if n.ready { "✓" } else { "✕" };
                                 view! {
                                     <div class="tip-row">
-                                        <span class="tip-node"
-                                            class:tip-node-warn=move || !n.ready>
-                                            {ready_label}" "{n.name}
+                                        <span class="tip-node">
+                                            <span class=if n.ready { "tip-node-ok" } else { "tip-node-err" }>
+                                                {if n.ready { "✓" } else { "✕" }}
+                                            </span>
+                                            " "{n.name}
                                         </span>
                                         <span>"CPU "{format!("{c:.0}%")}</span>
                                         <span>"Mem "{format!("{m:.0}%")}</span>
@@ -175,15 +158,21 @@ fn FailingBadge() -> impl IntoView {
     }
 }
 
-/// A small dot showing whether the SSE data stream is live or reconnecting.
 #[component]
-fn ConnectionDot() -> impl IntoView {
+fn Brand() -> impl IntoView {
+    let selected_kind = expect_context::<RwSignal<Option<ResourceKind>>>();
     let connected = expect_context::<ConnectionState>().0;
     view! {
-        <span class="conn-dot-wrap">
-            <span class="conn-dot" class:conn-dot-ok=move || connected.get()></span>
-            <span class="tooltip conn-dot-tip">
-                {move || if connected.get() { "Connected" } else { "Reconnecting…" }}
+        <span class="brand"
+              class:brand-disconnected=move || connected.get().is_some()
+              on:click=move |_| selected_kind.set(None)>
+            <span style="--i:0">"R"</span>
+            <span style="--i:1">"o"</span>
+            <span style="--i:2">"d"</span>
+            <span style="--i:3">"e"</span>
+            <span style="--i:4">"r"</span>
+            <span class="brand-tip tooltip">
+                {move || connected.get().unwrap_or_else(|| "Connected".to_string())}
             </span>
         </span>
     }
@@ -202,7 +191,7 @@ fn Identity() -> impl IntoView {
                             .or_else(|| v.get("name").and_then(|n| n.as_str()))
                             .or_else(|| v.get("subject").and_then(|s| s.as_str()))
                             .unwrap_or("anonymous").to_string();
-                        view! { <span>{who}</span> <a class="logout" href="/auth/logout">"sign out"</a> }.into_any()
+                        view! { <span>{who}</span> <a class="logout" href="/auth/logout" rel="external">"sign out"</a> }.into_any()
                     }
                     Err(_) => ().into_any(),
                 })}

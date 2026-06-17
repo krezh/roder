@@ -1,30 +1,66 @@
+/* ---- shared overlay animations ---- */
+
+/* Centered modals, palettes, dialogs: pop in from center with spring overshoot. */
+@keyframes overlay-in {
+  from { opacity: 0; scale: 0.82; }
+}
+@keyframes overlay-out {
+  to { opacity: 0; scale: 0.92; }
+}
+/* Context menus / dropdowns: smaller pop + slide from trigger. */
+@keyframes popup-in {
+  from { opacity: 0; scale: 0.9; translate: 0 -4px; }
+}
+@keyframes popup-out {
+  to { opacity: 0; scale: 0.95; translate: 0 -4px; }
+}
+/* Backdrop scrims: fade only. */
+@keyframes scrim-in {
+  from { opacity: 0; }
+}
+@keyframes scrim-out {
+  to { opacity: 0; }
+}
+
+/* ---- closing state (applied while exit animation plays before DOM removal) ---- */
+.palette.closing,
+.pmodal.closing,
+.modal.closing,
+.shortcuts-modal.closing {
+  animation: overlay-out 0.16s ease-in forwards;
+}
+.palette-scrim.closing,
+.pmodal-scrim.closing,
+.modal-scrim.closing,
+.shortcuts-scrim.closing {
+  animation: scrim-out 0.16s ease-in forwards;
+}
+.ctx-menu.closing {
+  animation: popup-out 0.16s ease-in forwards;
+}
+
 /* ---- centered pod modal ---- */
 .pmodal-scrim {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.5);
-  z-index: 200;
+  z-index: 60;
+  animation: scrim-in 0.15s ease;
 }
 .pmodal {
   position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 201;
+  inset: 0;
+  margin: auto;
+  z-index: 61;
   width: min(760px, 92vw);
+  height: fit-content;
   max-height: 85vh;
   overflow: auto;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
-  animation: pmodal-in 0.14s ease;
-}
-@keyframes pmodal-in {
-  from {
-    opacity: 0;
-    transform: translate(-50%, -50%) scale(0.97);
-  }
+  animation: overlay-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .pmodal-head {
   position: sticky;
@@ -60,11 +96,11 @@
 .ctx-scrim {
   position: fixed;
   inset: 0;
-  z-index: 500;
+  z-index: 70;
 }
 .ctx-menu {
   position: fixed;
-  z-index: 501;
+  z-index: 71;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -73,7 +109,7 @@
   min-width: 190px;
   display: flex;
   flex-direction: column;
-  animation: rd-in 0.1s ease;
+  animation: popup-in 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .ctx-item {
   background: none;
@@ -138,35 +174,26 @@
 }
 
 /* ---- confirm modal ---- */
-@keyframes modal-in {
-  from {
-    opacity: 0;
-    transform: translateX(-50%) scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(-50%) scale(1);
-  }
-}
 .modal-scrim {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.5);
-  z-index: 50;
+  z-index: 40;
+  animation: scrim-in 0.15s ease;
 }
 .modal {
   position: fixed;
-  top: 28%;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 51;
+  inset: 0;
+  margin: auto;
+  z-index: 41;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
   padding: 1.1rem 1.2rem;
   width: min(380px, 92vw);
-  animation: modal-in 0.14s ease;
+  height: fit-content;
+  animation: overlay-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
   .modal-msg {
     margin-bottom: 1rem;
   }
@@ -182,22 +209,25 @@
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.6);
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  animation: fade-in 0.12s ease;
+  z-index: 50;
+  animation: scrim-in 0.15s ease;
 }
 .shortcuts-modal {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  z-index: 51;
+  width: min(520px, 92vw);
+  height: fit-content;
+  max-height: 80vh;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
-  width: min(520px, 92vw);
-  max-height: 80vh;
   display: flex;
   flex-direction: column;
-  animation: modal-in 0.14s ease;
+  overflow: hidden;
+  animation: overlay-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .shortcuts-head {
   display: flex;

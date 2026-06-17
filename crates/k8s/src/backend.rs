@@ -16,6 +16,7 @@ use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomRe
 use kube::api::{
     Api, DeleteParams, DynamicObject, ListParams, LogParams, Patch, PatchParams, PostParams,
 };
+use kube::core::PartialObjectMeta;
 use kube::runtime::watcher;
 use roder_core::{
     Category, ClusterOverview, HealthRollup, MetricsPoint, NodeSummary, ObjectDetail, ObjectEvent,
@@ -599,45 +600,35 @@ impl Backend {
         }
     }
 
-    /// When a pod has multiple containers and no container was explicitly selected,
-    /// return the name of the first non-init container so the kube API doesn't
-    /// reject the request with "please specify the container to tail".
-    async fn resolve_container(
-        &self,
-        ns: &str,
-        pod: &str,
-        container: Option<String>,
-    ) -> Option<String> {
-        if container.is_some() {
-            return container;
-        }
-        // Try the informer cache first; fall back to a live API call on cache miss
-        // (e.g. pods in namespaces not actively watched).
+    /// Resolve the list of main (non-init) container names for a pod.
+    /// Tries the informer cache first, falls back to a live API call.
+    async fn pod_containers(&self, ns: &str, pod: &str) -> Vec<String> {
         if let Some(obj) = self.registry.cached_object("/v1/Pod", Some(ns), pod).await {
-            let containers = obj
+            if let Some(arr) = obj
                 .data
                 .get("spec")
                 .and_then(|s| s.get("containers"))
-                .and_then(|c| c.as_array())?;
-            if containers.len() <= 1 {
-                return None;
+                .and_then(|c| c.as_array())
+            {
+                return arr
+                    .iter()
+                    .filter_map(|c| c.get("name")?.as_str().map(str::to_string))
+                    .collect();
             }
-            return containers
-                .first()?
-                .get("name")?
-                .as_str()
-                .map(|s| s.to_string());
         }
-        // Cache miss: fetch the pod directly so we still pick the right container.
         let api: Api<Pod> = Api::namespaced(self.client(), ns);
-        let containers = api.get(pod).await.ok()?.spec?.containers;
-        if containers.len() <= 1 {
-            return None;
-        }
-        containers.into_iter().next().map(|c| c.name)
+        api.get(pod)
+            .await
+            .ok()
+            .and_then(|p| p.spec)
+            .map(|s| s.containers.into_iter().map(|c| c.name).collect())
+            .unwrap_or_default()
     }
 
-    /// Recent (tail) pod logs.
+    /// Live pod logs as SSE. When a specific container is requested it is streamed
+    /// without a prefix. When the pod has multiple containers and none was specified,
+    /// all containers are streamed in parallel with `container │ ` line prefixes so
+    /// the frontend can show a container pill per line.
     pub async fn logs(
         &self,
         ns: &str,
@@ -646,17 +637,71 @@ impl Backend {
         follow: bool,
     ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>, K8sError> {
         let api: Api<Pod> = Api::namespaced(self.client(), ns);
-        let container = self.resolve_container(ns, pod, container).await;
-        let lp = LogParams {
-            follow,
-            tail_lines: Some(500),
-            timestamps: false,
-            container,
-            ..Default::default()
-        };
-        let reader = api.log_stream(pod, &lp).await.map_err(api_err)?;
-        let lines = reader.lines().filter_map(|r| async move { r.ok() });
-        Ok(Box::pin(lines))
+
+        if let Some(name) = container {
+            // Explicit container selection — stream it without any prefix.
+            let lp = LogParams {
+                follow,
+                tail_lines: Some(500),
+                timestamps: false,
+                container: Some(name),
+                ..Default::default()
+            };
+            let lines = api
+                .log_stream(pod, &lp)
+                .await
+                .map_err(api_err)?
+                .lines()
+                .filter_map(|r| async move { r.ok() });
+            return Ok(Box::pin(lines));
+        }
+
+        let containers = self.pod_containers(ns, pod).await;
+
+        if containers.len() <= 1 {
+            // Single container — stream without prefix.
+            let lp = LogParams {
+                follow,
+                tail_lines: Some(500),
+                timestamps: false,
+                container: containers.into_iter().next(),
+                ..Default::default()
+            };
+            let lines = api
+                .log_stream(pod, &lp)
+                .await
+                .map_err(api_err)?
+                .lines()
+                .filter_map(|r| async move { r.ok() });
+            return Ok(Box::pin(lines));
+        }
+
+        // Multiple containers — stream all with `container │ ` prefix.
+        let mut streams: Vec<Pin<Box<dyn Stream<Item = String> + Send>>> = Vec::new();
+        for name in containers {
+            let lp = LogParams {
+                follow,
+                tail_lines: Some(500),
+                timestamps: false,
+                container: Some(name.clone()),
+                ..Default::default()
+            };
+            match api.log_stream(pod, &lp).await {
+                Ok(reader) => {
+                    let s = reader
+                        .lines()
+                        .filter_map(|r| async move { r.ok() })
+                        .map(move |line| format!("{name} │ {line}"));
+                    streams.push(Box::pin(s));
+                }
+                Err(e) => {
+                    tracing::debug!("failed to open log stream for container {name}: {e}");
+                    let msg = format!("{name} │ [roder] failed to stream logs: {e}");
+                    streams.push(Box::pin(futures::stream::once(async move { msg })));
+                }
+            }
+        }
+        Ok(Box::pin(futures::stream::select_all(streams)))
     }
 
     /// Aggregated logs for a workload: resolve its pods by `spec.selector` and merge
@@ -835,11 +880,11 @@ fn spawn_crd_watch(
     tokio::spawn(async move {
         loop {
             let client = (*cluster.client()).clone();
-            let api: Api<CustomResourceDefinition> = Api::all(client);
+            let api: Api<PartialObjectMeta<CustomResourceDefinition>> = Api::all(client);
             // Metadata-only watch: we just need to know a CRD changed, not its
             // (potentially megabyte) schema — so this never deserializes the
             // heavy CRD bodies. The actual column harvest is `printer_columns::load`.
-            let stream = watcher::metadata_watcher(api, watcher::Config::default());
+            let stream = watcher::watcher(api, watcher::Config::default());
             futures::pin_mut!(stream);
             while let Some(event) = stream.next().await {
                 if let Err(e) = event {

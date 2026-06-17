@@ -9,7 +9,7 @@ members = ["crates/core", "crates/k8s", "crates/auth"]
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/krezh/roder"
-rust-version = "1.82"
+rust-version = "1.96"
 
 [workspace.dependencies]
 roder-core = { path = "crates/core" }
@@ -25,16 +25,17 @@ leptos_router = "0.8"
 # Server
 axum = "0.8"
 tokio = { version = "1", features = [
-    "rt-multi-thread",
-    "macros",
-    "sync",
-    "time",
+  "rt-multi-thread",
+  "macros",
+  "sync",
+  "time",
+  "signal",
 ] }
 tower = "0.5"
 tower-http = { version = "0.7", features = ["fs", "trace", "compression-br"] }
 
 # Wasm
-wasm-bindgen = "=0.2.125"
+wasm-bindgen = "0.2.125"
 console_error_panic_hook = "0.1"
 send_wrapper = "0.6"
 
@@ -84,9 +85,9 @@ rand = { version = "0.10", optional = true }
 aes-gcm = { version = "0.10", optional = true }
 time = { version = "0.3", optional = true }
 rustls = { version = "0.23", default-features = false, features = [
-    "ring",
-    "std",
-    "tls12",
+  "ring",
+  "std",
+  "tls12",
 ], optional = true }
 tokio-stream = { version = "0.1", features = ["sync"], optional = true }
 futures = { version = "0.3", optional = true }
@@ -98,21 +99,21 @@ wasm-bindgen = { workspace = true, optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
 js-sys = { version = "0.3", optional = true }
 gloo-net = { version = "0.7", default-features = false, features = [
-    "http",
-    "json",
+  "http",
+  "json",
 ], optional = true }
 web-sys = { version = "0.3", features = [
-    "EventSource",
-    "MessageEvent",
-    "Window",
-    "Navigator",
-    "Clipboard",
-    "Storage",
-    "Document",
-    "Element",
-    "EventTarget",
-    "TransitionEvent",
-    "DomRect",
+  "EventSource",
+  "MessageEvent",
+  "Window",
+  "Navigator",
+  "Clipboard",
+  "Storage",
+  "Document",
+  "Element",
+  "EventTarget",
+  "TransitionEvent",
+  "DomRect",
 ], optional = true }
 
 # Native (server) binary only — target-gated out of the wasm/hydrate build, and
@@ -134,34 +135,34 @@ serial_test = "3"
 [features]
 default = ["ssr"]
 hydrate = [
-    "leptos/hydrate",
-    "dep:send_wrapper",
-    "dep:console_error_panic_hook",
-    "dep:wasm-bindgen",
-    "dep:wasm-bindgen-futures",
-    "dep:js-sys",
-    "dep:gloo-net",
-    "dep:web-sys",
+  "leptos/hydrate",
+  "dep:send_wrapper",
+  "dep:console_error_panic_hook",
+  "dep:wasm-bindgen",
+  "dep:wasm-bindgen-futures",
+  "dep:js-sys",
+  "dep:gloo-net",
+  "dep:web-sys",
 ]
 ssr = [
-    "leptos/ssr",
-    "leptos_meta/ssr",
-    "leptos_router/ssr",
-    "dep:leptos_axum",
-    "dep:axum",
-    "dep:tokio",
-    "dep:tower",
-    "dep:tower-http",
-    "dep:tracing",
-    "dep:tracing-subscriber",
-    "dep:roder-k8s",
-    "dep:roder-auth",
-    "dep:rand",
-    "dep:rustls",
-    "dep:tokio-stream",
-    "dep:futures",
-    "dep:aes-gcm",
-    "dep:time",
+  "leptos/ssr",
+  "leptos_meta/ssr",
+  "leptos_router/ssr",
+  "dep:leptos_axum",
+  "dep:axum",
+  "dep:tokio",
+  "dep:tower",
+  "dep:tower-http",
+  "dep:tracing",
+  "dep:tracing-subscriber",
+  "dep:roder-k8s",
+  "dep:roder-auth",
+  "dep:rand",
+  "dep:rustls",
+  "dep:tokio-stream",
+  "dep:futures",
+  "dep:aes-gcm",
+  "dep:time",
 ]
 # Use jemalloc for the server allocator. Off by default
 # enabled only in the production
@@ -182,6 +183,7 @@ bin-default-features = false
 lib-features = ["hydrate"]
 lib-default-features = false
 lib-profile-release = "wasm-release"
+js-minify = true
 
 [profile.release]
 codegen-units = 1

@@ -3,7 +3,6 @@
 use leptos::prelude::*;
 use roder_core::{Category, ResourceKind};
 
-
 use crate::app::state::{Catalog, NavOpen, PaneConfig, WorkspaceConf};
 use crate::data;
 

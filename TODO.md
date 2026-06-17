@@ -1,13 +1,8 @@
 # TODO
 
-## Core
-
-- Workspaces live view is a bit broken unless reloading the page
-
 ## Logging
 
-- Use pills for log levels
-- implement real log parsing. support for the common log formats
+- implement real log parsing. support for more log formats (e.g. Python, syslog)
 
 ## Flux Integration
 

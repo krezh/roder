@@ -5,7 +5,7 @@ use leptos::prelude::*;
 
 use crate::app::state::{LogPods, LogTarget};
 use crate::app::util::color::hue_of;
-use crate::app::util::format::{ansi_to_html, log_level};
+use crate::app::util::format::{ansi_to_html, log_level, parse_log_line};
 use crate::data;
 
 /// Right-docked, drag-resizable log sidebar. Holds one streaming `LogsView` pane
@@ -164,15 +164,21 @@ pub(crate) fn LogsView(
             <input class="logs-filter" placeholder="Filter..."
                 prop:value=move || filter.get()
                 on:input=move |e| filter.set(event_target_value(&e)) />
-            <select class="logs-level-filter"
-                prop:value=move || level_filter.get()
-                on:change=move |e| level_filter.set(event_target_value(&e))>
-                <option value="">"All"</option>
-                <option value="error">"Error"</option>
-                <option value="warn">"Warn"</option>
-                <option value="info">"Info"</option>
-                <option value="debug">"Debug"</option>
-            </select>
+            <button class="lvl-pill lvl-pill-all"
+                class:active=move || level_filter.get().is_empty()
+                on:click=move |_| level_filter.set(String::new())>"All"</button>
+            <button class="lvl-pill lvl-pill-error"
+                class:active=move || level_filter.get() == "error"
+                on:click=move |_| level_filter.set("error".into())>"ERR"</button>
+            <button class="lvl-pill lvl-pill-warn"
+                class:active=move || level_filter.get() == "warn"
+                on:click=move |_| level_filter.set("warn".into())>"WRN"</button>
+            <button class="lvl-pill lvl-pill-info"
+                class:active=move || level_filter.get() == "info"
+                on:click=move |_| level_filter.set("info".into())>"INF"</button>
+            <button class="lvl-pill lvl-pill-debug"
+                class:active=move || level_filter.get() == "debug"
+                on:click=move |_| level_filter.set("debug".into())>"DBG"</button>
             <span class="logs-ctl-spacer"></span>
             <button class="logtog" class:on=move || show_timestamps.get()
                 on:click=move |_| show_timestamps.update(|t| *t = !*t)>"Timestamps"</button>
@@ -194,9 +200,18 @@ pub(crate) fn LogsView(
                         None => (None, item.1),
                     };
                     let lvl = log_level(&msg);
-                    // Extract timestamp if present (ISO 8601 format at start of line)
-                    let (timestamp, content) = extract_timestamp(&msg);
-                    let msg_html = ansi_to_html(&content);
+                    let parsed = parse_log_line(&msg);
+                    // Extract caller before consuming the rest of parsed.
+                    let caller = parsed.caller;
+                    // Structured logs carry their timestamp as a field; plain logs
+                    // may have an ISO prefix that extract_timestamp can strip.
+                    let (ts, display) = if parsed.is_structured {
+                        (parsed.timestamp, parsed.display)
+                    } else {
+                        let (ts, content) = extract_timestamp(&parsed.display);
+                        (ts, content)
+                    };
+                    let msg_html = ansi_to_html(&display);
                     let lvl_label = match lvl {
                         "error" => Some("ERR"),
                         "warn"  => Some("WRN"),
@@ -210,8 +225,9 @@ pub(crate) fn LogsView(
                                 let style = format!("background:hsl({}deg 45% 28%)", hue_of(&p));
                                 view! { <span class="log-pod" style=style>{p}</span> }
                             })}
-                            {move || show_timestamps.get().then(|| timestamp.clone().map(|ts| view! { <span class="log-ts">{ts}</span> }))}
+                            {move || show_timestamps.get().then(|| ts.clone().map(|t| view! { <span class="log-ts">{t}</span> }))}
                             {lvl_label.map(|label| view! { <span class=format!("log-lvl log-lvl-{lvl}")>{label}</span> })}
+                            {caller.map(|c| view! { <span class="log-caller">{c}</span> })}
                             <span class="log-msg" inner_html=msg_html></span>
                         </div>
                     }

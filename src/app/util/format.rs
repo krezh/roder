@@ -1,5 +1,7 @@
 //! Pure formatting / parsing helpers used across the UI.
 
+use serde_json::Value as JsonValue;
+
 /// Parse a resource key ("group/version/kind", group may be empty) into (group, kind).
 pub(crate) fn parse_key(key: &str) -> (String, String) {
     let mut parts = key.splitn(3, '/');
@@ -47,50 +49,263 @@ pub(crate) fn talos_version(os_image: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// Classify a log line by severity for colouring. Handles klog/glog single-letter
-/// prefixes (E0603…, W…, I…), `level=error`/`"level":"warn"`, and plain keywords.
-pub(crate) fn log_level(line: &str) -> &'static str {
-    // Aggregated workload logs are prefixed "pod │ " — classify the message itself.
-    let line = line.split_once(" │ ").map(|(_, rest)| rest).unwrap_or(line);
+/// Structured fields extracted from a log line.
+pub(crate) struct ParsedLog {
+    /// The human-readable message (extracted `msg`/`message`/`event` field, or the raw line).
+    pub display: String,
+    /// Shortened caller (`file.go:line`), if present in structured fields.
+    pub caller: Option<String>,
+    /// Timestamp from a structured field (`ts`, `time`, `timestamp`).
+    pub timestamp: Option<String>,
+    /// True when a structured format (JSON or logfmt) was recognised.
+    pub is_structured: bool,
+}
+
+/// Parse a log line into structured fields. Handles:
+/// - JSON (Zap, logrus, slog, Bunyan-ish)
+/// - logfmt (logrus text, many Go loggers)
+/// - Raw / klog / ANSI-coloured output (returned as-is)
+///
+/// Lines containing ANSI escape codes are returned raw so colours are preserved.
+pub(crate) fn parse_log_line(line: &str) -> ParsedLog {
+    let raw = ParsedLog {
+        display: line.to_string(),
+        caller: None,
+        timestamp: None,
+        is_structured: false,
+    };
+
+    // Don't touch ANSI-coloured output — pass it straight through.
+    if line.contains('\x1b') {
+        return raw;
+    }
+
     let t = line.trim_start();
-    let mut chars = t.chars();
-    if let (Some(c0), Some(c1)) = (chars.next(), chars.next()) {
-        if c1.is_ascii_digit() {
-            match c0 {
-                'E' | 'F' => return "error",
-                'W' => return "warn",
-                'I' => return "info",
-                'D' => return "debug",
+
+    if t.starts_with('{') {
+        if let Ok(JsonValue::Object(obj)) = serde_json::from_str::<JsonValue>(t) {
+            // Top-level message field (Zap, logrus, slog JSON, …), or tracing-subscriber's
+            // nested `fields.message` / `fields.msg`.
+            let msg = ["msg", "message", "event"]
+                .iter()
+                .find_map(|&k| obj.get(k)?.as_str().map(str::to_string))
+                .or_else(|| {
+                    let fields = obj.get("fields")?.as_object()?;
+                    ["message", "msg"]
+                        .iter()
+                        .find_map(|&k| fields.get(k)?.as_str().map(str::to_string))
+                });
+
+            if let Some(display) = msg {
+                // `target` is the tracing-subscriber equivalent of `caller`.
+                let caller = ["caller", "source", "logger", "target"]
+                    .iter()
+                    .find_map(|&k| obj.get(k)?.as_str().map(shorten_caller));
+
+                let timestamp = ["ts", "time", "timestamp"].iter().find_map(|&k| {
+                    let v = obj.get(k)?;
+                    v.as_str()
+                        .map(str::to_string)
+                        .or_else(|| v.as_f64().map(|n| format!("{n:.3}s")))
+                });
+
+                return ParsedLog {
+                    display,
+                    caller,
+                    timestamp,
+                    is_structured: true,
+                };
+            }
+        }
+        return raw;
+    }
+
+    // logfmt
+    if let Some(display) = logfmt_str_value(t, &["msg=", "message="]) {
+        let caller = logfmt_str_value(t, &["caller=", "source="]).map(|s| shorten_caller(&s));
+        let timestamp = logfmt_str_value(t, &["ts=", "time=", "timestamp="]);
+        return ParsedLog {
+            display,
+            caller,
+            timestamp,
+            is_structured: true,
+        };
+    }
+
+    raw
+}
+
+fn shorten_caller(s: &str) -> String {
+    s.rfind('/')
+        .map_or_else(|| s.to_string(), |i| s[i + 1..].to_string())
+}
+
+/// Classify a log line by severity. Tries structured formats in order:
+/// klog/glog prefix, JSON `"level":`, logfmt `level=`, bracket prefix `[LEVEL]`,
+/// then level word at line start. Returns "plain" when nothing matches.
+///
+/// Deliberately avoids substring search across the full message to prevent false
+/// positives on messages that happen to contain words like "error" or "info".
+pub(crate) fn log_level(line: &str) -> &'static str {
+    let line = line.split_once(" │ ").map(|(_, r)| r).unwrap_or(line);
+    let t = line.trim_start();
+
+    // klog/glog: E0603, W0603, I0603, D0603, F0603
+    {
+        let b = t.as_bytes();
+        if b.len() >= 2 && b[1].is_ascii_digit() {
+            match b[0] {
+                b'E' | b'F' => return "error",
+                b'W' => return "warn",
+                b'I' => return "info",
+                b'D' => return "debug",
                 _ => {}
             }
         }
     }
-    // Case-sensitive fast path — covers the vast majority of k8s structured and plain logs
-    // without allocating. Falls through to the allocation-based scan only for mixed-case lines.
-    if t.contains("error") || t.contains("fatal") || t.contains("panic") {
-        return "error";
+
+    // JSON: only use JSON-path for lines that look like JSON objects to avoid
+    // accidentally matching `level=` inside a stringified JSON value.
+    if t.starts_with('{') {
+        for key in [r#""level":""#, r#""severity":""#, r#""lvl":""#] {
+            if let Some(pos) = t.find(key) {
+                if let Some(lvl) = level_word(&t[pos + key.len()..]) {
+                    return lvl;
+                }
+            }
+        }
+        return "plain";
     }
-    if t.contains("warn") {
-        return "warn";
+
+    // logfmt: level=error, lvl=warn, severity=info (value optionally quoted).
+    // Require the key to be at start-of-line or preceded by whitespace so we
+    // don't match `level=` embedded inside a quoted value later in the line.
+    for key in ["level=", "lvl=", "severity="] {
+        if let Some(lvl) = logfmt_level(t, key) {
+            return lvl;
+        }
     }
-    if t.contains("debug") || t.contains("trace") {
-        return "debug";
+
+    // Bracket prefix: [ERROR], [WARN], [INFO], [DEBUG]
+    if let Some(inner) = t.strip_prefix('[') {
+        if let Some(end) = inner.find(']') {
+            if let Some(lvl) = level_word(&inner[..end]) {
+                return lvl;
+            }
+        }
     }
-    if t.contains("info") {
-        return "info";
+
+    // Level word at the very start of the line: "ERROR: ...", "WARN message", etc.
+    let word_end = t
+        .bytes()
+        .position(|b| matches!(b, b':' | b' ' | b'\t' | b'-' | b'|'))
+        .unwrap_or(t.len());
+    if word_end <= 8 {
+        if let Some(lvl) = level_word(&t[..word_end]) {
+            return lvl;
+        }
     }
-    // Allocate only for mixed-case keywords (e.g. "ERROR", "WARN", "INFO").
-    let l = t.to_ascii_lowercase();
-    if l.contains("error") || l.contains("fatal") || l.contains("panic") {
-        "error"
-    } else if l.contains("warn") {
-        "warn"
-    } else if l.contains("debug") || l.contains("trace") {
-        "debug"
-    } else if l.contains("info") {
-        "info"
-    } else {
-        "plain"
+
+    "plain"
+}
+
+fn logfmt_level(t: &str, key: &str) -> Option<&'static str> {
+    let pos = logfmt_key_pos(t, key)?;
+    let val = t[pos + key.len()..].trim_start_matches('"');
+    level_word(val)
+}
+
+/// Position of a logfmt key in `t`, requiring it to be at line-start or
+/// preceded by whitespace and not inside a quoted value.
+fn logfmt_key_pos(t: &str, key: &str) -> Option<usize> {
+    let mut search = t;
+    while let Some(i) = search.find(key) {
+        let abs = t.len() - search.len() + i;
+        let preceded_by_ws =
+            abs == 0 || matches!(t.as_bytes().get(abs - 1), Some(&b' ') | Some(&b'\t'));
+        let inside_quotes = t[..abs].bytes().filter(|&b| b == b'"').count() % 2 == 1;
+        if preceded_by_ws && !inside_quotes {
+            return Some(abs);
+        }
+        search = &search[i + 1..];
+    }
+    None
+}
+
+/// Extract the string value for the first matching logfmt key.
+fn logfmt_str_value(t: &str, keys: &[&str]) -> Option<String> {
+    for key in keys {
+        let Some(pos) = logfmt_key_pos(t, key) else {
+            continue;
+        };
+        let rest = &t[pos + key.len()..];
+        let val = if let Some(after_quote) = rest.strip_prefix('"') {
+            parse_logfmt_quoted(after_quote)
+        } else {
+            rest.split_ascii_whitespace()
+                .next()
+                .unwrap_or("")
+                .to_string()
+        };
+        if !val.is_empty() {
+            return Some(val);
+        }
+    }
+    None
+}
+
+fn parse_logfmt_quoted(s: &str) -> String {
+    let mut out = String::new();
+    let mut esc = false;
+    for c in s.chars() {
+        if esc {
+            match c {
+                '"' => out.push('"'),
+                'n' => out.push('\n'),
+                't' => out.push('\t'),
+                '\\' => out.push('\\'),
+                _ => {
+                    out.push('\\');
+                    out.push(c);
+                }
+            }
+            esc = false;
+        } else if c == '\\' {
+            esc = true;
+        } else if c == '"' {
+            break;
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Match the first alphabetic token of `s` against known level names.
+fn level_word(s: &str) -> Option<&'static str> {
+    let word = s
+        .split(|c: char| !c.is_ascii_alphabetic())
+        .next()
+        .unwrap_or("");
+    match word {
+        "error" | "ERROR" | "Error" | "fatal" | "FATAL" | "Fatal" | "panic" | "PANIC" | "Panic"
+        | "crit" | "CRIT" | "Crit" | "critical" | "CRITICAL" | "Critical" => Some("error"),
+
+        "warn" | "WARN" | "Warn" | "warning" | "WARNING" | "Warning" => Some("warn"),
+
+        "info" | "INFO" | "Info" => Some("info"),
+
+        "debug" | "DEBUG" | "Debug" | "trace" | "TRACE" | "Trace" | "dbg" | "DBG" => Some("debug"),
+
+        _ if !word.is_empty() => match word.to_ascii_lowercase().as_str() {
+            "error" | "fatal" | "panic" | "crit" | "critical" => Some("error"),
+            "warn" | "warning" => Some("warn"),
+            "info" => Some("info"),
+            "debug" | "trace" | "dbg" => Some("debug"),
+            _ => None,
+        },
+
+        _ => None,
     }
 }
 
@@ -349,26 +564,123 @@ mod tests {
     }
 
     #[test]
-    fn log_level_structured_level_key() {
-        assert_eq!(log_level(r#"{"level":"error","msg":"oops"}"#), "error");
-        assert_eq!(log_level("time=2024 level=warn msg=degraded"), "warn");
+    fn parse_log_line_json_standard() {
+        let p = parse_log_line(
+            r#"{"level":"info","ts":1234.0,"caller":"pkg/main.go:42","msg":"starting"}"#,
+        );
+        assert!(p.is_structured);
+        assert_eq!(p.display, "starting");
+        assert_eq!(p.caller.as_deref(), Some("main.go:42"));
+        assert_eq!(p.timestamp.as_deref(), Some("1234.000s"));
     }
 
     #[test]
-    fn log_level_keyword_fallback() {
+    fn parse_log_line_tracing_subscriber() {
+        let line = r#"{"timestamp":"2026-06-17T18:26:15.370166Z","level":"WARN","fields":{"message":"stream error"},"target":"towonel_agent::tunnel"}"#;
+        let p = parse_log_line(line);
+        assert!(p.is_structured);
+        assert_eq!(p.display, "stream error");
+        assert_eq!(p.caller.as_deref(), Some("towonel_agent::tunnel"));
+        assert_eq!(p.timestamp.as_deref(), Some("2026-06-17T18:26:15.370166Z"));
+    }
+
+    #[test]
+    fn parse_log_line_logfmt() {
+        let p = parse_log_line(
+            r#"time=2024-01-15T10:30:45Z level=info caller=main.go:42 msg="server started""#,
+        );
+        assert!(p.is_structured);
+        assert_eq!(p.display, "server started");
+        assert_eq!(p.caller.as_deref(), Some("main.go:42"));
+    }
+
+    #[test]
+    fn parse_log_line_ansi_passthrough() {
+        let line = "\x1b[31mERROR\x1b[0m something failed";
+        let p = parse_log_line(line);
+        assert!(!p.is_structured);
+        assert_eq!(p.display, line);
+    }
+
+    #[test]
+    fn parse_log_line_plain() {
+        let p = parse_log_line("I0603 12:00:00.000000 main.go:42] starting");
+        assert!(!p.is_structured);
+        assert_eq!(p.display, "I0603 12:00:00.000000 main.go:42] starting");
+    }
+
+    #[test]
+    fn log_level_json() {
+        assert_eq!(log_level(r#"{"level":"error","msg":"oops"}"#), "error");
+        assert_eq!(
+            log_level(r#"{"level":"info","ts":1234,"msg":"ok"}"#),
+            "info"
+        );
+        assert_eq!(
+            log_level(r#"{"severity":"WARNING","message":"degraded"}"#),
+            "warn"
+        );
+        assert_eq!(log_level(r#"{"lvl":"debug","msg":"connecting"}"#), "debug");
+        // JSON with "error" only in message body must not be classified as error
+        assert_eq!(
+            log_level(r#"{"level":"info","msg":"network error occurred"}"#),
+            "info"
+        );
+        // JSON without a level key → plain
+        assert_eq!(log_level(r#"{"msg":"hello"}"#), "plain");
+    }
+
+    #[test]
+    fn log_level_logfmt() {
+        assert_eq!(log_level("time=2024 level=warn msg=degraded"), "warn");
+        assert_eq!(log_level(r#"time=2024 level="info" msg=ok"#), "info");
+        assert_eq!(
+            log_level("ts=2024 lvl=error caller=main.go msg=fail"),
+            "error"
+        );
+        // "level=" inside a value must not trigger (preceded by non-space)
+        assert_eq!(log_level(r#"msg="set level=debug" ts=2024"#), "plain");
+    }
+
+    #[test]
+    fn log_level_bracket_prefix() {
+        assert_eq!(log_level("[ERROR] something failed"), "error");
+        assert_eq!(log_level("[WARN] disk nearly full"), "warn");
+        assert_eq!(log_level("[info] starting up"), "info");
+    }
+
+    #[test]
+    fn log_level_word_prefix() {
         assert_eq!(log_level("panic: runtime error"), "error");
         assert_eq!(log_level("FATAL: out of memory"), "error");
         assert_eq!(log_level("DEBUG: connecting..."), "debug");
+        assert_eq!(log_level("ERROR something"), "error");
+        assert_eq!(log_level("warn - disk nearly full"), "warn");
+    }
+
+    #[test]
+    fn log_level_no_false_positives() {
+        // Words appearing mid-message must NOT trigger classification
+        assert_eq!(log_level("network error occurred"), "plain");
+        assert_eq!(log_level("found information in registry"), "plain");
+        assert_eq!(
+            log_level("connection to debug-service established"),
+            "plain"
+        );
+        assert_eq!(log_level("http://error-reporting.example.com"), "plain");
+        assert_eq!(log_level("Reconciling HelmRelease"), "plain");
     }
 
     #[test]
     fn log_level_aggregated_prefix_stripped() {
-        // "pod │ message" format — classify the message part
         assert_eq!(log_level("my-pod-xyz │ E0101 something bad"), "error");
+        // message part containing "error" mid-sentence must not mis-classify
+        assert_eq!(log_level("my-pod-xyz │ network error occurred"), "plain");
     }
 
     #[test]
     fn log_level_plain() {
         assert_eq!(log_level("hello world"), "plain");
+        assert_eq!(log_level("Starting server on :8080"), "plain");
     }
 }

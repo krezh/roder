@@ -128,31 +128,41 @@
     border-color: var(--accent);
   }
 }
-.logs-level-filter {
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  color: var(--fg);
-  border-radius: 5px;
-  padding: 0.15rem 0.4rem;
+.lvl-pill {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--muted);
+  border-radius: 9999px;
+  padding: 0.1rem 0.5rem;
   font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
   cursor: pointer;
-  &:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
+  &:hover { color: var(--fg); border-color: var(--border); }
 }
+.lvl-pill-all.active    { background: var(--panel-2); color: var(--fg); border-color: var(--border); }
+.lvl-pill-error.active  { background: rgba(255, 107, 107, 0.18); color: #ff6b6b; border-color: rgba(255, 107, 107, 0.35); }
+.lvl-pill-warn.active   { background: rgba(240, 198, 116, 0.18); color: #f0c674; border-color: rgba(240, 198, 116, 0.35); }
+.lvl-pill-info.active   { background: rgba(102, 153, 204, 0.18); color: #6699cc; border-color: rgba(102, 153, 204, 0.35); }
+.lvl-pill-debug.active  { background: rgba(125, 138, 153, 0.12); color: #7d8a99; border-color: rgba(125, 138, 153, 0.25); }
 .log-ts {
   color: var(--muted);
   font-size: 0.85em;
   margin-right: 0.5em;
   opacity: 0.7;
 }
+.log-caller {
+  color: var(--muted);
+  font-size: 0.8em;
+  margin-right: 0.5em;
+  opacity: 0.6;
+}
 .log-lvl {
   display: inline-block;
   font-size: 0.72em;
   font-weight: 700;
-  border-radius: 2px;
-  padding: 0.05em 0.35em;
+  border-radius: 9999px;
+  padding: 0.05em 0.4em;
   margin-right: 0.45em;
   letter-spacing: 0.04em;
   vertical-align: middle;

@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.1.17](https://github.com/krezh/roder/compare/0.1.16...0.1.17) (2026-06-17)
+
+
+### Features
+
+* **cargo:** update rust crate tower-http (0.6.11 ➔ 0.7.0) ([#43](https://github.com/krezh/roder/issues/43)) ([8b729fc](https://github.com/krezh/roder/commit/8b729fc8eaf485c9ce02510312b4392efb34e353))
+* Refactor ([#48](https://github.com/krezh/roder/issues/48)) ([5c03e2a](https://github.com/krezh/roder/commit/5c03e2a6c0b8bd1e600ae8e4b01553d581a90572))
+
+
+### Bug Fixes
+
+* **renovate:** group kube and k8s-openapi ([39c273e](https://github.com/krezh/roder/commit/39c273e983a1c9b8ca7981f45790b21ff7060dab))
+* **renovate:** group kube and k8s-openapi updates into one PR ([5751cd3](https://github.com/krezh/roder/commit/5751cd366fb7705f3ffd22ea895af75990f324f0))
+
+
+### Miscellaneous Chores
+
+* **renovate:** add minimumGroupSize ([98cadd0](https://github.com/krezh/roder/commit/98cadd0fdd8c7276f3b667b1c6e60fc20e6cbab4))
+
 ## [0.1.16](https://github.com/krezh/roder/compare/0.1.15...0.1.16) (2026-06-14)
 
 

@@ -11,12 +11,13 @@
       ],
       groupName: "wasm-bindgen",
     },
-    // kube depends on k8s-openapi and they must be upgraded together;
-    // grouping them ensures Renovate waits until both have a compatible release.
+    // kube and k8s-openapi release in lockstep; separateMajorMinor: false keeps them
+    // in one bucket so they satisfy minimumGroupSize: 2 and land in a single PR.
     {
       matchPackageNames: ["kube", "k8s-openapi"],
       groupName: "kube",
       minimumGroupSize: 2,
+      separateMajorMinor: false,
     },
   ],
 }

@@ -57,7 +57,7 @@
 .grid-row.row {
   cursor: pointer;
   &:hover .cell {
-    background: var(--panel-2);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
   }
 }
 .cell {

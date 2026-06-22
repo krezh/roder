@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.1.18](https://github.com/krezh/roder/compare/0.1.17...0.1.18) (2026-06-22)
+
+
+### Features
+
+* fuzzy highlight in namespace palette, standardize with kind palette ([552e910](https://github.com/krezh/roder/commit/552e910e48608472a2035699fab62d8daf4c326a))
+
+
+### Bug Fixes
+
+* **cargo:** update rust crate rustls (0.23.40 ➔ 0.23.41) ([#55](https://github.com/krezh/roder/issues/55)) ([b0a7b17](https://github.com/krezh/roder/commit/b0a7b17e1d6f5488d06cf5dc3425b5f20651c566))
+* **cargo:** update rust crate time (0.3.49 ➔ 0.3.51) ([#54](https://github.com/krezh/roder/issues/54)) ([d6c3c90](https://github.com/krezh/roder/commit/d6c3c90cd9152c242ebc80d1faf3029ff1755eeb))
+* **container:** update image ghcr.io/rust-lang/rust (4fd8406 ➔ c681116) ([#50](https://github.com/krezh/roder/issues/50)) ([0741048](https://github.com/krezh/roder/commit/07410487b5a25e35ce2f3f21d59e26d1a020ea49))
+* preserve extra structured log fields; palette focus on open ([e1f50db](https://github.com/krezh/roder/commit/e1f50dbd7902d14112eb851246f19eba09e67fd1))
+
+
+### Miscellaneous Chores
+
+* **cargo:** lock file maintenance cargo.lock ([#56](https://github.com/krezh/roder/issues/56)) ([b05e4f6](https://github.com/krezh/roder/commit/b05e4f6d8485bda67b7d6d4145d54ffadc6ee3a9))
+
+
+### Continuous Integration
+
+* enable automerge ([d9a2334](https://github.com/krezh/roder/commit/d9a23345207b3f0100fdfce7c2e6aa7b7c4f8cbb))
+
 ## [0.1.17](https://github.com/krezh/roder/compare/0.1.16...0.1.17) (2026-06-17)
 
 

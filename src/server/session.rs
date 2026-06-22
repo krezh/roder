@@ -45,7 +45,8 @@ struct SealedPending {
 }
 
 fn cipher(key: &[u8; 32]) -> Aes256Gcm {
-    Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key))
+    let k = Key::<Aes256Gcm>::from(*key);
+    Aes256Gcm::new(&k)
 }
 
 /// AES-256-GCM seal of arbitrary bytes over a 12-byte random nonce, URL-safe
@@ -54,7 +55,7 @@ fn cipher(key: &[u8; 32]) -> Aes256Gcm {
 /// there is no server-side store to lose on restart or to make pods sticky.
 fn seal_bytes(plain: &[u8], key: &[u8; 32]) -> String {
     let nonce_bytes: [u8; 12] = rand::random();
-    let Ok(ct) = cipher(key).encrypt(Nonce::from_slice(&nonce_bytes), plain) else {
+    let Ok(ct) = cipher(key).encrypt(&Nonce::from(nonce_bytes), plain) else {
         return String::new();
     };
     let mut buf = Vec::with_capacity(nonce_bytes.len() + ct.len());
@@ -74,7 +75,8 @@ fn open_bytes(cookie: &str, key: &[u8; 32]) -> Option<Vec<u8>> {
         return None;
     }
     let (nonce, ct) = raw.split_at(12);
-    cipher(key).decrypt(Nonce::from_slice(nonce), ct).ok()
+    let nonce: [u8; 12] = nonce.try_into().unwrap();
+    cipher(key).decrypt(&Nonce::from(nonce), ct).ok()
 }
 
 /// Seal a token set into the `roder_session` cookie value.

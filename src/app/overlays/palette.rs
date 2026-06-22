@@ -35,7 +35,7 @@ pub(crate) fn use_palette_scroll(cursor: RwSignal<usize>) -> NodeRef<leptos::htm
     list_ref
 }
 
-fn fuzzy_match(pattern: &str, text: &str) -> Option<(Vec<usize>, i32)> {
+pub(crate) fn fuzzy_match(pattern: &str, text: &str) -> Option<(Vec<usize>, i32)> {
     let pattern = pattern.to_lowercase();
     let text_lower = text.to_lowercase();
     let pat: Vec<char> = pattern.chars().collect();
@@ -75,7 +75,7 @@ fn fuzzy_match(pattern: &str, text: &str) -> Option<(Vec<usize>, i32)> {
     }
 }
 
-fn highlight(text: &str, positions: &[usize]) -> Vec<(String, bool)> {
+pub(crate) fn highlight(text: &str, positions: &[usize]) -> Vec<(String, bool)> {
     if positions.is_empty() {
         return vec![(text.to_string(), false)];
     }

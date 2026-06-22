@@ -2,6 +2,7 @@
 
 use leptos::prelude::*;
 
+use crate::app::overlays::palette::{fuzzy_match, highlight};
 use crate::app::state::NsPaletteOpen;
 
 #[component]
@@ -24,23 +25,38 @@ pub(crate) fn NsPalette() -> impl IntoView {
         }
     });
 
-    // Build the list: "All namespaces" sentinel + actual namespaces, filtered by query.
+    // Build the list: "All namespaces" sentinel + actual namespaces, filtered+scored by query.
+    // Each entry is (ns, display_label, highlight_positions).
     let matches = Memo::new(move |_| {
-        let q = query.get().to_lowercase();
-        let mut list = vec![None::<String>]; // None = "All namespaces"
+        let q = query.get();
+        let mut list: Vec<Option<String>> = vec![None]; // None = "All namespaces"
         if let Some(Ok(nss)) = namespaces.get() {
             for ns in nss {
                 list.push(Some(ns));
             }
         }
-        list.into_iter()
-            .filter(|ns| {
+        let mut scored: Vec<(Option<String>, String, Vec<usize>, i32)> = list
+            .into_iter()
+            .filter_map(|ns| {
+                let label = ns.as_deref().unwrap_or("All namespaces").to_string();
                 if q.is_empty() {
-                    return true;
+                    return Some((ns, label, vec![], 0));
                 }
-                let label = ns.as_deref().unwrap_or("all namespaces");
-                label.to_lowercase().contains(&q)
+                fuzzy_match(&q, &label).map(|(pos, score)| (ns, label, pos, score))
             })
+            .collect();
+        scored.sort_by(|a, b| {
+            // Keep "All namespaces" (None) pinned to top when query is empty,
+            // otherwise sort by descending score.
+            if q.is_empty() {
+                std::cmp::Ordering::Equal
+            } else {
+                b.3.cmp(&a.3)
+            }
+        });
+        scored
+            .into_iter()
+            .map(|(ns, label, pos, _)| (ns, label, pos))
             .collect::<Vec<_>>()
     });
 
@@ -72,7 +88,7 @@ pub(crate) fn NsPalette() -> impl IntoView {
                 }
             }
             "Enter" => {
-                let chosen = matches.with(|v| v.get(cursor.get()).cloned().flatten());
+                let chosen = matches.with(|v| v.get(cursor.get()).and_then(|(ns, _, _)| ns.clone()));
                 select(chosen);
                 e.prevent_default();
             }
@@ -93,17 +109,25 @@ pub(crate) fn NsPalette() -> impl IntoView {
                         on:keydown=handle_keydown />
                 </div>
                 <ul class="palette-list" node_ref=list_ref>
-                    {move || matches.get().into_iter().enumerate().map(|(idx, ns)| {
+                    {move || matches.get().into_iter().enumerate().map(|(idx, (ns, label, positions))| {
                         let is_active = move || cursor.get() == idx;
                         let cur_ns = selected_ns.get();
                         let is_selected = ns == cur_ns;
-                        let label = ns.clone().unwrap_or_else(|| "All namespaces".to_string());
                         let ns_click = ns.clone();
+                        let segs = highlight(&label, &positions);
                         view! {
                             <li class="palette-item"
                                 class:palette-item-active=is_active
                                 on:click=move |_| select(ns_click.clone())>
-                                <span class="pi-kind">{label}</span>
+                                <span class="pi-kind">
+                                    {segs.into_iter().map(|(s, matched)| {
+                                        if matched {
+                                            view! { <span class="highlight">{s}</span> }.into_any()
+                                        } else {
+                                            view! { <span>{s}</span> }.into_any()
+                                        }
+                                    }).collect_view()}
+                                </span>
                                 {is_selected.then(|| view! { <span class="pi-cat">"✓ active"</span> })}
                             </li>
                         }

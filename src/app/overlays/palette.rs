@@ -141,7 +141,7 @@ pub(crate) fn CommandPalette() -> impl IntoView {
         if palette_open.get() {
             query.set(String::new());
             cursor.set(0);
-            if let Some(el) = input_ref.get_untracked() {
+            if let Some(el) = input_ref.get() {
                 let _ = el.focus();
             }
         }

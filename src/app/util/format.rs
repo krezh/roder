@@ -96,7 +96,7 @@ pub(crate) fn parse_log_line(line: &str) -> ParsedLog {
                         .find_map(|&k| fields.get(k)?.as_str().map(str::to_string))
                 });
 
-            if let Some(display) = msg {
+            if let Some(msg_text) = msg {
                 // `target` is the tracing-subscriber equivalent of `caller`.
                 let caller = ["caller", "source", "logger", "target"]
                     .iter()
@@ -108,6 +108,31 @@ pub(crate) fn parse_log_line(line: &str) -> ParsedLog {
                         .map(str::to_string)
                         .or_else(|| v.as_f64().map(|n| format!("{n:.3}s")))
                 });
+
+                const JSON_META: &[&str] = &[
+                    "msg", "message", "event",
+                    "caller", "source", "logger", "target",
+                    "ts", "time", "timestamp",
+                    "level", "severity", "lvl",
+                    "fields",
+                ];
+                let mut extras: Vec<String> = obj
+                    .iter()
+                    .filter(|(k, _)| !JSON_META.contains(&k.as_str()))
+                    .map(|(k, v)| format!("{k}={}", json_val_display(v)))
+                    .collect();
+                if let Some(fields) = obj.get("fields").and_then(|f| f.as_object()) {
+                    for (k, v) in fields {
+                        if k != "message" && k != "msg" {
+                            extras.push(format!("{k}={}", json_val_display(v)));
+                        }
+                    }
+                }
+                let display = if extras.is_empty() {
+                    msg_text
+                } else {
+                    format!("{msg_text} {}", extras.join(" "))
+                };
 
                 return ParsedLog {
                     display,
@@ -121,9 +146,40 @@ pub(crate) fn parse_log_line(line: &str) -> ParsedLog {
     }
 
     // logfmt
-    if let Some(display) = logfmt_str_value(t, &["msg=", "message="]) {
-        let caller = logfmt_str_value(t, &["caller=", "source="]).map(|s| shorten_caller(&s));
-        let timestamp = logfmt_str_value(t, &["ts=", "time=", "timestamp="]);
+    let pairs = logfmt_tokenize(t);
+    if let Some(msg_text) = pairs
+        .iter()
+        .find(|(k, _)| k == "msg" || k == "message")
+        .map(|(_, v)| v.clone())
+    {
+        const LOGFMT_META: &[&str] = &[
+            "msg", "message", "caller", "source",
+            "ts", "time", "timestamp", "level", "lvl", "severity",
+        ];
+        let extras: Vec<String> = pairs
+            .iter()
+            .filter(|(k, _)| !LOGFMT_META.contains(&k.as_str()))
+            .map(|(k, v)| {
+                if v.contains(' ') || v.is_empty() {
+                    format!("{k}=\"{v}\"")
+                } else {
+                    format!("{k}={v}")
+                }
+            })
+            .collect();
+        let display = if extras.is_empty() {
+            msg_text
+        } else {
+            format!("{msg_text} {}", extras.join(" "))
+        };
+        let caller = pairs
+            .iter()
+            .find(|(k, _)| k == "caller" || k == "source")
+            .map(|(_, v)| shorten_caller(v));
+        let timestamp = pairs
+            .iter()
+            .find(|(k, _)| k == "ts" || k == "time" || k == "timestamp")
+            .map(|(_, v)| v.clone());
         return ParsedLog {
             display,
             caller,
@@ -232,53 +288,90 @@ fn logfmt_key_pos(t: &str, key: &str) -> Option<usize> {
     None
 }
 
-/// Extract the string value for the first matching logfmt key.
-fn logfmt_str_value(t: &str, keys: &[&str]) -> Option<String> {
-    for key in keys {
-        let Some(pos) = logfmt_key_pos(t, key) else {
-            continue;
-        };
-        let rest = &t[pos + key.len()..];
-        let val = if let Some(after_quote) = rest.strip_prefix('"') {
-            parse_logfmt_quoted(after_quote)
-        } else {
-            rest.split_ascii_whitespace()
-                .next()
-                .unwrap_or("")
-                .to_string()
-        };
-        if !val.is_empty() {
-            return Some(val);
+fn json_val_display(v: &JsonValue) -> String {
+    match v {
+        JsonValue::String(s) => {
+            if s.contains(' ') {
+                format!("\"{s}\"")
+            } else {
+                s.clone()
+            }
         }
+        other => other.to_string(),
     }
-    None
 }
 
-fn parse_logfmt_quoted(s: &str) -> String {
-    let mut out = String::new();
-    let mut esc = false;
-    for c in s.chars() {
-        if esc {
-            match c {
-                '"' => out.push('"'),
-                'n' => out.push('\n'),
-                't' => out.push('\t'),
-                '\\' => out.push('\\'),
-                _ => {
-                    out.push('\\');
-                    out.push(c);
-                }
-            }
-            esc = false;
-        } else if c == '\\' {
-            esc = true;
-        } else if c == '"' {
+/// Parse all key=value pairs from a logfmt string.
+fn logfmt_tokenize(t: &str) -> Vec<(String, String)> {
+    let mut result = Vec::new();
+    let b = t.as_bytes();
+    let mut i = 0;
+
+    while i < b.len() {
+        while i < b.len() && (b[i] == b' ' || b[i] == b'\t') {
+            i += 1;
+        }
+        if i >= b.len() {
             break;
+        }
+
+        let key_start = i;
+        while i < b.len() && b[i] != b'=' && b[i] != b' ' && b[i] != b'\t' {
+            i += 1;
+        }
+        if i >= b.len() || b[i] != b'=' {
+            continue;
+        }
+        let key = t[key_start..i].to_string();
+        i += 1; // skip '='
+
+        let value = if i < b.len() && b[i] == b'"' {
+            i += 1;
+            let mut val = String::new();
+            let mut esc = false;
+            loop {
+                if i >= b.len() {
+                    break;
+                }
+                let c = t[i..].chars().next().unwrap();
+                let clen = c.len_utf8();
+                if esc {
+                    match c {
+                        '"' => val.push('"'),
+                        'n' => val.push('\n'),
+                        't' => val.push('\t'),
+                        '\\' => val.push('\\'),
+                        _ => {
+                            val.push('\\');
+                            val.push(c);
+                        }
+                    }
+                    esc = false;
+                } else if c == '\\' {
+                    esc = true;
+                } else if c == '"' {
+                    i += clen;
+                    break;
+                } else {
+                    val.push(c);
+                }
+                i += clen;
+            }
+            val
         } else {
-            out.push(c);
+            let val_start = i;
+            while i < b.len() && b[i] != b' ' && b[i] != b'\t' {
+                i += 1;
+            }
+            t[val_start..i].to_string()
+        };
+
+        if !key.is_empty() {
+            result.push((key, value));
         }
     }
-    out
+
+    result
 }
 
 /// Match the first alphabetic token of `s` against known level names.
@@ -607,6 +700,40 @@ mod tests {
         let p = parse_log_line("I0603 12:00:00.000000 main.go:42] starting");
         assert!(!p.is_structured);
         assert_eq!(p.display, "I0603 12:00:00.000000 main.go:42] starting");
+    }
+
+    #[test]
+    fn parse_log_line_json_extra_fields() {
+        let p = parse_log_line(
+            r#"{"time":"2026-06-22T20:38:29Z","level":"INFO","msg":"HTTP request","method":"POST","path":"/webhook/token-review","status":200}"#,
+        );
+        assert!(p.is_structured);
+        assert!(p.display.starts_with("HTTP request"), "got: {}", p.display);
+        assert!(p.display.contains("method=POST"), "got: {}", p.display);
+        assert!(p.display.contains("status=200"), "got: {}", p.display);
+        // path contains no spaces so should be unquoted
+        assert!(p.display.contains("path=/webhook/token-review"), "got: {}", p.display);
+    }
+
+    #[test]
+    fn parse_log_line_json_extra_field_with_spaces() {
+        let p = parse_log_line(
+            r#"{"time":"2026-06-22T20:38:29Z","level":"WARN","msg":"token review denied","reason":"invalid webhook token"}"#,
+        );
+        assert!(p.is_structured);
+        assert!(p.display.starts_with("token review denied"), "got: {}", p.display);
+        assert!(p.display.contains("reason=\"invalid webhook token\""), "got: {}", p.display);
+    }
+
+    #[test]
+    fn parse_log_line_logfmt_extra_fields() {
+        let p = parse_log_line(
+            r#"time=2024-01-15T10:30:45Z level=info caller=main.go:42 msg="request handled" method=GET status=200"#,
+        );
+        assert!(p.is_structured);
+        assert!(p.display.starts_with("request handled"), "got: {}", p.display);
+        assert!(p.display.contains("method=GET"), "got: {}", p.display);
+        assert!(p.display.contains("status=200"), "got: {}", p.display);
     }
 
     #[test]

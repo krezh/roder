@@ -1,6 +1,17 @@
 {
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
   extends: ["local>krezh/renovate-config"],
+  nix: {
+    enabled: true,
+  },
+  postUpdateOptions: ["gomodTidy"],
+  lockFileMaintenance: {
+    enabled: true,
+    schedule: ["after 1am and before 2am"],
+    automerge: true,
+    automergeType: "pr",
+    ignoreTests: false,
+  },
   packageRules: [
     {
       matchPackageNames: [
@@ -10,6 +21,9 @@
         "web-sys",
       ],
       groupName: "wasm-bindgen",
+      automerge: true,
+      automergeType: "pr",
+      ignoreTests: false,
     },
     // kube and k8s-openapi release in lockstep; separateMajorMinor: false keeps them
     // in one bucket so they satisfy minimumGroupSize: 2 and land in a single PR.
@@ -18,6 +32,9 @@
       groupName: "kube",
       minimumGroupSize: 2,
       separateMajorMinor: false,
+      automerge: true,
+      automergeType: "pr",
+      ignoreTests: false,
     },
   ],
 }

@@ -918,6 +918,13 @@ impl Backend {
             .unwrap_or_default())
     }
 
+    pub async fn kind_stats(
+        &self,
+        namespace: Option<&str>,
+    ) -> std::collections::HashMap<String, roder_core::KindStats> {
+        self.registry.kind_stats(namespace).await
+    }
+
     /// RBAC: which actions may the current identity take on this kind/namespace.
     /// Cached briefly so the per-detail-open `patch`+`delete` checks don't each SSAR.
     pub async fn can(&self, verb: &str, key: &str, ns: Option<&str>) -> bool {

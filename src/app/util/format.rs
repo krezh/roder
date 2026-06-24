@@ -188,12 +188,189 @@ pub(crate) fn parse_log_line(line: &str) -> ParsedLog {
         };
     }
 
+    // Python logging: "2024-01-15 10:30:45,123 LEVEL message..."
+    if is_python_ts(t) {
+        let after_ts = &t[24..];
+        // Skip the level word; everything after it is the message.
+        let msg_start = after_ts
+            .find(' ')
+            .map(|i| after_ts[i..].trim_start())
+            .unwrap_or(after_ts);
+        return ParsedLog {
+            display: msg_start.to_string(),
+            caller: None,
+            timestamp: Some(t[..23].to_string()),
+            is_structured: true,
+        };
+    }
+
+    // Syslog RFC 5424: "<N>1 timestamp hostname app pid msgid [data] message"
+    if t.starts_with('<') {
+        if let Some((_, rest)) = syslog_priority(t) {
+            let rest = rest.trim_start();
+            // RFC 5424: version field is a digit
+            if rest.starts_with(|c: char| c.is_ascii_digit()) {
+                let mut fields = rest.splitn(7, ' ');
+                let _version = fields.next();
+                let timestamp = fields.next().filter(|s| *s != "-").map(str::to_string);
+                let _hostname = fields.next();
+                let caller = fields.next().filter(|s| *s != "-").map(str::to_string);
+                let _procid = fields.next();
+                let _msgid = fields.next();
+                let sd_and_msg = fields.next().unwrap_or("");
+                let msg = rfc5424_message(sd_and_msg);
+                if !msg.is_empty() {
+                    return ParsedLog {
+                        display: msg.to_string(),
+                        caller,
+                        timestamp,
+                        is_structured: true,
+                    };
+                }
+            }
+            // RFC 3164 with priority: "<N>Mon DD HH:MM:SS hostname app: message"
+            if let Some(parsed) = parse_syslog_3164_body(rest) {
+                return parsed;
+            }
+        }
+    }
+
+    // Syslog RFC 3164 without priority: "Mon DD HH:MM:SS hostname app: message"
+    if let Some(parsed) = parse_syslog_3164_body(t) {
+        return parsed;
+    }
+
     raw
 }
 
 fn shorten_caller(s: &str) -> String {
     s.rfind('/')
         .map_or_else(|| s.to_string(), |i| s[i + 1..].to_string())
+}
+
+/// True if `t` starts with a Python `logging` timestamp: "YYYY-MM-DD HH:MM:SS,mmm ".
+fn is_python_ts(t: &str) -> bool {
+    let b = t.as_bytes();
+    b.len() > 23
+        && b[0].is_ascii_digit()
+        && b[1].is_ascii_digit()
+        && b[2].is_ascii_digit()
+        && b[3].is_ascii_digit()
+        && b[4] == b'-'
+        && b[5].is_ascii_digit()
+        && b[6].is_ascii_digit()
+        && b[7] == b'-'
+        && b[8].is_ascii_digit()
+        && b[9].is_ascii_digit()
+        && b[10] == b' '
+        && b[11].is_ascii_digit()
+        && b[12].is_ascii_digit()
+        && b[13] == b':'
+        && b[14].is_ascii_digit()
+        && b[15].is_ascii_digit()
+        && b[16] == b':'
+        && b[17].is_ascii_digit()
+        && b[18].is_ascii_digit()
+        && b[19] == b','
+        && b[20].is_ascii_digit()
+        && b[21].is_ascii_digit()
+        && b[22].is_ascii_digit()
+        && b[23] == b' '
+}
+
+/// Extract syslog priority from a `<NNN>` prefix. Returns `(severity 0–7, rest after '>')`.
+fn syslog_priority(t: &str) -> Option<(u8, &str)> {
+    let inner = t.strip_prefix('<')?;
+    let gt = inner.find('>')?;
+    let priority: u32 = inner[..gt].parse().ok()?;
+    Some(((priority % 8) as u8, &inner[gt + 1..]))
+}
+
+fn syslog_severity_to_level(sev: u8) -> &'static str {
+    match sev {
+        0..=3 => "error",
+        4 => "warn",
+        5 | 6 => "info",
+        7 => "debug",
+        _ => "plain",
+    }
+}
+
+/// Parse the body of a syslog RFC 3164 line: "Mon DD HH:MM:SS hostname app[pid]: message".
+/// `t` must start at the month abbreviation (priority prefix already stripped).
+fn parse_syslog_3164_body(t: &str) -> Option<ParsedLog> {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    if !MONTHS.iter().any(|&m| t.starts_with(m)) {
+        return None;
+    }
+    // "Mon DD HH:MM:SS hostname rest..."
+    let mut iter = t.splitn(5, ' ').filter(|s| !s.is_empty());
+    let month = iter.next()?;
+    let day = iter.next()?;
+    let time = iter.next()?;
+    let _hostname = iter.next()?;
+    let rest = iter.next().unwrap_or("").trim();
+
+    let timestamp = format!("{month} {day} {time}");
+
+    let (caller, msg) = if let Some(pos) = rest.find(": ") {
+        let app_part = &rest[..pos];
+        let app = app_part
+            .find('[')
+            .map(|i| app_part[..i].to_string())
+            .unwrap_or_else(|| app_part.to_string());
+        (Some(app), rest[pos + 2..].to_string())
+    } else {
+        (None, rest.to_string())
+    };
+
+    if msg.is_empty() && caller.is_none() {
+        return None;
+    }
+    Some(ParsedLog {
+        display: if msg.is_empty() { rest.to_string() } else { msg },
+        caller,
+        timestamp: Some(timestamp),
+        is_structured: true,
+    })
+}
+
+/// Locate the syslog RFC 5424 message: everything after the structured-data block `[…]` or
+/// the `-` nil value. `s` starts at the structured-data or `-` field.
+fn rfc5424_message(s: &str) -> &str {
+    let s = s.trim_start();
+    if let Some(rest) = s.strip_prefix("- ").or_else(|| (s == "-").then_some("")) {
+        return rest.trim_start();
+    }
+    if !s.starts_with('[') {
+        return s;
+    }
+    // Walk through structured-data element(s), respecting quoted values.
+    let b = s.as_bytes();
+    let mut i = 0;
+    let mut in_quotes = false;
+    while i < b.len() {
+        match b[i] {
+            b'\\' if in_quotes => i += 2,
+            b'"' => {
+                in_quotes = !in_quotes;
+                i += 1;
+            }
+            b']' if !in_quotes => {
+                i += 1;
+                // Another SD element may follow immediately.
+                if b.get(i) == Some(&b'[') {
+                    continue;
+                }
+                break;
+            }
+            _ => i += 1,
+        }
+    }
+    s[i..].trim_start()
 }
 
 /// Classify a log line by severity. Tries structured formats in order:
@@ -239,6 +416,26 @@ pub(crate) fn log_level(line: &str) -> &'static str {
     for key in ["level=", "lvl=", "severity="] {
         if let Some(lvl) = logfmt_level(t, key) {
             return lvl;
+        }
+    }
+
+    // Python logging: "2024-01-15 10:30:45,123 LEVEL ..."
+    if is_python_ts(t) {
+        let after_ts = &t[24..];
+        let word_end = after_ts
+            .bytes()
+            .position(|b| !b.is_ascii_alphabetic())
+            .unwrap_or(after_ts.len());
+        if let Some(lvl) = level_word(&after_ts[..word_end]) {
+            return lvl;
+        }
+        return "plain";
+    }
+
+    // Syslog with priority prefix: "<N>..." → severity = N % 8
+    if t.starts_with('<') {
+        if let Some((severity, _)) = syslog_priority(t) {
+            return syslog_severity_to_level(severity);
         }
     }
 
@@ -809,5 +1006,125 @@ mod tests {
     fn log_level_plain() {
         assert_eq!(log_level("hello world"), "plain");
         assert_eq!(log_level("Starting server on :8080"), "plain");
+    }
+
+    // --- Python logging ---
+
+    #[test]
+    fn parse_log_line_python_basic() {
+        let p = parse_log_line("2024-01-15 10:30:45,123 INFO server started on port 8080");
+        assert!(p.is_structured, "expected structured");
+        assert_eq!(p.display, "server started on port 8080");
+        assert_eq!(p.timestamp.as_deref(), Some("2024-01-15 10:30:45,123"));
+        assert!(p.caller.is_none());
+    }
+
+    #[test]
+    fn parse_log_line_python_error() {
+        let p = parse_log_line("2024-01-15 10:30:45,123 ERROR Connection refused to database");
+        assert!(p.is_structured);
+        assert_eq!(p.display, "Connection refused to database");
+        assert_eq!(p.timestamp.as_deref(), Some("2024-01-15 10:30:45,123"));
+    }
+
+    #[test]
+    fn parse_log_line_python_with_logger() {
+        let p = parse_log_line("2024-01-15 10:30:45,123 WARNING django.request POST /api/ 400");
+        assert!(p.is_structured);
+        assert_eq!(p.display, "django.request POST /api/ 400");
+    }
+
+    #[test]
+    fn log_level_python_info() {
+        assert_eq!(log_level("2024-01-15 10:30:45,123 INFO hello"), "info");
+    }
+
+    #[test]
+    fn log_level_python_error() {
+        assert_eq!(log_level("2024-01-15 10:30:45,123 ERROR boom"), "error");
+    }
+
+    #[test]
+    fn log_level_python_warning() {
+        assert_eq!(log_level("2024-01-15 10:30:45,123 WARNING disk almost full"), "warn");
+    }
+
+    #[test]
+    fn log_level_python_debug() {
+        assert_eq!(log_level("2024-01-15 10:30:45,123 DEBUG connecting"), "debug");
+    }
+
+    // --- Syslog RFC 5424 ---
+
+    #[test]
+    fn parse_log_line_syslog_rfc5424_basic() {
+        let p = parse_log_line(
+            "<165>1 2024-01-15T10:30:45.000000+00:00 mymachine myapp 1234 ID47 - An application event",
+        );
+        assert!(p.is_structured, "expected structured");
+        assert_eq!(p.display, "An application event");
+        assert_eq!(p.timestamp.as_deref(), Some("2024-01-15T10:30:45.000000+00:00"));
+        assert_eq!(p.caller.as_deref(), Some("myapp"));
+    }
+
+    #[test]
+    fn parse_log_line_syslog_rfc5424_with_sd() {
+        let p = parse_log_line(
+            r#"<34>1 2024-01-15T10:30:45Z host myapp 100 - [exampleSDID@32473 key="val"] the message"#,
+        );
+        assert!(p.is_structured);
+        assert_eq!(p.display, "the message");
+        assert_eq!(p.caller.as_deref(), Some("myapp"));
+    }
+
+    #[test]
+    fn log_level_syslog_rfc5424_error() {
+        // priority 34 = facility 4, severity 2 (critical) → error
+        assert_eq!(log_level("<34>1 2024-01-15T10:30:45Z h app - - - msg"), "error");
+    }
+
+    #[test]
+    fn log_level_syslog_rfc5424_warn() {
+        // priority 164 = facility 20, severity 4 (warning) → warn
+        assert_eq!(log_level("<164>1 2024-01-15T10:30:45Z h app - - - msg"), "warn");
+    }
+
+    #[test]
+    fn log_level_syslog_rfc5424_info() {
+        // priority 165 = facility 20, severity 5 (notice) → info
+        assert_eq!(log_level("<165>1 2024-01-15T10:30:45Z h app - - - msg"), "info");
+    }
+
+    #[test]
+    fn log_level_syslog_rfc5424_debug() {
+        // priority 167 = facility 20, severity 7 (debug) → debug
+        assert_eq!(log_level("<167>1 2024-01-15T10:30:45Z h app - - - msg"), "debug");
+    }
+
+    // --- Syslog RFC 3164 ---
+
+    #[test]
+    fn parse_log_line_syslog_rfc3164_no_priority() {
+        let p = parse_log_line("Jan 15 10:30:45 myhost sshd[1234]: Accepted publickey for user");
+        assert!(p.is_structured, "expected structured");
+        assert_eq!(p.display, "Accepted publickey for user");
+        assert_eq!(p.timestamp.as_deref(), Some("Jan 15 10:30:45"));
+        assert_eq!(p.caller.as_deref(), Some("sshd"));
+    }
+
+    #[test]
+    fn parse_log_line_syslog_rfc3164_with_priority() {
+        let p = parse_log_line("<34>Jan 15 10:30:45 myhost su: 'su root' failed");
+        assert!(p.is_structured);
+        assert_eq!(p.display, "'su root' failed");
+        assert_eq!(p.caller.as_deref(), Some("su"));
+    }
+
+    #[test]
+    fn log_level_syslog_rfc3164_priority() {
+        // <34> → severity 2 (critical) → error
+        assert_eq!(log_level("<34>Jan 15 10:30:45 host su: msg"), "error");
+        // <30> → severity 6 (info) → info
+        assert_eq!(log_level("<30>Jan 15 10:30:45 host su: msg"), "info");
     }
 }

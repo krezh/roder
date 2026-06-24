@@ -276,6 +276,38 @@ impl InformerRegistry {
         None
     }
 
+    /// Per-kind row counts and error/warn tallies for all currently-active informers.
+    /// Only informers that have been subscribed to at least once are included.
+    /// When `namespace` is `Some(ns)`, namespace-scoped informers for other namespaces
+    /// are excluded; cluster-scoped informers are always included.
+    pub async fn kind_stats(
+        &self,
+        namespace: Option<&str>,
+    ) -> std::collections::HashMap<String, roder_core::KindStats> {
+        use roder_core::{KindStats, RowStatus};
+        let active = self.active.lock().await;
+        let mut result: std::collections::HashMap<String, KindStats> = std::collections::HashMap::new();
+        for entry in active.values() {
+            // Skip namespace-scoped informers that don't match the requested namespace.
+            if let (Some(ns), Some(entry_ns)) = (namespace, entry.namespace.as_deref()) {
+                if ns != entry_ns {
+                    continue;
+                }
+            }
+            let rows = entry.rows.read().await;
+            let bucket = result.entry(entry.resource_key.clone()).or_default();
+            bucket.count += rows.len() as u32;
+            for row in rows.values() {
+                match row.status {
+                    RowStatus::Error => bucket.errors += 1,
+                    RowStatus::Warn => bucket.warnings += 1,
+                    _ => {}
+                }
+            }
+        }
+        result
+    }
+
     /// Get the metrics history for a specific pod (namespace/name).
     pub async fn pod_metrics_history(
         &self,

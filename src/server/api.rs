@@ -389,6 +389,20 @@ pub async fn metrics_history(
     }
 }
 
+#[derive(Deserialize)]
+pub struct CatalogStatsQuery {
+    namespace: Option<String>,
+}
+
+pub async fn catalog_stats(
+    State(state): State<AppState>,
+    Query(q): Query<CatalogStatsQuery>,
+) -> Response {
+    let b = backend_or_return!(state);
+    let ns = q.namespace.as_deref().filter(|s| !s.is_empty());
+    Json(b.kind_stats(ns).await).into_response()
+}
+
 fn to_event(ev: &WatchEvent) -> Result<SseEvent, Infallible> {
     Ok(SseEvent::default()
         .json_data(ev)

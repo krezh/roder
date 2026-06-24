@@ -7,6 +7,7 @@ use roder_core::{ResourceKind, ResourceRow, RowStatus};
 
 use crate::app::components::icons::ShiftIcon;
 use crate::app::hooks::use_sse_subscription;
+use crate::app::overlays::confirm::Confirm;
 use crate::app::state::{
     Catalog, ConnectionState, NavOpen, NsPaletteOpen, OnlyProblems, PaletteOpen,
 };
@@ -36,6 +37,7 @@ pub(crate) fn Topbar() -> impl IntoView {
                 {move || selected_ns.get().unwrap_or_else(|| "All namespaces".to_string())}
                 " " <kbd><ShiftIcon />"N"</kbd>
             </button>
+            <SanitizeButton />
             <FailingBadge />
             <TopUsage />
             <Identity />
@@ -106,6 +108,35 @@ fn TopUsage() -> impl IntoView {
                 }
             })}
         </Suspense>
+    }
+}
+
+/// One-click sweep of dead pods + finished jobs, mirroring k9s's sanitize command.
+#[component]
+fn SanitizeButton() -> impl IntoView {
+    let confirm = expect_context::<RwSignal<Option<Confirm>>>();
+    let selected_ns = expect_context::<RwSignal<Option<String>>>();
+
+    let do_sanitize = move || {
+        let ns = selected_ns.get_untracked();
+        let payload = serde_json::json!({ "action": "sanitize", "namespace": ns });
+        leptos::task::spawn_local(async move {
+            let _ = data::post_action(&payload).await;
+        });
+    };
+
+    view! {
+        <button class="sweep-btn"
+            on:click=move |_| {
+                confirm.set(Some(Confirm {
+                    message: "Delete all dead pods and finished jobs?".into(),
+                    ok_label: Some("Sweep".into()),
+                    on_ok: std::sync::Arc::new(do_sanitize),
+                }));
+            }>
+            "Sweep"
+            <span class="tooltip">"Delete dead pods and finished jobs"</span>
+        </button>
     }
 }
 

@@ -9,6 +9,7 @@ use leptos::prelude::*;
 pub(crate) struct Confirm {
     pub(crate) message: String,
     pub(crate) on_ok: std::sync::Arc<dyn Fn() + Send + Sync>,
+    pub(crate) ok_label: Option<String>,
 }
 
 /// Pop an in-page confirmation; runs `on_ok` if the user confirms.
@@ -20,6 +21,7 @@ pub(crate) fn ask_confirm(
     sig.set(Some(Confirm {
         message: message.into(),
         on_ok: std::sync::Arc::new(on_ok),
+        ok_label: None,
     }));
 }
 
@@ -38,7 +40,9 @@ pub(crate) fn ConfirmDialog() -> impl IntoView {
                     <div class="modal-msg">{c.message.clone()}</div>
                     <div class="modal-actions">
                         <button class="act" on:click=move |_| do_close()>"Cancel"</button>
-                        <button class="act danger" on:click=move |_| { on_ok(); do_close(); }>"Delete"</button>
+                        <button class="act danger" on:click=move |_| { on_ok(); do_close(); }>
+                            {c.ok_label.clone().unwrap_or_else(|| "Delete".into())}
+                        </button>
                     </div>
                 </div>
             }

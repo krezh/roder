@@ -32,6 +32,19 @@
 
 .palette-btn { @extend %chip-btn; }
 
+.sweep-btn {
+  @extend %chip-btn;
+  position: relative;
+  .tooltip {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 6px;
+  }
+  &:hover .tooltip { display: block; }
+}
+
 .errfilter {
   @extend %chip-btn;
   &.active {

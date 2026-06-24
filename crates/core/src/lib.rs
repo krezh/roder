@@ -263,6 +263,13 @@ pub fn format_age_secs(secs: u64) -> String {
     }
 }
 
+/// Result of a sweep/sanitize operation.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CleanupSummary {
+    pub pods_deleted: usize,
+    pub jobs_deleted: usize,
+}
+
 /// Counts of resources by reconciled/suspended/failing for a CRD family.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HealthRollup {

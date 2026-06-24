@@ -279,12 +279,14 @@ pub async fn action(
         "mutation requested"
     );
 
-    // `apply` only needs YAML; the rest need key + name.
+    // `apply` and `sanitize` don't operate on a named resource.
     let res = if req.action == "apply" {
         match req.yaml.as_deref() {
             Some(y) => b.apply_yaml(y).await,
             None => return (StatusCode::BAD_REQUEST, "missing yaml").into_response(),
         }
+    } else if req.action == "sanitize" {
+        b.sanitize(req.namespace.clone()).await.map(|_| ())
     } else {
         let (Some(key), Some(name)) = (req.key.as_deref(), req.name.as_deref()) else {
             return (StatusCode::BAD_REQUEST, "missing key or name").into_response();

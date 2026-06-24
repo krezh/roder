@@ -15,7 +15,6 @@
 - Kubernetes events view per resource and globally
 - Port forwarding
 - Pod exec / shell (terminal access into containers)
-- Bulk cleanup command — delete completed/failed pods, evicted pods, terminal-state jobs
 
 ## Sidebar
 

@@ -394,3 +394,131 @@ fn to_event(ev: &WatchEvent) -> Result<SseEvent, Infallible> {
         .json_data(ev)
         .unwrap_or_else(|_| SseEvent::default().data("{}")))
 }
+
+// ---- pod exec (WebSocket terminal) ---------------------------------------
+
+#[derive(Deserialize)]
+pub struct ExecQuery {
+    namespace: String,
+    pod: String,
+    container: Option<String>,
+}
+
+/// Injects a `nicolaka/netshoot` ephemeral container into a pod and waits for
+/// it to reach Running, then returns `{"container": "<name>"}`.
+pub async fn debug_shell(
+    State(state): State<AppState>,
+    Query(q): Query<ExecQuery>,
+) -> Response {
+    let b = backend_or_return!(state);
+    match b.inject_debug_container(&q.namespace, &q.pod).await {
+        Ok(container) => {
+            Json(serde_json::json!({ "container": container })).into_response()
+        }
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+            .into_response(),
+    }
+}
+
+/// WebSocket endpoint that proxies stdin/stdout for an interactive pod shell.
+pub async fn exec_ws(
+    State(state): State<AppState>,
+    Query(q): Query<ExecQuery>,
+    ws: axum::extract::ws::WebSocketUpgrade,
+) -> Response {
+    let b = backend_or_return!(state);
+    ws.on_upgrade(move |socket| exec_session(socket, b, q))
+}
+
+async fn exec_session(
+    socket: axum::extract::ws::WebSocket,
+    b: Arc<Backend>,
+    q: ExecQuery,
+) {
+    use axum::extract::ws::Message;
+    use futures::{SinkExt, StreamExt};
+    use roder_k8s::TerminalSize;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let (mut ws_sink, mut ws_stream) = socket.split();
+
+    let mut attached = match b.exec(&q.namespace, &q.pod, q.container.as_deref().filter(|s| !s.is_empty())).await {
+        Ok(a) => a,
+        Err(e) => {
+            let msg = format!("\r\n\x1b[31m[exec: {}]\x1b[0m\r\n", e);
+            let _ = ws_sink
+                .send(Message::Binary(msg.into_bytes().into()))
+                .await;
+            return;
+        }
+    };
+
+    let mut resize_tx = attached.terminal_size();
+    let Some(mut stdin)  = attached.stdin()  else { return };
+    let Some(mut stdout) = attached.stdout() else { return };
+
+    let to_client = async move {
+        let mut buf = [0u8; 4096];
+        loop {
+            match stdout.read(&mut buf).await {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    if ws_sink
+                        .send(Message::Binary(buf[..n].to_vec().into()))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+    };
+
+    let from_client = async move {
+        while let Some(Ok(msg)) = futures::StreamExt::next(&mut ws_stream).await {
+            match msg {
+                Message::Binary(data) => {
+                    if stdin.write_all(&data).await.is_err() {
+                        break;
+                    }
+                }
+                Message::Text(txt) => {
+                    if let Ok(v) =
+                        serde_json::from_str::<serde_json::Value>(txt.as_str())
+                    {
+                        if v.get("type").and_then(|t| t.as_str()) == Some("resize") {
+                            if let (Some(r), Some(c)) = (
+                                v.get("rows").and_then(|v| v.as_u64()),
+                                v.get("cols").and_then(|v| v.as_u64()),
+                            ) {
+                                if let Some(ref mut tx) = resize_tx {
+                                    let _ = tx
+                                        .send(TerminalSize {
+                                            height: r as u16,
+                                            width: c as u16,
+                                        })
+                                        .await;
+                                }
+                            }
+                        }
+                    }
+                }
+                Message::Close(_) => break,
+                _ => {}
+            }
+        }
+    };
+
+    tokio::select! {
+        _ = to_client => {}
+        _ = from_client => {}
+    }
+
+    let _ = attached.join().await;
+}
+
+/// Serves the xterm.js terminal page loaded in the exec overlay iframe.
+pub async fn terminal_page() -> impl IntoResponse {
+    axum::response::Html(include_str!("terminal.html"))
+}

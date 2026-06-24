@@ -28,13 +28,14 @@ use detail::Tab;
 use logs::LogSidebar;
 use overlays::confirm::{Confirm, ConfirmDialog};
 use overlays::context_menu::ContextMenu;
+use overlays::exec::ExecWindow;
 use overlays::ns_palette::NsPalette;
 use overlays::palette::CommandPalette;
 use overlays::shortcuts::ShortcutsHelp;
 use state::{
-    Catalog, ConnectionState, CtxMenu, FilterFocus, LogPods, LogTarget, NavOpen, NsPaletteOpen,
-    OnlyProblems, PaletteOpen, PodModalTarget, ResourceFilter, ShortcutsOpen, TableRows,
-    TableSelected, Tick, WorkspaceConf, WorkspaceConfig,
+    Catalog, ConnectionState, CtxMenu, ExecOpen, ExecTarget, FilterFocus, LogPods, LogTarget,
+    NavOpen, NsPaletteOpen, OnlyProblems, PaletteOpen, PodModalTarget, ResourceFilter,
+    ShortcutsOpen, TableRows, TableSelected, Tick, WorkspaceConf, WorkspaceConfig,
 };
 use views::resource::ResourceView;
 use views::search::SearchResultsView;
@@ -81,6 +82,8 @@ pub fn App() -> impl IntoView {
     let confirm = RwSignal::new(None::<Confirm>);
     let pod_modal = RwSignal::new(None::<DetailTarget>);
     provide_context(PodModalTarget(pod_modal));
+    let exec_open = RwSignal::new(None::<ExecTarget>);
+    provide_context(ExecOpen(exec_open));
     let shortcuts_open = RwSignal::new(false);
     provide_context(ShortcutsOpen(shortcuts_open));
     let resource_filter = RwSignal::new(String::new());
@@ -310,6 +313,7 @@ pub fn App() -> impl IntoView {
                 <ContextMenu />
                 <ConfirmDialog />
                 <PodModal />
+                <ExecWindow />
                 <DetailDrawer />
                 <LogSidebar />
                 <ShortcutsHelp />

@@ -11,7 +11,7 @@ use roder_core::ObjectDetail;
 use crate::app::components::table::ScaleControl;
 use crate::app::logs::LogsView;
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
-use crate::app::state::DetailTarget;
+use crate::app::state::{DetailTarget, ExecOpen, ExecTarget};
 use crate::app::util::format::parse_key;
 use crate::app::util::json::selector_from;
 use crate::app::util::predicate::KindKind;
@@ -111,6 +111,7 @@ pub(crate) fn RowDetail(target: DetailTarget) -> impl IntoView {
     let is_cronjob = kk.is_cronjob();
     let ns = target.namespace.clone().unwrap_or_default();
     let pod = target.name.clone();
+    let exec_open = expect_context::<ExecOpen>().0;
 
     let tv = StoredValue::new(target.clone());
     let kind_sv = StoredValue::new(kind.clone());
@@ -223,6 +224,20 @@ pub(crate) fn RowDetail(target: DetailTarget) -> impl IntoView {
                     <Show when=can_patch fallback=|| ()>
                         <button class="act" on:click=move |_| run("cronjob-trigger", serde_json::json!({}))>"Trigger"</button>
                     </Show>
+                })}
+                {is_pod.then(|| {
+                    let exec_ns  = ns.clone();
+                    let exec_pod = pod.clone();
+                    view! {
+                        <button class="act" on:click=move |_| {
+                            exec_open.set(Some(ExecTarget {
+                                namespace: exec_ns.clone(),
+                                pod: exec_pod.clone(),
+                                container: None,
+                                pending: false,
+                            }));
+                        }>"Shell"</button>
+                    }
                 })}
                 {move || can_delete().then(|| view! {
                     <button class="act danger" on:click=move |_| {

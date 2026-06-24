@@ -20,3 +20,4 @@ mod test_alloc;
 pub use backend::Backend;
 pub use client::{ClusterAccess, K8sError};
 pub use informers::WatchHandle;
+pub use kube::api::{AttachedProcess, TerminalSize};

@@ -63,6 +63,19 @@ pub(crate) struct Catalog(pub(crate) RwSignal<Vec<ResourceKind>>);
 #[derive(Clone, Copy)]
 pub(crate) struct PodModalTarget(pub(crate) RwSignal<Option<DetailTarget>>);
 
+/// Target for the exec/shell overlay: which pod (and optionally container) to exec into.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct ExecTarget {
+    pub(crate) namespace: String,
+    pub(crate) pod: String,
+    pub(crate) container: Option<String>,
+    /// True while an ephemeral debug container is being injected and waited on.
+    pub(crate) pending: bool,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct ExecOpen(pub(crate) RwSignal<Option<ExecTarget>>);
+
 /// Whether the keyboard shortcuts help overlay is open.
 #[derive(Clone, Copy)]
 pub(crate) struct ShortcutsOpen(pub(crate) RwSignal<bool>);

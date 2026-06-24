@@ -50,7 +50,6 @@ pub async fn security_headers(State(state): State<AppState>, req: Request, next:
     if let Some(v) = cache {
         h.insert(header::CACHE_CONTROL, HeaderValue::from_static(v));
     }
-    h.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
     h.insert(
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),
@@ -63,21 +62,38 @@ pub async fn security_headers(State(state): State<AppState>, req: Request, next:
         HeaderName::from_static("permissions-policy"),
         HeaderValue::from_static("geolocation=(), microphone=(), camera=()"),
     );
-    // CSP is strict by default; the only relaxation is dev-mode loopback ws
-    // for the live-reload socket, which is otherwise harmless to allow since
-    // an attacker would already need code execution on the developer box.
+
+    // /terminal is served inside our own iframe — it must allow framing by
+    // 'self' and load xterm.js + its CSS from the CDN.
+    // All other pages stay locked down with frame-ancestors 'none'.
+    let is_terminal = path == "/terminal";
+
+    if !is_terminal {
+        h.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    }
+
     let connect_src = if state.config.dev_mode {
-        "connect-src 'self' ws://127.0.0.1:* ws://localhost:*"
+        "connect-src 'self' ws://127.0.0.1:* ws://localhost:* wss://127.0.0.1:* wss://localhost:*"
     } else {
         "connect-src 'self'"
     };
-    let csp = format!(
-        "default-src 'self'; \
-         script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; \
-         style-src 'self' 'unsafe-inline'; \
-         img-src 'self' data:; font-src 'self'; \
-         {connect_src}; frame-ancestors 'none'; base-uri 'self'"
-    );
+    let csp = if is_terminal {
+        format!(
+            "default-src 'self'; \
+             script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; \
+             style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; \
+             img-src 'self' data:; font-src 'self' https://cdn.jsdelivr.net; \
+             {connect_src}; frame-ancestors 'self'; base-uri 'self'"
+        )
+    } else {
+        format!(
+            "default-src 'self'; \
+             script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; \
+             style-src 'self' 'unsafe-inline'; \
+             img-src 'self' data:; font-src 'self'; \
+             {connect_src}; frame-ancestors 'none'; base-uri 'self'"
+        )
+    };
     h.insert(
         header::CONTENT_SECURITY_POLICY,
         HeaderValue::from_str(&csp).expect("static CSP is valid"),

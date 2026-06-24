@@ -10,7 +10,7 @@ repository.workspace = true
 
 [dependencies]
 roder-core = { workspace = true }
-kube = { version = "4.0", features = ["runtime", "derive"] }
+kube = { version = "4.0", features = ["runtime", "derive", "ws"] }
 k8s-openapi = { version = "0.28", features = ["latest"] }
 http = "1"
 arc-swap = "1"

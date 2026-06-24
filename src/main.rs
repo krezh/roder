@@ -57,6 +57,9 @@ async fn main() {
         .route("/api/logs", get(api::logs))
         .route("/api/metrics", get(api::metrics_history))
         .route("/api/action", post(api::action))
+        .route("/api/exec", get(api::exec_ws))
+        .route("/api/debug-shell", get(api::debug_shell))
+        .route("/terminal", get(api::terminal_page))
         .leptos_routes(&state, routes, {
             let leptos_options = leptos_options.clone();
             move || shell(leptos_options.clone())

@@ -6,7 +6,8 @@ use roder_core::ResourceKind;
 use crate::app::events::{fire_action, fire_action_with};
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::state::{
-    open_logs, Catalog, CtxMenu, DetailTarget, LogPods, LogTarget, TableRows, TableSelected,
+    open_logs, Catalog, CtxMenu, DetailTarget, ExecOpen, ExecTarget, LogPods, LogTarget, TableRows,
+    TableSelected,
 };
 use crate::app::util::clipboard::copy_to_clipboard;
 use crate::app::util::format::parse_key;
@@ -21,6 +22,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
     let confirm = expect_context::<RwSignal<Option<Confirm>>>();
     let catalog = expect_context::<Catalog>().0;
     let log_pods = expect_context::<LogPods>().0;
+    let exec_open = expect_context::<ExecOpen>().0;
     // Provided at App level; ResourceView fills in the Option on mount.
     let table_selected = expect_context::<TableSelected>().0;
     let table_rows = expect_context::<TableRows>().0;
@@ -128,6 +130,20 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             };
 
             let scale_n = RwSignal::new(1i32);
+            let shell = (!is_bulk && is_pod).then(|| {
+                let ns  = m.target.namespace.clone().unwrap_or_default();
+                let pod = m.target.name.clone();
+                move |_| {
+                    exec_open.set(Some(ExecTarget {
+                        namespace: ns.clone(),
+                        pod: pod.clone(),
+                        container: None,
+                        pending: false,
+                    }));
+                    do_close();
+                }
+            });
+
             let ns_item = (!is_bulk).then(|| m.target.namespace.clone()).flatten();
             let node_item = (!is_bulk && is_pod).then(|| m.node.clone()).flatten();
 
@@ -141,6 +157,55 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                     })}
                     {(!is_bulk).then(|| view! { <button class="ctx-item" on:click=open>"Open details"</button> })}
                     {has_logs.then(|| view! { <button class="ctx-item" on:click=logs>"Logs"</button> })}
+                    {shell.map(|s| view! { <button class="ctx-item" on:click=s>"Shell"</button> })}
+                    {(!is_bulk && is_pod).then(|| {
+                        let ns  = m.target.namespace.clone().unwrap_or_default();
+                        let pod = m.target.name.clone();
+                        move |_: leptos::ev::MouseEvent| {
+                            let ns  = ns.clone();
+                            let pod = pod.clone();
+                            do_close();
+                            exec_open.set(Some(ExecTarget {
+                                namespace: ns.clone(),
+                                pod: pod.clone(),
+                                container: None,
+                                pending: true,
+                            }));
+                            leptos::task::spawn_local(async move {
+                                let url = format!(
+                                    "/api/debug-shell?namespace={}&pod={}",
+                                    crate::data::percent_encode(&ns),
+                                    crate::data::percent_encode(&pod),
+                                );
+                                // Guard: don't touch exec_open if the user dismissed the overlay
+                                // while the request was in flight (pending cleared or signal gone).
+                                let still_pending = || {
+                                    exec_open.get_untracked().map(|t| t.pending).unwrap_or(false)
+                                };
+                                match crate::data::fetch_json::<serde_json::Value>(&url).await {
+                                    Ok(resp) => {
+                                        if still_pending() {
+                                            if let Some(ctr) = resp.get("container").and_then(|c| c.as_str()) {
+                                                exec_open.set(Some(ExecTarget {
+                                                    namespace: ns.clone(),
+                                                    pod: pod.clone(),
+                                                    container: Some(ctr.to_string()),
+                                                    pending: false,
+                                                }));
+                                            } else {
+                                                exec_open.set(None);
+                                            }
+                                        }
+                                    }
+                                    Err(_) => {
+                                        if still_pending() {
+                                            exec_open.set(None);
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    }).map(|h| view! { <button class="ctx-item" on:click=h>"Debug shell"</button> })}
                     {ns_item.map(|ns| view! { <button class="ctx-item" on:click=goto_ns>"Go to namespace " <span class="ctx-sub">{ns}</span></button> })}
                     {node_item.map(|node| view! { <button class="ctx-item" on:click=goto_node>"Go to node " <span class="ctx-sub">{node}</span></button> })}
                     <button class="ctx-item" on:click=copy>"Copy name"</button>

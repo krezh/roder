@@ -6,7 +6,6 @@
 
 ## Flux Integration
 
-- Show failing Kustomizations and HelmReleases in the topbar
 - Add dependency tree overview
 
 ## Resources

@@ -39,9 +39,76 @@ pub(crate) fn Topbar() -> impl IntoView {
             </button>
             <SanitizeButton />
             <FailingBadge />
+            <FluxFailingBadge />
             <TopUsage />
             <Identity />
         </header>
+    }
+}
+
+/// Live count of failing Flux Kustomizations and HelmReleases.
+#[component]
+fn FluxFailingBadge() -> impl IntoView {
+    let catalog = expect_context::<Catalog>().0;
+    let selected_kind = expect_context::<RwSignal<Option<ResourceKind>>>();
+    let only_problems = expect_context::<OnlyProblems>().0;
+
+    let ks_kind = Memo::new(move |_| {
+        catalog
+            .get()
+            .into_iter()
+            .find(|k| k.group.ends_with("fluxcd.io") && k.kind == "Kustomization")
+    });
+    let hr_kind = Memo::new(move |_| {
+        catalog
+            .get()
+            .into_iter()
+            .find(|k| k.group.ends_with("fluxcd.io") && k.kind == "HelmRelease")
+    });
+
+    let ks_rows = RwSignal::new(std::collections::HashMap::<String, ResourceRow>::new());
+    let ks_entering = RwSignal::new(std::collections::BTreeSet::<String>::new());
+    let ks_removing = RwSignal::new(std::collections::BTreeSet::<String>::new());
+    let hr_rows = RwSignal::new(std::collections::HashMap::<String, ResourceRow>::new());
+    let hr_entering = RwSignal::new(std::collections::BTreeSet::<String>::new());
+    let hr_removing = RwSignal::new(std::collections::BTreeSet::<String>::new());
+
+    use_sse_subscription(ks_rows, ks_entering, ks_removing, None, move || {
+        Some(data::watch_url(&ks_kind.get()?.key, None, None))
+    });
+    use_sse_subscription(hr_rows, hr_entering, hr_removing, None, move || {
+        Some(data::watch_url(&hr_kind.get()?.key, None, None))
+    });
+
+    let count = Memo::new(move |_| {
+        let ks = ks_rows.with(|m| m.values().filter(|r| r.status == RowStatus::Error).count());
+        let hr = hr_rows.with(|m| m.values().filter(|r| r.status == RowStatus::Error).count());
+        ks + hr
+    });
+
+    view! {
+        {move || {
+            let n = count.get();
+            (n > 0).then(|| {
+                let go = move |_| {
+                    let kind = if ks_rows.with(|m| m.values().any(|r| r.status == RowStatus::Error)) {
+                        ks_kind.get_untracked()
+                    } else {
+                        hr_kind.get_untracked()
+                    };
+                    if let Some(k) = kind {
+                        only_problems.set(true);
+                        selected_kind.set(Some(k));
+                    }
+                };
+                view! {
+                    <button class="fluxbadge" on:click=go>
+                        "✕ " {n} " Flux"
+                        <span class="tooltip">"Flux resources failing — click to view"</span>
+                    </button>
+                }
+            })
+        }}
     }
 }
 

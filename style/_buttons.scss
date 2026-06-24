@@ -71,6 +71,24 @@
   cursor: pointer;
 }
 
+// Cluster-wide failing Flux resource count; clicking jumps to Kustomizations or HelmReleases.
+.fluxbadge {
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  border: 1px solid var(--warn);
+  color: var(--warn);
+  border-radius: 6px;
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+  font-weight: 600;
+  white-space: nowrap;
+  position: relative;
+  .tooltip { display: none; position: absolute; top: 100%; left: 0; margin-top: 6px; }
+  &:hover {
+    background: color-mix(in srgb, var(--warn) 26%, transparent);
+    .tooltip { display: block; }
+  }
+}
+
 // Cluster-wide failing-pod count; clicking jumps to the filtered pods view.
 .failbadge {
   background: color-mix(in srgb, var(--error) 16%, transparent);

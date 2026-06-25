@@ -6,7 +6,7 @@
   },
   postUpdateOptions: ["gomodTidy"],
   lockFileMaintenance: {
-    enabled: true,
+    enabled: false,
     schedule: ["after 1am and before 2am"],
     automerge: true,
     automergeType: "pr",

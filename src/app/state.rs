@@ -5,7 +5,7 @@
 use std::collections::{BTreeSet, HashMap};
 
 use leptos::prelude::*;
-use roder_core::{ResourceKind, ResourceRow};
+use roder_core::{FiringAlert, ResourceKind, ResourceRow};
 use serde::{Deserialize, Serialize};
 
 /// The object currently shown in the detail drawer.
@@ -79,6 +79,14 @@ pub(crate) struct ExecOpen(pub(crate) RwSignal<Option<ExecTarget>>);
 /// Whether the keyboard shortcuts help overlay is open.
 #[derive(Clone, Copy)]
 pub(crate) struct ShortcutsOpen(pub(crate) RwSignal<bool>);
+
+/// Whether the alerts panel overlay is open.
+#[derive(Clone, Copy)]
+pub(crate) struct AlertsOpen(pub(crate) RwSignal<bool>);
+
+/// Cached list of firing alerts from AlertManager (None = not yet fetched).
+#[derive(Clone, Copy)]
+pub(crate) struct AlertsData(pub(crate) RwSignal<Option<Vec<FiringAlert>>>);
 
 /// `None` = SSE stream is live. `Some(msg)` = disconnected, with the HTTP status
 /// or network error that caused it (e.g. "401 Unauthorized", "Network error").

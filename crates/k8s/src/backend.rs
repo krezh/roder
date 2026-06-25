@@ -103,7 +103,7 @@ impl Backend {
     }
 
     /// The current `kube::Client` (a cheap clone of the hot-swappable inner Arc).
-    fn client(&self) -> kube::Client {
+    pub fn client(&self) -> kube::Client {
         (*self.cluster.client()).clone()
     }
 

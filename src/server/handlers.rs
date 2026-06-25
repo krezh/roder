@@ -229,7 +229,10 @@ async fn ensure_backend(state: &AppState, id_token: &str) -> bool {
             return false;
         }
     };
+    let client = new_backend.client();
     *state.backend.write().await = Some(Arc::new(new_backend));
+    let url = roder_k8s::discover_alertmanager(&client).await;
+    *state.alerts.write().await = url.map(|u| Arc::new(roder_k8s::AlertsCache::new(u)));
     true
 }
 
@@ -448,6 +451,7 @@ mod tests {
             current: Arc::new(RwLock::new(None)),
             refresh_lock: Arc::new(Mutex::new(())),
             backend_build_lock: Arc::new(Mutex::new(())),
+            alerts: Arc::new(RwLock::new(None)),
         }
     }
 

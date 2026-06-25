@@ -39,6 +39,8 @@ pub struct AppState {
     /// apiserver. Normally the backend is already built at startup, so this is
     /// only contended if the startup connect failed.
     pub backend_build_lock: Arc<Mutex<()>>,
+    /// Alertmanager HTTP cache. `None` if no Alertmanager was discovered.
+    pub alerts: Arc<RwLock<Option<Arc<roder_k8s::AlertsCache>>>>,
 }
 
 // Lets Leptos's axum handlers pull `LeptosOptions` out of our custom state.
@@ -73,13 +75,17 @@ pub async fn build_state(leptos_options: LeptosOptions) -> Result<AppState, Stri
     // each user's passthrough token, swapped into this same client on login.
     // Best-effort: if the cluster isn't reachable yet, the first request builds it.
     let backend = Arc::new(RwLock::new(None));
+    let alerts = Arc::new(RwLock::new(None));
     match Backend::connect_with_default().await {
         Ok(b) => {
             tracing::info!(
                 "connected to cluster at startup, {} kinds discovered",
                 b.kinds().len()
             );
+            let am_client = b.client();
             *backend.write().await = Some(Arc::new(b));
+            let url = roder_k8s::discover_alertmanager(&am_client).await;
+            *alerts.write().await = url.map(|u| Arc::new(roder_k8s::AlertsCache::new(u)));
         }
         Err(e) => {
             tracing::warn!("no cluster connection at startup (will connect on first request): {e}")
@@ -94,5 +100,6 @@ pub async fn build_state(leptos_options: LeptosOptions) -> Result<AppState, Stri
         current: Arc::new(RwLock::new(None)),
         refresh_lock: Arc::new(Mutex::new(())),
         backend_build_lock: Arc::new(Mutex::new(())),
+        alerts,
     })
 }

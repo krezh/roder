@@ -32,10 +32,11 @@ use overlays::exec::ExecWindow;
 use overlays::ns_palette::NsPalette;
 use overlays::palette::CommandPalette;
 use overlays::shortcuts::ShortcutsHelp;
+use overlays::AlertsPanel;
 use state::{
-    Catalog, ConnectionState, CtxMenu, ExecOpen, ExecTarget, FilterFocus, LogPods, LogTarget,
-    NavOpen, NsPaletteOpen, OnlyProblems, PaletteOpen, PodModalTarget, ResourceFilter,
-    ShortcutsOpen, TableRows, TableSelected, Tick, WorkspaceConf, WorkspaceConfig,
+    AlertsData, AlertsOpen, Catalog, ConnectionState, CtxMenu, ExecOpen, ExecTarget, FilterFocus,
+    LogPods, LogTarget, NavOpen, NsPaletteOpen, OnlyProblems, PaletteOpen, PodModalTarget,
+    ResourceFilter, ShortcutsOpen, TableRows, TableSelected, Tick, WorkspaceConf, WorkspaceConfig,
 };
 use views::resource::ResourceView;
 use views::search::SearchResultsView;
@@ -86,6 +87,10 @@ pub fn App() -> impl IntoView {
     provide_context(ExecOpen(exec_open));
     let shortcuts_open = RwSignal::new(false);
     provide_context(ShortcutsOpen(shortcuts_open));
+    let alerts_open = RwSignal::new(false);
+    provide_context(AlertsOpen(alerts_open));
+    let alerts_data: RwSignal<Option<Vec<roder_core::FiringAlert>>> = RwSignal::new(None);
+    provide_context(AlertsData(alerts_data));
     let resource_filter = RwSignal::new(String::new());
     provide_context(ResourceFilter(resource_filter));
     provide_context(FilterFocus(RwSignal::new(0u32)));
@@ -225,6 +230,33 @@ pub fn App() -> impl IntoView {
         );
     });
 
+    // Fetch alerts once at mount so the panel has data immediately on open.
+    #[cfg(target_arch = "wasm32")]
+    leptos::task::spawn_local(async move {
+        if let Ok(list) =
+            data::fetch_json::<Vec<roder_core::FiringAlert>>("/api/alerts").await
+        {
+            alerts_data.set(Some(list));
+        }
+    });
+
+    // Poll for firing alerts every 30 s so the panel stays current.
+    Effect::new(move |_| {
+        set_interval(
+            move || {
+                #[cfg(target_arch = "wasm32")]
+                leptos::task::spawn_local(async move {
+                    if let Ok(list) =
+                        data::fetch_json::<Vec<roder_core::FiringAlert>>("/api/alerts").await
+                    {
+                        alerts_data.set(Some(list));
+                    }
+                });
+            },
+            std::time::Duration::from_secs(30),
+        );
+    });
+
     // Persist kind/detail on change (only after restore, so we don't clobber them).
     Effect::new(move |_| {
         let kind = selected_kind.get();
@@ -262,6 +294,7 @@ pub fn App() -> impl IntoView {
                 palette_open.set(false);
                 ns_palette_open.set(false);
                 shortcuts_open.set(false);
+                alerts_open.set(false);
                 ctx_menu.set(None);
                 detail.set(None);
             }
@@ -317,6 +350,7 @@ pub fn App() -> impl IntoView {
                 <PodModal />
                 <ExecWindow />
                 <ShortcutsHelp />
+                <AlertsPanel />
             </div>
             <TooltipLayer />
         </Router>

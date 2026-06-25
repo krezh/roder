@@ -286,6 +286,18 @@ pub struct KindStats {
     pub warnings: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FiringAlert {
+    pub fingerprint: String,
+    pub name: String,
+    pub severity: String,
+    pub summary: String,
+    pub description: String,
+    pub starts_at: String,
+    pub labels: std::collections::HashMap<String, String>,
+    pub silenced: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

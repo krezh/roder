@@ -104,6 +104,57 @@
   }
 }
 
+@keyframes alerts-btn-bounce {
+  0%   { transform: scale(1); }
+  35%  { transform: scale(1.18); }
+  65%  { transform: scale(0.9); }
+  85%  { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+// Topbar alerts count button with severity tooltip.
+.alerts-btn {
+  @extend %chip-btn;
+  position: relative;
+  white-space: nowrap;
+  font-weight: 600;
+
+  .tooltip { display: none; position: absolute; top: 100%; right: 0; margin-top: 6px; }
+  &:hover .tooltip { display: block; }
+
+  &.alerts-firing {
+    background: color-mix(in srgb, var(--warn) 16%, transparent);
+    border-color: var(--warn);
+    color: var(--warn);
+    &:hover { background: color-mix(in srgb, var(--warn) 26%, transparent); }
+  }
+
+  &.bouncing {
+    animation: alerts-btn-bounce 0.35s ease-out;
+  }
+}
+
+.alerts-tip {
+  min-width: 140px;
+
+  .tip-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+}
+
+.sev-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+
+  &.sev-critical { background: var(--error); }
+  &.sev-warning  { background: var(--warn); }
+  &.sev-info     { background: var(--ok); }
+}
+
 // Resource detail action bar buttons.
 .act {
   background: var(--panel-2);

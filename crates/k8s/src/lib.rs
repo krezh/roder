@@ -6,6 +6,7 @@
 //! - M4: metrics-server reads + cache-derived cluster summary.
 //! - M6: mutation executors (apply/edit/delete/scale/rollout, Flux, ESO).
 
+pub mod alertmanager;
 mod backend;
 mod client;
 mod discovery;
@@ -17,6 +18,7 @@ mod project;
 #[cfg(test)]
 mod test_alloc;
 
+pub use alertmanager::{AlertsCache, discover_alertmanager};
 pub use backend::Backend;
 pub use client::{ClusterAccess, K8sError};
 pub use informers::WatchHandle;

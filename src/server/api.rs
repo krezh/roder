@@ -46,6 +46,23 @@ fn ns_filter(ns: &Option<String>) -> Option<&str> {
     ns.as_deref().filter(|s| !s.is_empty())
 }
 
+/// Current firing alerts from Alertmanager, with 30-second in-process cache.
+pub async fn alerts(State(state): State<AppState>) -> Response {
+    let cache = state.alerts.read().await.as_ref().map(Arc::clone);
+    let Some(cache) = cache else {
+        tracing::warn!("alerts: no alertmanager configured (discovery found nothing at startup)");
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
+    let b = backend_or_return!(state);
+    match cache.get(&b.client()).await {
+        Ok(alerts) => Json(alerts).into_response(),
+        Err(e) => {
+            tracing::warn!("alerts: {e}");
+            bad_gateway(e)
+        }
+    }
+}
+
 /// The full browsable resource catalog (every GVR, RBAC-permitting).
 pub async fn resources(State(state): State<AppState>) -> Response {
     let b = backend_or_return!(state);

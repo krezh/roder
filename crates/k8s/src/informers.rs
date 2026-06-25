@@ -286,7 +286,8 @@ impl InformerRegistry {
     ) -> std::collections::HashMap<String, roder_core::KindStats> {
         use roder_core::{KindStats, RowStatus};
         let active = self.active.lock().await;
-        let mut result: std::collections::HashMap<String, KindStats> = std::collections::HashMap::new();
+        let mut result: std::collections::HashMap<String, KindStats> =
+            std::collections::HashMap::new();
         for entry in active.values() {
             // Skip namespace-scoped informers that don't match the requested namespace.
             if let (Some(ns), Some(entry_ns)) = (namespace, entry.namespace.as_deref()) {

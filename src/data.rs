@@ -131,7 +131,6 @@ pub async fn post_action(_body: &serde_json::Value) -> Result<(), String> {
     Err("not available on the server".to_string())
 }
 
-
 // ---- SSE ------------------------------------------------------------------
 
 #[cfg(target_arch = "wasm32")]

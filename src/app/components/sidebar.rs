@@ -107,14 +107,12 @@ pub(crate) fn Sidebar() -> impl IntoView {
                     let ns = selected_ns.get_untracked();
                     leptos::task::spawn_local(async move {
                         let url = match ns.as_deref() {
-                            Some(ns) if !ns.is_empty() => format!(
-                                "/api/catalog-stats?namespace={}",
-                                data::percent_encode(ns)
-                            ),
+                            Some(ns) if !ns.is_empty() => {
+                                format!("/api/catalog-stats?namespace={}", data::percent_encode(ns))
+                            }
                             _ => "/api/catalog-stats".to_string(),
                         };
-                        if let Ok(map) =
-                            data::fetch_json::<HashMap<String, KindStats>>(&url).await
+                        if let Ok(map) = data::fetch_json::<HashMap<String, KindStats>>(&url).await
                         {
                             stats.set(map);
                         }

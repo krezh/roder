@@ -654,11 +654,7 @@ impl Backend {
 
     /// Inject a `nicolaka/netshoot` ephemeral container into `pod`, wait for it
     /// to reach Running, and return its name for use with [`exec`].
-    pub async fn inject_debug_container(
-        &self,
-        ns: &str,
-        pod: &str,
-    ) -> Result<String, K8sError> {
+    pub async fn inject_debug_container(&self, ns: &str, pod: &str) -> Result<String, K8sError> {
         let api: Api<Pod> = Api::namespaced(self.client(), ns);
 
         // Fetch current ephemeral containers; the patch replaces the whole
@@ -715,8 +711,7 @@ impl Backend {
         .map_err(api_err)?;
 
         // Poll until the container reaches Running (up to 60 s).
-        let deadline =
-            std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
         loop {
             if std::time::Instant::now() > deadline {
                 return Err(api_err(format!(
@@ -735,11 +730,7 @@ impl Backend {
                     .iter()
                     .any(|cs| {
                         cs.name == name
-                            && cs
-                                .state
-                                .as_ref()
-                                .and_then(|s| s.running.as_ref())
-                                .is_some()
+                            && cs.state.as_ref().and_then(|s| s.running.as_ref()).is_some()
                     });
                 if running {
                     return Ok(name);
@@ -747,7 +738,6 @@ impl Backend {
             }
         }
     }
-
 
     /// Live pod logs as SSE. When a specific container is requested it is streamed
     /// without a prefix. When the pod has multiple containers and none was specified,
@@ -984,50 +974,53 @@ impl Backend {
 
     /// Delete all "dead" pods (matching k9s's `toastPhases`) and finished Jobs.
     /// Best-effort: individual delete failures are silently skipped.
-    pub async fn sanitize(
-        &self,
-        namespace: Option<String>,
-    ) -> Result<CleanupSummary, K8sError> {
-    let pod_api: Api<Pod> = match namespace.as_deref() {
-        Some(ns) => Api::namespaced(self.client(), ns),
-        None => Api::all(self.client()),
-    };
-    let pods = pod_api.list(&ListParams::default()).await.map_err(api_err)?;
-    let mut pods_deleted = 0usize;
-    for pod in pods.items.iter().filter(|p| is_toast_pod(p)) {
-        let name = pod.metadata.name.as_deref().unwrap_or_default();
-        let ns = pod.metadata.namespace.as_deref().unwrap_or_default();
-        if Api::<Pod>::namespaced(self.client(), ns)
-            .delete(name, &DeleteParams::default())
+    pub async fn sanitize(&self, namespace: Option<String>) -> Result<CleanupSummary, K8sError> {
+        let pod_api: Api<Pod> = match namespace.as_deref() {
+            Some(ns) => Api::namespaced(self.client(), ns),
+            None => Api::all(self.client()),
+        };
+        let pods = pod_api
+            .list(&ListParams::default())
             .await
-            .is_ok()
-        {
-            pods_deleted += 1;
+            .map_err(api_err)?;
+        let mut pods_deleted = 0usize;
+        for pod in pods.items.iter().filter(|p| is_toast_pod(p)) {
+            let name = pod.metadata.name.as_deref().unwrap_or_default();
+            let ns = pod.metadata.namespace.as_deref().unwrap_or_default();
+            if Api::<Pod>::namespaced(self.client(), ns)
+                .delete(name, &DeleteParams::default())
+                .await
+                .is_ok()
+            {
+                pods_deleted += 1;
+            }
         }
-    }
 
-    let job_api: Api<Job> = match namespace.as_deref() {
-        Some(ns) => Api::namespaced(self.client(), ns),
-        None => Api::all(self.client()),
-    };
-    let jobs = job_api.list(&ListParams::default()).await.map_err(api_err)?;
-    let mut jobs_deleted = 0usize;
-    for job in jobs.items.iter().filter(|j| is_finished_job(j)) {
-        let name = job.metadata.name.as_deref().unwrap_or_default();
-        let ns = job.metadata.namespace.as_deref().unwrap_or_default();
-        if Api::<Job>::namespaced(self.client(), ns)
-            .delete(name, &DeleteParams::default())
+        let job_api: Api<Job> = match namespace.as_deref() {
+            Some(ns) => Api::namespaced(self.client(), ns),
+            None => Api::all(self.client()),
+        };
+        let jobs = job_api
+            .list(&ListParams::default())
             .await
-            .is_ok()
-        {
-            jobs_deleted += 1;
+            .map_err(api_err)?;
+        let mut jobs_deleted = 0usize;
+        for job in jobs.items.iter().filter(|j| is_finished_job(j)) {
+            let name = job.metadata.name.as_deref().unwrap_or_default();
+            let ns = job.metadata.namespace.as_deref().unwrap_or_default();
+            if Api::<Job>::namespaced(self.client(), ns)
+                .delete(name, &DeleteParams::default())
+                .await
+                .is_ok()
+            {
+                jobs_deleted += 1;
+            }
         }
-    }
 
-    Ok(CleanupSummary {
-        pods_deleted,
-        jobs_deleted,
-    })
+        Ok(CleanupSummary {
+            pods_deleted,
+            jobs_deleted,
+        })
     }
 }
 
@@ -1051,12 +1044,7 @@ async fn detect_shell(api: &Api<Pod>, pod: &str, container: Option<&str>) -> Str
         let Ok(probe) = api.exec(pod, vec![shell], &ap).await else {
             continue;
         };
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            probe.join(),
-        )
-        .await
-        {
+        match tokio::time::timeout(std::time::Duration::from_secs(2), probe.join()).await {
             Ok(Ok(_)) => return shell.to_string(),
             _ => continue,
         }
@@ -1078,9 +1066,8 @@ fn is_toast_pod(pod: &Pod) -> bool {
     if status.and_then(|s| s.reason.as_deref()) == Some("Evicted") {
         return true;
     }
-    match status.and_then(|s| s.phase.as_deref()) {
-        Some("Succeeded") => return true,
-        _ => {}
+    if let Some("Succeeded") = status.and_then(|s| s.phase.as_deref()) {
+        return true;
     }
     let cs = status
         .and_then(|s| s.container_statuses.as_deref())

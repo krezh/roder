@@ -88,7 +88,8 @@ pub(crate) fn NsPalette() -> impl IntoView {
                 }
             }
             "Enter" => {
-                let chosen = matches.with(|v| v.get(cursor.get()).and_then(|(ns, _, _)| ns.clone()));
+                let chosen =
+                    matches.with(|v| v.get(cursor.get()).and_then(|(ns, _, _)| ns.clone()));
                 select(chosen);
                 e.prevent_default();
             }

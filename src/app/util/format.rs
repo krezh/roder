@@ -110,10 +110,19 @@ pub(crate) fn parse_log_line(line: &str) -> ParsedLog {
                 });
 
                 const JSON_META: &[&str] = &[
-                    "msg", "message", "event",
-                    "caller", "source", "logger", "target",
-                    "ts", "time", "timestamp",
-                    "level", "severity", "lvl",
+                    "msg",
+                    "message",
+                    "event",
+                    "caller",
+                    "source",
+                    "logger",
+                    "target",
+                    "ts",
+                    "time",
+                    "timestamp",
+                    "level",
+                    "severity",
+                    "lvl",
                     "fields",
                 ];
                 let mut extras: Vec<String> = obj
@@ -153,8 +162,16 @@ pub(crate) fn parse_log_line(line: &str) -> ParsedLog {
         .map(|(_, v)| v.clone())
     {
         const LOGFMT_META: &[&str] = &[
-            "msg", "message", "caller", "source",
-            "ts", "time", "timestamp", "level", "lvl", "severity",
+            "msg",
+            "message",
+            "caller",
+            "source",
+            "ts",
+            "time",
+            "timestamp",
+            "level",
+            "lvl",
+            "severity",
         ];
         let extras: Vec<String> = pairs
             .iter()
@@ -300,8 +317,7 @@ fn syslog_severity_to_level(sev: u8) -> &'static str {
 /// `t` must start at the month abbreviation (priority prefix already stripped).
 fn parse_syslog_3164_body(t: &str) -> Option<ParsedLog> {
     const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
     if !MONTHS.iter().any(|&m| t.starts_with(m)) {
         return None;
@@ -331,7 +347,11 @@ fn parse_syslog_3164_body(t: &str) -> Option<ParsedLog> {
         return None;
     }
     Some(ParsedLog {
-        display: if msg.is_empty() { rest.to_string() } else { msg },
+        display: if msg.is_empty() {
+            rest.to_string()
+        } else {
+            msg
+        },
         caller,
         timestamp: Some(timestamp),
         is_structured: true,
@@ -909,7 +929,11 @@ mod tests {
         assert!(p.display.contains("method=POST"), "got: {}", p.display);
         assert!(p.display.contains("status=200"), "got: {}", p.display);
         // path contains no spaces so should be unquoted
-        assert!(p.display.contains("path=/webhook/token-review"), "got: {}", p.display);
+        assert!(
+            p.display.contains("path=/webhook/token-review"),
+            "got: {}",
+            p.display
+        );
     }
 
     #[test]
@@ -918,8 +942,16 @@ mod tests {
             r#"{"time":"2026-06-22T20:38:29Z","level":"WARN","msg":"token review denied","reason":"invalid webhook token"}"#,
         );
         assert!(p.is_structured);
-        assert!(p.display.starts_with("token review denied"), "got: {}", p.display);
-        assert!(p.display.contains("reason=\"invalid webhook token\""), "got: {}", p.display);
+        assert!(
+            p.display.starts_with("token review denied"),
+            "got: {}",
+            p.display
+        );
+        assert!(
+            p.display.contains("reason=\"invalid webhook token\""),
+            "got: {}",
+            p.display
+        );
     }
 
     #[test]
@@ -928,7 +960,11 @@ mod tests {
             r#"time=2024-01-15T10:30:45Z level=info caller=main.go:42 msg="request handled" method=GET status=200"#,
         );
         assert!(p.is_structured);
-        assert!(p.display.starts_with("request handled"), "got: {}", p.display);
+        assert!(
+            p.display.starts_with("request handled"),
+            "got: {}",
+            p.display
+        );
         assert!(p.display.contains("method=GET"), "got: {}", p.display);
         assert!(p.display.contains("status=200"), "got: {}", p.display);
     }
@@ -1046,12 +1082,18 @@ mod tests {
 
     #[test]
     fn log_level_python_warning() {
-        assert_eq!(log_level("2024-01-15 10:30:45,123 WARNING disk almost full"), "warn");
+        assert_eq!(
+            log_level("2024-01-15 10:30:45,123 WARNING disk almost full"),
+            "warn"
+        );
     }
 
     #[test]
     fn log_level_python_debug() {
-        assert_eq!(log_level("2024-01-15 10:30:45,123 DEBUG connecting"), "debug");
+        assert_eq!(
+            log_level("2024-01-15 10:30:45,123 DEBUG connecting"),
+            "debug"
+        );
     }
 
     // --- Syslog RFC 5424 ---
@@ -1063,7 +1105,10 @@ mod tests {
         );
         assert!(p.is_structured, "expected structured");
         assert_eq!(p.display, "An application event");
-        assert_eq!(p.timestamp.as_deref(), Some("2024-01-15T10:30:45.000000+00:00"));
+        assert_eq!(
+            p.timestamp.as_deref(),
+            Some("2024-01-15T10:30:45.000000+00:00")
+        );
         assert_eq!(p.caller.as_deref(), Some("myapp"));
     }
 
@@ -1080,25 +1125,37 @@ mod tests {
     #[test]
     fn log_level_syslog_rfc5424_error() {
         // priority 34 = facility 4, severity 2 (critical) → error
-        assert_eq!(log_level("<34>1 2024-01-15T10:30:45Z h app - - - msg"), "error");
+        assert_eq!(
+            log_level("<34>1 2024-01-15T10:30:45Z h app - - - msg"),
+            "error"
+        );
     }
 
     #[test]
     fn log_level_syslog_rfc5424_warn() {
         // priority 164 = facility 20, severity 4 (warning) → warn
-        assert_eq!(log_level("<164>1 2024-01-15T10:30:45Z h app - - - msg"), "warn");
+        assert_eq!(
+            log_level("<164>1 2024-01-15T10:30:45Z h app - - - msg"),
+            "warn"
+        );
     }
 
     #[test]
     fn log_level_syslog_rfc5424_info() {
         // priority 165 = facility 20, severity 5 (notice) → info
-        assert_eq!(log_level("<165>1 2024-01-15T10:30:45Z h app - - - msg"), "info");
+        assert_eq!(
+            log_level("<165>1 2024-01-15T10:30:45Z h app - - - msg"),
+            "info"
+        );
     }
 
     #[test]
     fn log_level_syslog_rfc5424_debug() {
         // priority 167 = facility 20, severity 7 (debug) → debug
-        assert_eq!(log_level("<167>1 2024-01-15T10:30:45Z h app - - - msg"), "debug");
+        assert_eq!(
+            log_level("<167>1 2024-01-15T10:30:45Z h app - - - msg"),
+            "debug"
+        );
     }
 
     // --- Syslog RFC 3164 ---

@@ -6,8 +6,8 @@ use roder_core::ObjectDetail;
 
 use crate::app::util::format::camel_label;
 use crate::app::util::json::{
-    conditions, container_images, data_entries, json_map, json_str, owner_refs, rbac_rules,
-    section_scalars, status_scalars,
+    conditions, container_envs, container_images, data_entries, json_map, json_str, owner_refs,
+    rbac_rules, section_scalars, status_scalars,
 };
 use crate::data;
 
@@ -32,6 +32,7 @@ pub(crate) fn info_view(d: ObjectDetail, kind: String) -> impl IntoView {
         Vec::new()
     };
     let images = container_images(o);
+    let envs = container_envs(o);
 
     view! {
         <div class="info">
@@ -66,6 +67,24 @@ pub(crate) fn info_view(d: ObjectDetail, kind: String) -> impl IntoView {
                         <div class="kvc"><span class="kvc-k">{name}</span><span class="kvc-v">{image}</span></div>
                     }).collect_view()}
                 </div>
+            })}
+
+            {(!envs.is_empty()).then(|| {
+                let multi = envs.len() > 1;
+                view! {
+                    <h4>"Env"</h4>
+                    {envs.into_iter().map(|ce| view! {
+                        {multi.then(|| view! { <div class="env-container-name">{ce.container}</div> })}
+                        <div class="kvlist">
+                            {ce.entries.into_iter().map(|(k, v)| view! {
+                                <div class="kvl">
+                                    <span class="kvl-k">{format!("{k}:")}</span>
+                                    <span class="kvl-v">{v}</span>
+                                </div>
+                            }).collect_view()}
+                        </div>
+                    }).collect_view()}
+                }
             })}
 
             {(!rules.is_empty()).then(|| view! {

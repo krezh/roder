@@ -253,6 +253,78 @@ pub(crate) fn container_images(o: &Value) -> Vec<(String, String)> {
     out
 }
 
+pub(crate) struct ContainerEnv {
+    pub(crate) container: String,
+    pub(crate) entries: Vec<(String, String)>,
+}
+
+/// Env vars for each container (and initContainer) in a pod spec or pod template.
+/// Literal `value` fields are shown as-is; `valueFrom` references are summarised
+/// as `secret:name/key`, `configMap:name/key`, `field:path`, or `resource:name`.
+pub(crate) fn container_envs(o: &Value) -> Vec<ContainerEnv> {
+    let spec = o
+        .get("spec")
+        .and_then(|s| s.get("template"))
+        .and_then(|t| t.get("spec"))
+        .or_else(|| o.get("spec"));
+    let Some(spec) = spec else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for key in ["containers", "initContainers"] {
+        let Some(arr) = spec.get(key).and_then(|c| c.as_array()) else {
+            continue;
+        };
+        for c in arr {
+            let name = c
+                .get("name")
+                .and_then(|n| n.as_str())
+                .unwrap_or("?")
+                .to_string();
+            let Some(env) = c.get("env").and_then(|e| e.as_array()) else {
+                continue;
+            };
+            let entries = env
+                .iter()
+                .filter_map(|e| {
+                    let k = e.get("name").and_then(|n| n.as_str())?.to_string();
+                    let v = if let Some(val) = e.get("value").and_then(|v| v.as_str()) {
+                        val.to_string()
+                    } else if let Some(vf) = e.get("valueFrom") {
+                        if let Some(r) = vf.get("secretKeyRef") {
+                            let sn = r.get("name").and_then(|n| n.as_str()).unwrap_or("?");
+                            let sk = r.get("key").and_then(|n| n.as_str()).unwrap_or("?");
+                            format!("secret:{sn}/{sk}")
+                        } else if let Some(r) = vf.get("configMapKeyRef") {
+                            let cn = r.get("name").and_then(|n| n.as_str()).unwrap_or("?");
+                            let ck = r.get("key").and_then(|n| n.as_str()).unwrap_or("?");
+                            format!("configMap:{cn}/{ck}")
+                        } else if let Some(r) = vf.get("fieldRef") {
+                            let fp = r.get("fieldPath").and_then(|n| n.as_str()).unwrap_or("?");
+                            format!("field:{fp}")
+                        } else if let Some(r) = vf.get("resourceFieldRef") {
+                            let res = r.get("resource").and_then(|n| n.as_str()).unwrap_or("?");
+                            format!("resource:{res}")
+                        } else {
+                            "(ref)".to_string()
+                        }
+                    } else {
+                        return None;
+                    };
+                    Some((k, v))
+                })
+                .collect::<Vec<_>>();
+            if !entries.is_empty() {
+                out.push(ContainerEnv {
+                    container: name,
+                    entries,
+                });
+            }
+        }
+    }
+    out
+}
+
 /// Build a `k=v,k2=v2` label selector from a workload's `spec.selector.matchLabels`.
 pub(crate) fn selector_from(o: &Value) -> String {
     o.get("spec")

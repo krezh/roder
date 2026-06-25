@@ -35,14 +35,59 @@
     padding-top: 0.2rem;
   }
 }
+.yaml-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0 0.9rem 0.9rem;
+}
 .yaml-head {
   display: flex;
   align-items: center;
   gap: 0.6rem;
+  padding: 0.5rem 0 0.4rem;
+  flex: 0 0 auto;
+  h4 {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+}
+.yaml-view {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  margin: 0;
+  white-space: pre;
+  // Token colours
+  .y-key     { color: #79b8ff; }
+  .y-colon   { color: var(--muted); }
+  .y-str     { color: #9ecbff; }
+  .y-plain   { color: var(--fg); }
+  .y-num     { color: #f0c674; }
+  .y-bool    { color: #c678dd; }
+  .y-null    { color: var(--muted); }
+  .y-comment { color: var(--muted); font-style: italic; }
+  .y-doc     { color: var(--muted); }
+  .y-list    { color: var(--muted); }
+  .y-block   { color: #c678dd; }
+  .y-anchor  { color: #f0c674; }
 }
 .yaml-edit {
+  flex: 1;
+  min-height: 0;
   width: 100%;
-  min-height: 320px;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -51,17 +96,18 @@
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 12px;
   white-space: pre;
-  resize: vertical;
+  resize: none;
 }
 .logs {
   background: #000;
-  color: #d6e2ef;
+  color: #ffffff;
   border: 1px solid var(--border);
   border-radius: 6px;
   margin: 0 0.9rem 0.5rem;
   padding: 0.6rem 0.75rem;
-  font-family: "JetBrainsMono Nerd Font Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-family: "Monaspace Neon NF", ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 12px;
+  font-weight: 600;
   line-height: 1.5;
   max-height: 280px;
   overflow: auto;
@@ -90,7 +136,7 @@
   .ansi-4   { color: #6699cc; }  // blue
   .ansi-5   { color: #c678dd; }  // magenta
   .ansi-6   { color: #56b6c2; }  // cyan
-  .ansi-7   { color: #d6e2ef; }  // white (light gray)
+  .ansi-7   { color: #ffffff; }  // white
   .ansi-8   { color: #6e7681; }  // bright black (gray)
   .ansi-9   { color: #ff8787; }  // bright red
   .ansi-10  { color: #8bdb8b; }  // bright green
@@ -100,7 +146,7 @@
   .ansi-14  { color: #7ee8e8; }  // bright cyan
   .ansi-15  { color: #ffffff; }  // bright white
   .ansi-bold { font-weight: 700; }
-  .ansi-ext  { color: var(--ansi-256, #d6e2ef); } // 256-color / 24-bit fallback
+  .ansi-ext  { color: var(--ansi-256, #ffffff); } // 256-color / 24-bit fallback
 }
 .logs-ctl {
   display: flex;
@@ -356,6 +402,14 @@ table.rules {
   flex: 1 1 auto;
   white-space: pre-wrap;
   overflow-wrap: break-word;
+}
+.env-container-name {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0.6rem 0 0.2rem;
 }
 .hint {
   color: var(--muted);

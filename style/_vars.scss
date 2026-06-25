@@ -9,11 +9,15 @@
   font-display: swap;
 }
 @font-face {
-  font-family: "JetBrainsMono Nerd Font Mono";
-  src:
-    url("/fonts/jetbrains-mono-nerd.woff2") format("woff2"),
-    url("/fonts/jetbrains-mono-nerd.ttf") format("truetype");
-  font-weight: 100 800;
+  font-family: "Monaspace Neon NF";
+  src: url("/fonts/monaspace-neon-nf-regular.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Monaspace Neon NF";
+  src: url("/fonts/monaspace-neon-nf-semibold.woff2") format("woff2");
+  font-weight: 600;
   font-display: swap;
 }
 

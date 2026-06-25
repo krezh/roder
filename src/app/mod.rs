@@ -307,6 +307,8 @@ pub fn App() -> impl IntoView {
                             <Route path=StaticSegment("workspace") view=WorkspaceView />
                         </Routes>
                     </main>
+                    <DetailDrawer />
+                    <LogSidebar />
                 </div>
                 <CommandPalette />
                 <NsPalette />
@@ -314,8 +316,6 @@ pub fn App() -> impl IntoView {
                 <ConfirmDialog />
                 <PodModal />
                 <ExecWindow />
-                <DetailDrawer />
-                <LogSidebar />
                 <ShortcutsHelp />
             </div>
             <TooltipLayer />

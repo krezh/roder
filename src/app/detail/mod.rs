@@ -15,6 +15,7 @@ use crate::app::state::{DetailTarget, ExecOpen, ExecTarget};
 use crate::app::util::format::parse_key;
 use crate::app::util::json::selector_from;
 use crate::app::util::predicate::KindKind;
+use crate::app::util::yaml_hl;
 use crate::data;
 
 use self::info::info_view;
@@ -98,6 +99,7 @@ pub(crate) fn RowDetail(target: DetailTarget) -> impl IntoView {
         requested_tab.set(None);
     }
     let tab = RwSignal::new(initial_tab);
+    let yaml_editing = RwSignal::new(false);
 
     let (group, kind) = parse_key(&target.key);
     let kk = KindKind::new(&group, &kind);
@@ -275,16 +277,37 @@ pub(crate) fn RowDetail(target: DetailTarget) -> impl IntoView {
                         Tab::Logs => view! { <LogsView url=format!("/api/logs?namespace={}&pod={}", data::percent_encode(&ns), data::percent_encode(&pod)) /> }.into_any(),
                         Tab::Metrics => view! { <MetricsChart namespace=ns.clone() name=pod.clone() /> }.into_any(),
                         Tab::Yaml => view! {
-                            <div class="rd-body">
+                            <div class="yaml-pane">
                                 <div class="yaml-head">
                                     <h4>"YAML"</h4>
                                     {move || can_patch().then(|| view! {
-                                        <button class="act" on:click=move |_| run("apply", serde_json::json!({ "yaml": yaml.get() }))>"Apply"</button>
+                                        <Show when=move || yaml_editing.get() fallback=|| ()>
+                                            <button class="act"
+                                                on:click=move |_| run("apply", serde_json::json!({ "yaml": yaml.get() }))>
+                                                "Apply"
+                                            </button>
+                                        </Show>
+                                        <button class="act"
+                                            on:click=move |_| yaml_editing.update(|e| *e = !*e)>
+                                            {move || if yaml_editing.get() { "View" } else { "Edit" }}
+                                        </button>
                                     })}
                                 </div>
-                                <textarea class="yaml-edit" spellcheck="false"
-                                    prop:value=move || yaml.get()
-                                    on:input=move |e| yaml.set(event_target_value(&e))></textarea>
+                                {move || {
+                                    if yaml_editing.get() {
+                                        view! {
+                                            <textarea class="yaml-edit" spellcheck="false"
+                                                prop:value=move || yaml.get()
+                                                on:input=move |e| yaml.set(event_target_value(&e))>
+                                            </textarea>
+                                        }.into_any()
+                                    } else {
+                                        let highlighted = yaml_hl::highlight_yaml(&yaml.get());
+                                        view! {
+                                            <pre class="yaml-view" inner_html=highlighted></pre>
+                                        }.into_any()
+                                    }
+                                }}
                             </div>
                         }.into_any(),
                     };

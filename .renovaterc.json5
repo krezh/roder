@@ -4,7 +4,6 @@
   nix: {
     enabled: true,
   },
-  postUpdateOptions: ["gomodTidy"],
   lockFileMaintenance: {
     enabled: false,
     schedule: ["after 1am and before 2am"],

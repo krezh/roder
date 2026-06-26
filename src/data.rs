@@ -192,7 +192,7 @@ where
         let closed = e
             .target()
             .and_then(|t| t.dyn_into::<web_sys::EventSource>().ok())
-            .map_or(true, |es| es.ready_state() == web_sys::EventSource::CLOSED);
+            .is_none_or(|es| es.ready_state() == web_sys::EventSource::CLOSED);
         if closed {
             on_error();
         }
@@ -230,7 +230,7 @@ where
         let closed = e
             .target()
             .and_then(|t| t.dyn_into::<web_sys::EventSource>().ok())
-            .map_or(true, |es| es.ready_state() == web_sys::EventSource::CLOSED);
+            .is_none_or(|es| es.ready_state() == web_sys::EventSource::CLOSED);
         if closed {
             on_error();
         }

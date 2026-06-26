@@ -10,6 +10,83 @@ use crate::app::events::{apply_event, RowMap, UidSet};
 use crate::app::state::{ConnectionState, SortKey};
 use crate::data;
 
+/// How long an SSE burst accumulates before it's drained in one reactive flush.
+/// Short enough to be imperceptible; the back-to-back deltas of a single metrics
+/// scrape land in the same window. The `flush_scheduled` guard (not this delay) is
+/// what coalesces the burst — so a timer batches exactly as well as an animation
+/// frame would, while avoiding rAF's fatal flaw here: rAF is *paused* in a
+/// backgrounded tab while the `EventSource` keeps delivering, which would let the
+/// buffer grow without bound on a dashboard left open in a background tab. A timer
+/// still fires (throttled to ~1s) when hidden, so `pending` always drains.
+const COALESCE_DELAY: std::time::Duration = std::time::Duration::from_millis(16);
+
+/// Buffers a burst of pushed items and drains them together via `apply`, so a
+/// flood of SSE deltas collapses to one reactive flush.
+///
+/// SSE hands the browser each delta in its own event-loop turn; applying them
+/// one-by-one re-runs the table's `shown_uids` sort + sizer measure *once per
+/// event*, so a metrics scrape (one event per pod) costs O(rows) full recomputes.
+/// Draining the whole burst inside a single synchronous turn lets those downstream
+/// memos/effects recompute once. The `try_*` guards make a drain that fires after
+/// the owning scope is disposed a harmless no-op.
+pub(crate) struct Coalescer<T: Send + Sync + 'static> {
+    pending: StoredValue<Vec<T>>,
+    scheduled: StoredValue<bool>,
+    apply: StoredValue<Box<dyn Fn(Vec<T>) + Send + Sync>>,
+}
+
+// Hand-written so `Coalescer` is `Copy` regardless of `T` (every field is a
+// `Copy` `StoredValue`); `#[derive(Copy)]` would wrongly demand `T: Copy`.
+impl<T: Send + Sync + 'static> Clone for Coalescer<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<T: Send + Sync + 'static> Copy for Coalescer<T> {}
+
+impl<T: Send + Sync + 'static> Coalescer<T> {
+    pub(crate) fn new(apply: impl Fn(Vec<T>) + Send + Sync + 'static) -> Self {
+        let apply: Box<dyn Fn(Vec<T>) + Send + Sync> = Box::new(apply);
+        Self {
+            pending: StoredValue::new(Vec::new()),
+            scheduled: StoredValue::new(false),
+            apply: StoredValue::new(apply),
+        }
+    }
+
+    /// Append an item, scheduling a drain if one isn't already pending. Further
+    /// items arriving before the timer fires just extend the same batch.
+    pub(crate) fn push(&self, item: T) {
+        if self.pending.try_update_value(|p| p.push(item)).is_none() {
+            return; // owner disposed
+        }
+        if !self.scheduled.try_get_value().unwrap_or(true) {
+            let _ = self.scheduled.try_update_value(|s| *s = true);
+            let this = *self;
+            set_timeout(move || this.drain(), COALESCE_DELAY);
+        }
+    }
+
+    fn drain(&self) {
+        let _ = self.scheduled.try_update_value(|s| *s = false);
+        let Some(batch) = self.pending.try_update_value(std::mem::take) else {
+            return; // owner disposed
+        };
+        if batch.is_empty() {
+            return;
+        }
+        // The whole batch is applied in this one synchronous turn, so downstream
+        // memos/effects (sort, sizer) recompute once rather than once per item.
+        let _ = self.apply.try_with_value(|apply| apply(batch));
+    }
+
+    /// Drop any buffered items — e.g. before a reconnect replaces the data set,
+    /// so stale deltas from the old stream can't land on top of the fresh one.
+    pub(crate) fn clear(&self) {
+        let _ = self.pending.try_update_value(|p| p.clear());
+    }
+}
+
 /// Subscribe to a live resource list, re-subscribing whenever `url` re-reads a
 /// changed signal or when the connection is lost (e.g. the pod restarts).
 /// The `url` closure also performs any per-(re)subscribe reset as a side effect,
@@ -25,20 +102,30 @@ pub(crate) fn use_sse_subscription(
     // A counter that the error handler bumps to re-trigger the subscription Effect.
     let reconnect: RwSignal<u32> = RwSignal::new(0);
     let conn = use_context::<ConnectionState>().map(|c| c.0);
+
+    // Coalesce the per-event SSE deltas of a burst (notably a metrics scrape's one
+    // `Applied` per pod) into a single reactive flush — see [`Coalescer`].
+    let coalescer = Coalescer::new(move |batch: Vec<WatchEvent>| {
+        for ev in batch {
+            if matches!(ev, WatchEvent::Snapshot { .. }) {
+                if let Some(c) = conn {
+                    c.set(None);
+                }
+            }
+            apply_event(rows, entering, removing, columns, ev);
+        }
+    });
+
     Effect::new(move |_prev: Option<Option<data::SseHandle>>| {
         reconnect.track();
+        // Drop events still buffered from a previous stream so a reconnect/url
+        // change can't replay stale deltas on top of the fresh snapshot.
+        coalescer.clear();
         let url = url()?;
         let probe_url = url.clone();
         data::subscribe_with_error(
             &url,
-            move |ev| {
-                if matches!(ev, WatchEvent::Snapshot { .. }) {
-                    if let Some(c) = conn {
-                        c.set(None);
-                    }
-                }
-                apply_event(rows, entering, removing, columns, ev)
-            },
+            move |ev| coalescer.push(ev),
             move || {
                 // Probe the SSE endpoint with a normal GET to capture the HTTP
                 // status (e.g. "401 Unauthorized"). The EventSource onerror event

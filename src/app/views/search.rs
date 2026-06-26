@@ -10,7 +10,7 @@ use roder_core::{ResourceKind, ResourceRow, RowStatus, Trend};
 use crate::app::components::table::{cmp_str, sortable_th, FlashTd};
 use crate::app::components::table_row::{NameCell, ResourceRow as ResourceRowView};
 use crate::app::events::{apply_event, fire_action};
-use crate::app::hooks::{table_window, use_table_state};
+use crate::app::hooks::{table_window, use_table_state, Coalescer};
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::state::{
     open_logs, ConnectionState, CtxMenu, DetailTarget, LogPods, LogTarget, MultiKindSearch,
@@ -255,10 +255,11 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                 let rm = removing;
                 let pfx = prefix.clone();
                 let probe_url = url.clone();
-                data::subscribe_with_error(
-                    &url,
-                    move |ev| {
-                        use roder_core::WatchEvent::*;
+                // Coalesce this kind's SSE burst so the merged-set sort recomputes
+                // once per burst rather than once per delta (see `Coalescer`).
+                let coalescer = Coalescer::new(move |batch: Vec<roder_core::WatchEvent>| {
+                    use roder_core::WatchEvent::*;
+                    for ev in batch {
                         match ev {
                             // Snapshot replaces the whole kind: mirror the full rebuild
                             // (otherwise the per-kind buffer's safety-net timeouts for
@@ -316,7 +317,11 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                                 });
                             }
                         }
-                    },
+                    }
+                });
+                data::subscribe_with_error(
+                    &url,
+                    move |ev| coalescer.push(ev),
                     move || {
                         if let Some(c) = conn {
                             let probe = probe_url.clone();

@@ -5,6 +5,7 @@ use roder_core::{ResourceKind, WatchEvent};
 
 use crate::app::components::kind_table::KindTable;
 use crate::app::events::RowMap;
+use crate::app::hooks::Coalescer;
 use crate::app::state::{Catalog, DetailTarget, PaneConfig, WorkspaceConf};
 use crate::data;
 
@@ -50,9 +51,12 @@ pub(crate) fn WorkspaceView() -> impl IntoView {
                 .collect::<Vec<_>>(),
         );
 
-        data::subscribe_multi(
-            &url,
-            move |key, event| {
+        // Coalesce the multiplexed burst (one `Applied` per pod per metrics scrape,
+        // across every pane) into a single synchronous drain, so each pane's
+        // `rows_override` effect — and thus its sort — runs once per burst, not per
+        // event. Fresh per (re)subscribe, so it starts with an empty buffer.
+        let coalescer = Coalescer::new(move |batch: Vec<(String, WatchEvent)>| {
+            for (key, event) in batch {
                 let is_snapshot = matches!(event, WatchEvent::Snapshot { .. });
                 pane_rows.with_value(|map| {
                     if let Some(&rows) = map.get(&key) {
@@ -82,7 +86,12 @@ pub(crate) fn WorkspaceView() -> impl IntoView {
                         }
                     });
                 }
-            },
+            }
+        });
+
+        data::subscribe_multi(
+            &url,
+            move |key, event| coalescer.push((key, event)),
             move || {
                 set_timeout(
                     move || reconnect.update(|n| *n += 1),

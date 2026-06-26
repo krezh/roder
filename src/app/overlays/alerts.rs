@@ -1,8 +1,8 @@
 use leptos::prelude::*;
 use roder_core::FiringAlert;
 
-use crate::app::state::{AlertsData, AlertsOpen};
 use super::use_bool_overlay;
+use crate::app::state::{AlertsData, AlertsOpen};
 
 #[component]
 pub(crate) fn AlertsPanel() -> impl IntoView {
@@ -14,11 +14,13 @@ pub(crate) fn AlertsPanel() -> impl IntoView {
     let sorted_alerts = Memo::new(move |_| {
         let all = data.get().unwrap_or_default();
         let show_sil = show_silenced.get();
-        let mut alerts: Vec<_> = all.into_iter()
+        let mut alerts: Vec<_> = all
+            .into_iter()
             .filter(|a| show_sil || !a.silenced)
             .collect();
         alerts.sort_by(|a, b| {
-            sev_order(&a.severity).cmp(&sev_order(&b.severity))
+            sev_order(&a.severity)
+                .cmp(&sev_order(&b.severity))
                 .then_with(|| a.name.cmp(&b.name))
                 .then_with(|| a.fingerprint.cmp(&b.fingerprint))
         });
@@ -122,8 +124,7 @@ fn sev_order(sev: &str) -> u8 {
 fn format_duration(iso: &str) -> String {
     #[cfg(target_arch = "wasm32")]
     {
-        let parsed =
-            js_sys::Date::new(&wasm_bindgen::JsValue::from_str(iso)).get_time();
+        let parsed = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(iso)).get_time();
         if parsed.is_nan() {
             return iso.to_string();
         }

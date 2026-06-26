@@ -120,8 +120,7 @@ fn highlight_scalar(v: &str) -> String {
     // Quoted strings
     let len = v.len();
     if len >= 2
-        && ((v.starts_with('"') && v.ends_with('"'))
-            || (v.starts_with('\'') && v.ends_with('\'')))
+        && ((v.starts_with('"') && v.ends_with('"')) || (v.starts_with('\'') && v.ends_with('\'')))
     {
         return sp("str", v);
     }
@@ -172,10 +171,8 @@ fn find_inline_comment(s: &str) -> Option<usize> {
         match b[i] {
             b'\'' if !in_double => in_single = !in_single,
             b'"' if !in_single => in_double = !in_double,
-            b' ' if !in_single && !in_double => {
-                if i + 1 < b.len() && b[i + 1] == b'#' {
-                    return Some(i + 1);
-                }
+            b' ' if !in_single && !in_double && i + 1 < b.len() && b[i + 1] == b'#' => {
+                return Some(i + 1);
             }
             _ => {}
         }

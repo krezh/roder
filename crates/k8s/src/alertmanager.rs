@@ -51,7 +51,10 @@ pub async fn discover_alertmanager(client: &kube::Client) -> Option<String> {
             });
             if let Some(svc) = found {
                 let name = svc.metadata.name.unwrap_or_else(|| "alertmanager".into());
-                let namespace = svc.metadata.namespace.unwrap_or_else(|| "monitoring".into());
+                let namespace = svc
+                    .metadata
+                    .namespace
+                    .unwrap_or_else(|| "monitoring".into());
                 let port = svc
                     .spec
                     .as_ref()
@@ -156,15 +159,15 @@ impl AlertsCache {
         let req = http::Request::get(&path)
             .body(Vec::new())
             .map_err(|e| format!("alertmanager request build: {e}"))?;
-        let body = client
-            .request_text(req)
-            .await
-            .map_err(|e| {
-                warn!("alertmanager: proxy request failed: {e}");
-                format!("alertmanager proxy: {e}")
-            })?;
+        let body = client.request_text(req).await.map_err(|e| {
+            warn!("alertmanager: proxy request failed: {e}");
+            format!("alertmanager proxy: {e}")
+        })?;
         let raw: Vec<AmAlert> = serde_json::from_str(&body).map_err(|e| {
-            warn!("alertmanager: json parse failed: {e}\nbody: {}", &body[..body.len().min(500)]);
+            warn!(
+                "alertmanager: json parse failed: {e}\nbody: {}",
+                &body[..body.len().min(500)]
+            );
             format!("alertmanager json: {e}")
         })?;
         info!("alertmanager: {} alert(s) fetched", raw.len());

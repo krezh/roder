@@ -18,7 +18,7 @@ mod project;
 #[cfg(test)]
 mod test_alloc;
 
-pub use alertmanager::{AlertsCache, discover_alertmanager};
+pub use alertmanager::{discover_alertmanager, AlertsCache};
 pub use backend::Backend;
 pub use client::{ClusterAccess, K8sError};
 pub use informers::WatchHandle;

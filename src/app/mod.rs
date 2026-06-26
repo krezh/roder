@@ -233,9 +233,7 @@ pub fn App() -> impl IntoView {
     // Fetch alerts once at mount so the panel has data immediately on open.
     #[cfg(target_arch = "wasm32")]
     leptos::task::spawn_local(async move {
-        if let Ok(list) =
-            data::fetch_json::<Vec<roder_core::FiringAlert>>("/api/alerts").await
-        {
+        if let Ok(list) = data::fetch_json::<Vec<roder_core::FiringAlert>>("/api/alerts").await {
             alerts_data.set(Some(list));
         }
     });

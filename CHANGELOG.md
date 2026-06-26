@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.1.19](https://github.com/krezh/roder/compare/0.1.18...0.1.19) (2026-06-26)
+
+
+### Features
+
+* **alertmanager:** add AlertManager integration with alerts panel UI ([49068f4](https://github.com/krezh/roder/commit/49068f47fdd48fa988571d7bb956196292c63cf3))
+* Flux failing badge in topbar ([d6851ae](https://github.com/krezh/roder/commit/d6851ae39605dc9d6fd31b273bcee61daa106065))
+* **hooks:** coalesce SSE event bursts to reduce reactive recomputes ([85dcfaa](https://github.com/krezh/roder/commit/85dcfaaf9d6399956a8e3286d2b2a1f7bc79e936))
+* log parsing for Python/syslog, sidebar favorites + error indicators ([f2c0e6b](https://github.com/krezh/roder/commit/f2c0e6b17a4394aa708aab2be516300db6321ad9))
+* pod exec terminal + three k8s backend bug fixes ([9c34fd5](https://github.com/krezh/roder/commit/9c34fd540a37b73d21f2299bae41908adf2d2f54))
+* sweep button to sanitize dead pods and finished jobs ([bd55a85](https://github.com/krezh/roder/commit/bd55a8575e7b88b61406bf901b3bcdec0e450f01))
+* **ui:** detail drawer improvements ([e1d7096](https://github.com/krezh/roder/commit/e1d70964bbb1dbfce9e3fa3582250409b94af6dd))
+
+
+### Bug Fixes
+
+* **cargo:** update rust crate leptos (0.8.19 ➔ 0.8.20) ([#60](https://github.com/krezh/roder/issues/60)) ([6c27407](https://github.com/krezh/roder/commit/6c27407427edab6fdb3afbb9e55b511107414c81))
+* **cargo:** update rust crate leptos_axum (0.8.9 ➔ 0.8.10) ([#61](https://github.com/krezh/roder/issues/61)) ([e0e3c87](https://github.com/krezh/roder/commit/e0e3c87a35a68739ee6e79354a5d58fa779f71cc))
+* **cargo:** update rust crate leptos_router (0.8.13 ➔ 0.8.14) ([#62](https://github.com/krezh/roder/issues/62)) ([759dc6e](https://github.com/krezh/roder/commit/759dc6ec0e711ef5469cd1442ecef77beedc69de))
+* **container:** update image ghcr.io/rust-lang/rust (c681116 ➔ 6df234c) ([#59](https://github.com/krezh/roder/issues/59)) ([8a0ac16](https://github.com/krezh/roder/commit/8a0ac1677ecc4f672958b9052eae7c01330b3532))
+
+
+### Miscellaneous Chores
+
+* **cargo:** lock file maintenance cargo.lock ([#58](https://github.com/krezh/roder/issues/58)) ([db6eeeb](https://github.com/krezh/roder/commit/db6eeebcab421d7250b40a97ae48eccf204cfeff))
+
 ## [0.1.18](https://github.com/krezh/roder/compare/0.1.17...0.1.18) (2026-06-22)
 
 

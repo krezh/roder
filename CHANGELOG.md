@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.20](https://github.com/krezh/roder/compare/0.1.19...0.1.20) (2026-06-28)
+
+
+### Features
+
+* **alertmanager:** support direct HTTP URLs via reqwest ([acb2a96](https://github.com/krezh/roder/commit/acb2a96de06ce97d18b8af5ec9b5ee0cfbf67445))
+* **cargo:** update rust crate aes-gcm (0.10.3 ➔ 0.11.0) ([#64](https://github.com/krezh/roder/issues/64)) ([1f39581](https://github.com/krezh/roder/commit/1f39581a0842fb7bb1aee1104b482ca00ab07736))
+
+
+### Bug Fixes
+
+* **cargo:** update rust crate arc-swap (1.9.1 ➔ 1.9.2) ([#63](https://github.com/krezh/roder/issues/63)) ([bcc2ba7](https://github.com/krezh/roder/commit/bcc2ba79b2acd5af86c8602f9511a3aa0b474d9e))
+
 ## [0.1.19](https://github.com/krezh/roder/compare/0.1.18...0.1.19) (2026-06-26)
 
 

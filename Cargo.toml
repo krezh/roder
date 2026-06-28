@@ -82,7 +82,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 base64 = "0.22"
 rand = { version = "0.10", optional = true }
-aes-gcm = { version = "0.10", optional = true }
+aes-gcm = { version = "0.11", optional = true }
 time = { version = "0.3", optional = true }
 rustls = { version = "0.23", default-features = false, features = [
   "ring",

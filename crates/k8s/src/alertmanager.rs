@@ -1,87 +1,32 @@
-//! Alertmanager discovery and alert cache via the Kubernetes API proxy.
+//! Alertmanager alert cache.
 //!
-//! Requests to Alertmanager go through `/api/v1/namespaces/{ns}/services/http:{svc}:{port}/proxy`,
-//! so the feature works both in-cluster (where .svc DNS resolves) and from a local kubeconfig.
+//! `RODER_ALERTMANAGER_URL` accepts two forms:
+//!   - A full URL (`http://alertmanager-operated.monitoring.svc.cluster.local:9093`) — fetched
+//!     directly via reqwest, works in-cluster.
+//!   - A kube API proxy path (`/api/v1/namespaces/monitoring/services/http:alertmanager-main:9093/proxy`)
+//!     — proxied through the kube API server, works from a local kubeconfig too.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use k8s_openapi::api::core::v1::Service;
-use kube::api::ListParams;
-use kube::Api;
 use tracing::{info, warn};
 
 // ---------------------------------------------------------------------------
 // Discovery
 // ---------------------------------------------------------------------------
 
-/// Returns the kube API proxy path for Alertmanager, or `None` if none is found.
-///
-/// Discovery order:
-/// 1. `RODER_ALERTMANAGER_URL` env var — must be a kube proxy path, e.g.
-///    `/api/v1/namespaces/monitoring/services/http:alertmanager-main:9093/proxy`
-/// 2. Scan all Services cluster-wide; pick the first whose name contains "alertmanager"
-///    and that exposes port 9093 (or a port named "web").
-///
-/// All requests flow through the kube API server proxy so the feature works both
-/// locally (kubeconfig) and in-cluster.
-pub async fn discover_alertmanager(client: &kube::Client) -> Option<String> {
-    if let Ok(path) = std::env::var("RODER_ALERTMANAGER_URL") {
-        info!("alertmanager: using env override → {path}");
-        return Some(path);
-    }
-
-    let svc_api: Api<Service> = Api::all(client.clone());
-    match svc_api.list(&ListParams::default()).await {
-        Ok(list) => {
-            let found = list.items.into_iter().find(|svc| {
-                let name = svc.metadata.name.as_deref().unwrap_or("");
-                let has_name = name.contains("alertmanager");
-                let has_port = svc
-                    .spec
-                    .as_ref()
-                    .and_then(|s| s.ports.as_ref())
-                    .map(|ports| {
-                        ports
-                            .iter()
-                            .any(|p| p.port == 9093 || p.name.as_deref() == Some("web"))
-                    })
-                    .unwrap_or(false);
-                has_name && has_port
-            });
-            if let Some(svc) = found {
-                let name = svc.metadata.name.unwrap_or_else(|| "alertmanager".into());
-                let namespace = svc
-                    .metadata
-                    .namespace
-                    .unwrap_or_else(|| "monitoring".into());
-                let port = svc
-                    .spec
-                    .as_ref()
-                    .and_then(|s| s.ports.as_ref())
-                    .and_then(|ports| {
-                        ports
-                            .iter()
-                            .find(|p| p.port == 9093 || p.name.as_deref() == Some("web"))
-                    })
-                    .map(|p| p.port)
-                    .unwrap_or(9093);
-                let path = kube_proxy_path(&namespace, &name, port);
-                info!("alertmanager: discovered {name} in {namespace} → proxy {path}");
-                return Some(path);
-            }
-            info!("alertmanager: no Service containing 'alertmanager' with port 9093 found; set RODER_ALERTMANAGER_URL to configure manually");
+/// Returns the Alertmanager URL from `RODER_ALERTMANAGER_URL`, or `None`.
+pub async fn discover_alertmanager(_client: &kube::Client) -> Option<String> {
+    match std::env::var("RODER_ALERTMANAGER_URL") {
+        Ok(url) => {
+            info!("alertmanager: using {url}");
+            Some(url)
         }
-        Err(e) => {
-            warn!("alertmanager: Service list failed ({e}); set RODER_ALERTMANAGER_URL to configure manually");
+        Err(_) => {
+            info!("alertmanager: RODER_ALERTMANAGER_URL not set, alerts disabled");
+            None
         }
     }
-
-    None
-}
-
-fn kube_proxy_path(namespace: &str, service: &str, port: i32) -> String {
-    format!("/api/v1/namespaces/{namespace}/services/http:{service}:{port}/proxy")
 }
 
 // ---------------------------------------------------------------------------
@@ -125,26 +70,35 @@ impl AmAlert {
 
 const CACHE_TTL: Duration = Duration::from_secs(30);
 
+enum Transport {
+    /// Direct HTTP — `RODER_ALERTMANAGER_URL` is a full `http(s)://` URL.
+    Direct(reqwest::Client),
+    /// Kube API proxy — `RODER_ALERTMANAGER_URL` is a proxy path starting with `/`.
+    KubeProxy,
+}
+
 /// Short-lived cache for the Alertmanager alert list.
-///
-/// Requests go through the kube API server proxy so they work both in-cluster
-/// and from a local kubeconfig without port-forwarding.
 pub struct AlertsCache {
-    /// Kube API proxy path, e.g. `/api/v1/namespaces/monitoring/services/http:alertmanager-main:9093/proxy`
-    proxy_path: String,
+    base_url: String,
+    transport: Transport,
     cache: tokio::sync::Mutex<Option<(Vec<roder_core::FiringAlert>, Instant)>>,
 }
 
 impl AlertsCache {
-    pub fn new(proxy_path: String) -> Self {
+    pub fn new(url: String) -> Self {
+        let transport = if url.starts_with("http://") || url.starts_with("https://") {
+            Transport::Direct(reqwest::Client::new())
+        } else {
+            Transport::KubeProxy
+        };
         Self {
-            proxy_path,
+            base_url: url,
+            transport,
             cache: tokio::sync::Mutex::new(None),
         }
     }
 
-    /// Return the current alert list, fetching via the kube API proxy if the
-    /// cached value is absent or older than 30 seconds.
+    /// Return the current alert list, refreshing if the cache is stale.
     pub async fn get(&self, client: &kube::Client) -> Result<Vec<roder_core::FiringAlert>, String> {
         let mut guard = self.cache.lock().await;
 
@@ -154,15 +108,32 @@ impl AlertsCache {
             }
         }
 
-        let path = format!("{}/api/v2/alerts", self.proxy_path);
-        info!("alertmanager: fetching {path}");
-        let req = http::Request::get(&path)
-            .body(Vec::new())
-            .map_err(|e| format!("alertmanager request build: {e}"))?;
-        let body = client.request_text(req).await.map_err(|e| {
-            warn!("alertmanager: proxy request failed: {e}");
-            format!("alertmanager proxy: {e}")
-        })?;
+        let url = format!("{}/api/v2/alerts", self.base_url);
+        info!("alertmanager: fetching {url}");
+
+        let body = match &self.transport {
+            Transport::Direct(http) => http
+                .get(&url)
+                .send()
+                .await
+                .map_err(|e| {
+                    warn!("alertmanager: request failed: {e}");
+                    format!("alertmanager request: {e}")
+                })?
+                .text()
+                .await
+                .map_err(|e| format!("alertmanager response: {e}"))?,
+            Transport::KubeProxy => {
+                let req = http::Request::get(&url)
+                    .body(Vec::new())
+                    .map_err(|e| format!("alertmanager request build: {e}"))?;
+                client.request_text(req).await.map_err(|e| {
+                    warn!("alertmanager: proxy request failed: {e}");
+                    format!("alertmanager proxy: {e}")
+                })?
+            }
+        };
+
         let raw: Vec<AmAlert> = serde_json::from_str(&body).map_err(|e| {
             warn!(
                 "alertmanager: json parse failed: {e}\nbody: {}",

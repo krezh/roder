@@ -138,10 +138,32 @@ fn FluxFailingBadge() -> impl IntoView {
         Some(data::watch_url(&hr_kind.get()?.key, None, None))
     });
 
+    // Seed the badge's count from the last-known value so it doesn't vanish and
+    // then pop back up across a refresh while the SSE snapshots are in flight.
+    let cached_count = RwSignal::new(0usize);
+    Effect::new(move |_| {
+        if let Some(n) = data::storage_get("roder.flux_failing_count").and_then(|s| s.parse().ok())
+        {
+            cached_count.set(n);
+        }
+    });
+    // Unlike pods, a cluster can legitimately have zero Kustomizations/HelmReleases,
+    // so `loaded` may never flip true — but `cached_count` is then also correctly 0.
+    let loaded =
+        Memo::new(move |_| ks_rows.with(|m| !m.is_empty()) || hr_rows.with(|m| !m.is_empty()));
     let count = Memo::new(move |_| {
-        let ks = ks_rows.with(|m| m.values().filter(|r| r.status == RowStatus::Error).count());
-        let hr = hr_rows.with(|m| m.values().filter(|r| r.status == RowStatus::Error).count());
-        ks + hr
+        if loaded.get() {
+            let ks = ks_rows.with(|m| m.values().filter(|r| r.status == RowStatus::Error).count());
+            let hr = hr_rows.with(|m| m.values().filter(|r| r.status == RowStatus::Error).count());
+            ks + hr
+        } else {
+            cached_count.get()
+        }
+    });
+    Effect::new(move |_| {
+        if loaded.get() {
+            data::storage_set("roder.flux_failing_count", &count.get().to_string());
+        }
     });
 
     view! {
@@ -176,12 +198,31 @@ fn FluxFailingBadge() -> impl IntoView {
 fn TopUsage() -> impl IntoView {
     let selected_kind = expect_context::<RwSignal<Option<ResourceKind>>>();
     let catalog = expect_context::<Catalog>().0;
+
+    let overview = RwSignal::new(None::<roder_core::ClusterOverview>);
+    // Seed from the last-known overview so cluster usage doesn't flash empty on
+    // refresh while the first `/api/overview` round-trip is in flight.
+    Effect::new(move |_| {
+        if let Some(cached) = data::storage_get("roder.overview")
+            .and_then(|s| serde_json::from_str::<roder_core::ClusterOverview>(&s).ok())
+        {
+            overview.set(Some(cached));
+        }
+    });
     let ov = LocalResource::new(|| async {
         data::fetch_json::<roder_core::ClusterOverview>("/api/overview").await
     });
+    Effect::new(move |_| {
+        if let Some(Ok(o)) = ov.get() {
+            if let Ok(json) = serde_json::to_string(&o) {
+                data::storage_set("roder.overview", &json);
+            }
+            overview.set(Some(o));
+        }
+    });
+
     view! {
-        <Suspense>
-            {move || ov.get().and_then(|res| res.ok()).map(|o| {
+            {move || overview.get().map(|o| {
                 let nodes = o.nodes.clone();
                 let cpu_p = pct(
                     Some(nodes.iter().filter_map(|n| n.cpu_used).sum()),
@@ -232,7 +273,6 @@ fn TopUsage() -> impl IntoView {
                     </div>
                 }
             })}
-        </Suspense>
     }
 }
 
@@ -288,8 +328,30 @@ fn FailingBadge() -> impl IntoView {
         let pk = pod_kind.get()?;
         Some(data::watch_url(&pk.key, None, None))
     });
+
+    // Seed the badge's count from the last-known value so it doesn't vanish and
+    // then pop back up across a refresh while the SSE snapshot is in flight.
+    let cached_count = RwSignal::new(0usize);
+    Effect::new(move |_| {
+        if let Some(n) = data::storage_get("roder.failing_count").and_then(|s| s.parse().ok()) {
+            cached_count.set(n);
+        }
+    });
+    // `rows` holds every pod cluster-wide, which is never truly empty in a real
+    // cluster — a non-empty map is a reliable proxy for "the first SSE snapshot
+    // has landed", at which point the live count takes over from the cache.
+    let loaded = Memo::new(move |_| rows.with(|m| !m.is_empty()));
     let count = Memo::new(move |_| {
-        rows.with(|m| m.values().filter(|r| r.status == RowStatus::Error).count())
+        if loaded.get() {
+            rows.with(|m| m.values().filter(|r| r.status == RowStatus::Error).count())
+        } else {
+            cached_count.get()
+        }
+    });
+    Effect::new(move |_| {
+        if loaded.get() {
+            data::storage_set("roder.failing_count", &count.get().to_string());
+        }
     });
 
     view! {
@@ -336,22 +398,35 @@ fn Brand() -> impl IntoView {
 
 #[component]
 fn Identity() -> impl IntoView {
+    let identity = RwSignal::new(None::<serde_json::Value>);
+    // Seed from the last-known identity so the name/sign-out link doesn't flash
+    // empty on refresh while the first `/api/me` round-trip is in flight.
+    Effect::new(move |_| {
+        if let Some(cached) = data::storage_get("roder.identity")
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        {
+            identity.set(Some(cached));
+        }
+    });
     let me =
         LocalResource::new(|| async { data::fetch_json::<serde_json::Value>("/api/me").await });
+    Effect::new(move |_| {
+        if let Some(Ok(v)) = me.get() {
+            if let Ok(json) = serde_json::to_string(&v) {
+                data::storage_set("roder.identity", &json);
+            }
+            identity.set(Some(v));
+        }
+    });
     view! {
         <span class="identity">
-            <Suspense>
-                {move || me.get().map(|res| match res {
-                    Ok(v) => {
-                        let who = v.get("email").and_then(|e| e.as_str())
-                            .or_else(|| v.get("name").and_then(|n| n.as_str()))
-                            .or_else(|| v.get("subject").and_then(|s| s.as_str()))
-                            .unwrap_or("anonymous").to_string();
-                        view! { <span>{who}</span> <a class="logout" href="/auth/logout" rel="external">"sign out"</a> }.into_any()
-                    }
-                    Err(_) => ().into_any(),
-                })}
-            </Suspense>
+            {move || identity.get().map(|v| {
+                let who = v.get("email").and_then(|e| e.as_str())
+                    .or_else(|| v.get("name").and_then(|n| n.as_str()))
+                    .or_else(|| v.get("subject").and_then(|s| s.as_str()))
+                    .unwrap_or("anonymous").to_string();
+                view! { <span>{who}</span> <a class="logout" href="/auth/logout" rel="external">"sign out"</a> }
+            })}
         </span>
     }
 }

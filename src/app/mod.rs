@@ -91,6 +91,15 @@ pub fn App() -> impl IntoView {
     provide_context(AlertsOpen(alerts_open));
     let alerts_data: RwSignal<Option<Vec<roder_core::FiringAlert>>> = RwSignal::new(None);
     provide_context(AlertsData(alerts_data));
+    // Seed the alerts button from the last-known list so it doesn't flash empty
+    // on refresh while the first `/api/alerts` round-trip is in flight.
+    Effect::new(move |_| {
+        if let Some(cached) = data::storage_get("roder.alerts")
+            .and_then(|s| serde_json::from_str::<Vec<roder_core::FiringAlert>>(&s).ok())
+        {
+            alerts_data.set(Some(cached));
+        }
+    });
     let resource_filter = RwSignal::new(String::new());
     provide_context(ResourceFilter(resource_filter));
     provide_context(FilterFocus(RwSignal::new(0u32)));
@@ -234,6 +243,9 @@ pub fn App() -> impl IntoView {
     #[cfg(target_arch = "wasm32")]
     leptos::task::spawn_local(async move {
         if let Ok(list) = data::fetch_json::<Vec<roder_core::FiringAlert>>("/api/alerts").await {
+            if let Ok(json) = serde_json::to_string(&list) {
+                data::storage_set("roder.alerts", &json);
+            }
             alerts_data.set(Some(list));
         }
     });
@@ -247,6 +259,9 @@ pub fn App() -> impl IntoView {
                     if let Ok(list) =
                         data::fetch_json::<Vec<roder_core::FiringAlert>>("/api/alerts").await
                     {
+                        if let Ok(json) = serde_json::to_string(&list) {
+                            data::storage_set("roder.alerts", &json);
+                        }
                         alerts_data.set(Some(list));
                     }
                 });

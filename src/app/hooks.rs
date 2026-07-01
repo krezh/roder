@@ -251,7 +251,11 @@ pub(crate) fn table_window(
     #[cfg(target_arch = "wasm32")]
     let measure = move || {
         request_animation_frame(move || {
-            let Some(wrap) = table_ref.get_untracked() else {
+            // `try_get_untracked` (not `get_untracked`): the mobile/desktop tree
+            // swap can dispose this table between the resize event that
+            // scheduled this rAF callback and the callback actually firing on
+            // the next frame — a harmless no-op then, not a panic.
+            let Some(Some(wrap)) = table_ref.try_get_untracked() else {
                 return;
             };
             let ch = wrap.client_height() as f64;

@@ -12,8 +12,10 @@ mod detail;
 mod events;
 mod hooks;
 mod logs;
+mod mobile;
 mod overlays;
 mod state;
+mod table_logic;
 mod util;
 mod views;
 
@@ -26,6 +28,7 @@ use detail::pods::PodModal;
 use detail::DetailDrawer;
 use detail::Tab;
 use logs::LogSidebar;
+use mobile::MobileShell;
 use overlays::confirm::{Confirm, ConfirmDialog};
 use overlays::context_menu::ContextMenu;
 use overlays::exec::ExecWindow;
@@ -73,6 +76,37 @@ pub fn App() -> impl IntoView {
     let selected_ns = RwSignal::new(None::<String>);
     let detail = RwSignal::new(None::<DetailTarget>);
     let nav_open = RwSignal::new(false);
+    // Same on server and first client paint (hydration-safe), corrected
+    // client-side below by a live `matchMedia` listener.
+    let is_mobile = RwSignal::new(false);
+    Effect::new(move |_| {
+        #[cfg(target_arch = "wasm32")]
+        {
+            use send_wrapper::SendWrapper;
+            use wasm_bindgen::closure::Closure;
+            use wasm_bindgen::JsCast;
+            let Some(mql) =
+                web_sys::window().and_then(|w| w.match_media("(max-width: 760px)").ok().flatten())
+            else {
+                return;
+            };
+            is_mobile.set(mql.matches());
+            let mql_for_cleanup = mql.clone();
+            let cb = Closure::<dyn FnMut(web_sys::MediaQueryListEvent)>::new(
+                move |e: web_sys::MediaQueryListEvent| {
+                    is_mobile.set(e.matches());
+                },
+            );
+            let cb_fn: js_sys::Function = cb.as_ref().unchecked_ref::<js_sys::Function>().clone();
+            let _ = mql.add_event_listener_with_callback("change", &cb_fn);
+            let cleanup = SendWrapper::new((mql_for_cleanup, cb_fn, cb));
+            on_cleanup(move || {
+                let (mql, cb_fn, cb) = cleanup.take();
+                let _ = mql.remove_event_listener_with_callback("change", &cb_fn);
+                drop(cb);
+            });
+        }
+    });
     let palette_open = RwSignal::new(false);
     let ns_palette_open = RwSignal::new(false);
     provide_context(NsPaletteOpen(ns_palette_open));
@@ -345,31 +379,37 @@ pub fn App() -> impl IntoView {
     view! {
         <Title text="Roder" />
         <Router>
-            <div class="app" class:nav-open=move || nav_open.get()>
-                <Topbar />
-                <div class="body">
-                    <Sidebar />
-                    <main class="main">
-                        <Routes fallback=|| view! { <p class="empty">"Not found."</p> }>
-                            <Route path=StaticSegment("") view=ResourceView />
-                            <Route path=StaticSegment("search") view=SearchResultsView />
-                            <Route path=StaticSegment("workspace") view=WorkspaceView />
-                        </Routes>
-                    </main>
-                    <DetailDrawer />
-                    <LogSidebar />
-                </div>
-                <CommandPalette />
-                <NsPalette />
-                <ContextMenu />
-                <ConfirmDialog />
-                <PodModal />
-                <ExecWindow />
-                <ShortcutsHelp />
-                <AlertsPanel />
-                <ToastView />
-            </div>
-            <TooltipLayer />
+            {move || if is_mobile.get() {
+                view! { <MobileShell /> }.into_any()
+            } else {
+                view! {
+                    <div class="app" class:nav-open=move || nav_open.get()>
+                        <Topbar />
+                        <div class="body">
+                            <Sidebar />
+                            <main class="main">
+                                <Routes fallback=|| view! { <p class="empty">"Not found."</p> }>
+                                    <Route path=StaticSegment("") view=ResourceView />
+                                    <Route path=StaticSegment("search") view=SearchResultsView />
+                                    <Route path=StaticSegment("workspace") view=WorkspaceView />
+                                </Routes>
+                            </main>
+                            <DetailDrawer />
+                            <LogSidebar />
+                        </div>
+                        <CommandPalette />
+                        <NsPalette />
+                        <ContextMenu />
+                        <ConfirmDialog />
+                        <PodModal />
+                        <ExecWindow />
+                        <ShortcutsHelp />
+                        <AlertsPanel />
+                        <ToastView />
+                    </div>
+                    <TooltipLayer />
+                }.into_any()
+            }}
         </Router>
     }
 }

@@ -53,7 +53,7 @@ pub(crate) fn Topbar() -> impl IntoView {
 /// Alerts button — hidden entirely when AlertManager is not configured (data is None).
 /// Shows total count and a hover tooltip with critical/warning/info breakdown.
 #[component]
-fn AlertsButton() -> impl IntoView {
+pub(crate) fn AlertsButton() -> impl IntoView {
     let data = expect_context::<AlertsData>().0;
     let open = expect_context::<AlertsOpen>().0;
 
@@ -108,7 +108,7 @@ fn AlertsButton() -> impl IntoView {
 
 /// Live count of failing Flux Kustomizations and HelmReleases.
 #[component]
-fn FluxFailingBadge() -> impl IntoView {
+pub(crate) fn FluxFailingBadge() -> impl IntoView {
     let catalog = expect_context::<Catalog>().0;
     let selected_kind = expect_context::<RwSignal<Option<ResourceKind>>>();
     let only_problems = expect_context::<OnlyProblems>().0;
@@ -197,7 +197,7 @@ fn FluxFailingBadge() -> impl IntoView {
 /// Cluster CPU/mem usage + node health in the top bar, with a hover tooltip of
 /// per-node CPU/mem and ready status.
 #[component]
-fn TopUsage() -> impl IntoView {
+pub(crate) fn TopUsage() -> impl IntoView {
     let selected_kind = expect_context::<RwSignal<Option<ResourceKind>>>();
     let catalog = expect_context::<Catalog>().0;
 
@@ -367,7 +367,7 @@ fn SyncButton() -> impl IntoView {
 /// Live cluster-wide count of failing pods. Clicking jumps to the Pods view
 /// filtered to problems. Backed by a single all-namespace pod watch.
 #[component]
-fn FailingBadge() -> impl IntoView {
+pub(crate) fn FailingBadge() -> impl IntoView {
     let catalog = expect_context::<Catalog>().0;
     let selected_kind = expect_context::<RwSignal<Option<ResourceKind>>>();
     let selected_ns = expect_context::<RwSignal<Option<String>>>();

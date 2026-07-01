@@ -1,8 +1,7 @@
 use leptos::prelude::*;
-use roder_core::{ResourceKind, ResourceRow, RowStatus, Trend};
-use std::cmp::Ordering;
+use roder_core::{ResourceKind, RowStatus, Trend};
 
-use crate::app::components::table::{cmp_cell, sortable_th, FlashTd};
+use crate::app::components::table::{sortable_th, FlashTd};
 use crate::app::components::table_row::{NameCell, ResourceRow as ResourceRowView};
 use crate::app::events::fire_action;
 use crate::app::events::RowMap;
@@ -13,48 +12,11 @@ use crate::app::state::{
     open_logs, CtxMenu, DetailTarget, FilterFocus, LogPods, LogTarget, OnlyProblems,
     ResourceFilter, SortKey, TableRows, TableSelected, Tick,
 };
+use crate::app::table_logic;
 use crate::app::util::color::{dot_class, pct_thresh_color};
 use crate::app::util::format::parse_key;
 use crate::app::util::predicate::KindKind;
 use crate::data;
-
-/// Natural (human) sort: numeric runs in strings are compared by value so that
-/// "osd-2" < "osd-10" rather than "osd-10" < "osd-2" (lexicographic order).
-fn nat_cmp(a: &str, b: &str) -> Ordering {
-    let mut a = a;
-    let mut b = b;
-    loop {
-        match (a.is_empty(), b.is_empty()) {
-            (true, true) => return Ordering::Equal,
-            (true, false) => return Ordering::Less,
-            (false, true) => return Ordering::Greater,
-            _ => {}
-        }
-        let a_digit = a.starts_with(|c: char| c.is_ascii_digit());
-        let b_digit = b.starts_with(|c: char| c.is_ascii_digit());
-        if a_digit && b_digit {
-            let an = a.find(|c: char| !c.is_ascii_digit()).unwrap_or(a.len());
-            let bn = b.find(|c: char| !c.is_ascii_digit()).unwrap_or(b.len());
-            let av: u64 = a[..an].parse().unwrap_or(0);
-            let bv: u64 = b[..bn].parse().unwrap_or(0);
-            let ord = av.cmp(&bv);
-            if ord != Ordering::Equal {
-                return ord;
-            }
-            a = &a[an..];
-            b = &b[bn..];
-        } else {
-            let ac = a.chars().next().unwrap();
-            let bc = b.chars().next().unwrap();
-            let ord = ac.cmp(&bc);
-            if ord != Ordering::Equal {
-                return ord;
-            }
-            a = &a[ac.len_utf8()..];
-            b = &b[bc.len_utf8()..];
-        }
-    }
-}
 
 /// Full-featured live resource table. Handles its own SSE subscription, virtual
 /// scrolling, column flash, sorting, multi-select, and bulk actions.
@@ -214,38 +176,8 @@ pub(crate) fn KindTable(
         }
         .to_lowercase();
         let (sort_key, asc) = t.sort.get();
-        t.rows.with(|m| {
-            let mut v: Vec<&ResourceRow> = m
-                .values()
-                .filter(|r| !problems || matches!(r.status, RowStatus::Error | RowStatus::Warn))
-                .filter(|r| filter_text.is_empty() || r.name.to_lowercase().contains(&filter_text))
-                .collect();
-            v.sort_by(|a, b| {
-                let ord = match sort_key {
-                    SortKey::Namespace => nat_cmp(
-                        a.namespace.as_deref().unwrap_or(""),
-                        b.namespace.as_deref().unwrap_or(""),
-                    )
-                    .then_with(|| nat_cmp(&a.name, &b.name)),
-                    SortKey::Name => nat_cmp(&a.name, &b.name),
-                    SortKey::Age => a
-                        .created
-                        .cmp(&b.created)
-                        .then_with(|| nat_cmp(&a.name, &b.name)),
-                    SortKey::Cell(i) => cmp_cell(a.cells.get(i), b.cells.get(i))
-                        .then_with(|| nat_cmp(&a.name, &b.name)),
-                }
-                .then_with(|| a.uid.cmp(&b.uid));
-                if asc {
-                    ord
-                } else {
-                    ord.reverse()
-                }
-            });
-            v.into_iter()
-                .map(|r| r.uid.clone())
-                .collect::<Vec<String>>()
-        })
+        t.rows
+            .with(|m| table_logic::shown_uids(m.values(), sort_key, asc, problems, &filter_text))
     });
 
     let window = table_window(t, shown_uids);
@@ -331,16 +263,7 @@ pub(crate) fn KindTable(
     let do_bulk = move |action: &'static str| {
         let key = key_sv.get_value();
         let uids = selected.get_untracked();
-        let targets: Vec<DetailTarget> = rows.with_untracked(|v| {
-            v.values()
-                .filter(|r| uids.contains(&r.uid))
-                .map(|r| DetailTarget {
-                    key: key.clone(),
-                    namespace: r.namespace.clone(),
-                    name: r.name.clone(),
-                })
-                .collect()
-        });
+        let targets = rows.with_untracked(|v| table_logic::bulk_targets(&key, v, &uids));
         fire_action(toast, action, &targets);
         selected.set(std::collections::BTreeSet::new());
     };

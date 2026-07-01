@@ -114,6 +114,8 @@ web-sys = { version = "0.3", features = [
   "EventTarget",
   "TransitionEvent",
   "DomRect",
+  "MediaQueryList",
+  "MediaQueryListEvent",
 ], optional = true }
 
 # Native (server) binary only — target-gated out of the wasm/hydrate build, and

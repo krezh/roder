@@ -143,6 +143,20 @@ pub(crate) fn RowDetail(target: DetailTarget) -> impl IntoView {
                 .map(|n| n as i32)
         })
     });
+    // Whether to show "Suspend" or "Resume": read once from the fetched object,
+    // then refetched (see `run`) after a flux-suspend/flux-resume call so the
+    // button reflects the persisted `spec.suspend` rather than flipping blindly.
+    let is_suspended = move || {
+        obj.get()
+            .flatten()
+            .and_then(|d| {
+                d.object
+                    .get("spec")
+                    .and_then(|s| s.get("suspend"))
+                    .and_then(|b| b.as_bool())
+            })
+            .unwrap_or(false)
+    };
     Effect::new(move |_| {
         if let Some(Some(d)) = obj.get() {
             yaml.set(d.yaml.clone());
@@ -197,6 +211,9 @@ pub(crate) fn RowDetail(target: DetailTarget) -> impl IntoView {
                     if action == "delete" {
                         detail.set(None);
                     }
+                    if action == "flux-suspend" || action == "flux-resume" {
+                        obj.refetch();
+                    }
                 }
                 Err(e) => status.set(Some(Err(e))),
             }
@@ -222,8 +239,12 @@ pub(crate) fn RowDetail(target: DetailTarget) -> impl IntoView {
                             <button class="act" on:click=move |_| run("flux-force", serde_json::json!({}))>"Force"</button>
                             <button class="act" on:click=move |_| run("flux-reset", serde_json::json!({}))>"Reset"</button>
                         })}
-                        <button class="act" on:click=move |_| run("flux-suspend", serde_json::json!({}))>"Suspend"</button>
-                        <button class="act" on:click=move |_| run("flux-resume", serde_json::json!({}))>"Resume"</button>
+                        <Show when=move || !is_suspended() fallback=|| ()>
+                            <button class="act" on:click=move |_| run("flux-suspend", serde_json::json!({}))>"Suspend"</button>
+                        </Show>
+                        <Show when=is_suspended fallback=|| ()>
+                            <button class="act" on:click=move |_| run("flux-resume", serde_json::json!({}))>"Resume"</button>
+                        </Show>
                     </Show>
                 })}
                 {is_eso.then(|| view! {

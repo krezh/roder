@@ -1,7 +1,7 @@
 //! Right-click context menu with resource-type-specific actions.
 
 use leptos::prelude::*;
-use roder_core::ResourceKind;
+use roder_core::{ResourceKind, RowStatus};
 
 use crate::app::events::{fire_action, fire_action_with};
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
@@ -45,27 +45,47 @@ pub(crate) fn ContextMenu() -> impl IntoView {
 
             // When the right-clicked row is part of a multi-selection, all
             // bulk-capable actions fire on every selected row.
-            let targets: Vec<DetailTarget> = match (table_selected.get_value(), table_rows.get_value()) {
-                (Some(sel), Some(rows)) => {
+            let rows_opt = table_rows.get_value();
+            let target_uids: Vec<String> = match (table_selected.get_value(), rows_opt) {
+                (Some(sel), Some(_)) => {
                     let uids = sel.get_untracked();
                     if uids.len() > 1 && uids.contains(&m.uid) {
-                        let ts: Vec<DetailTarget> = rows.with_untracked(|rm| {
-                            uids.iter()
-                                .filter_map(|uid| rm.get(uid).map(|r| DetailTarget {
-                                    key: m.target.key.clone(),
-                                    namespace: r.namespace.clone(),
-                                    name: r.name.clone(),
-                                }))
-                                .collect()
-                        });
-                        if ts.is_empty() { vec![m.target.clone()] } else { ts }
+                        uids.into_iter().collect()
                     } else {
-                        vec![m.target.clone()]
+                        vec![m.uid.clone()]
                     }
                 }
-                _ => vec![m.target.clone()],
+                _ => vec![m.uid.clone()],
+            };
+            let targets: Vec<DetailTarget> = match rows_opt {
+                Some(rows) => {
+                    let ts: Vec<DetailTarget> = rows.with_untracked(|rm| {
+                        target_uids.iter()
+                            .filter_map(|uid| rm.get(uid).map(|r| DetailTarget {
+                                key: m.target.key.clone(),
+                                namespace: r.namespace.clone(),
+                                name: r.name.clone(),
+                            }))
+                            .collect()
+                    });
+                    if ts.is_empty() { vec![m.target.clone()] } else { ts }
+                }
+                None => vec![m.target.clone()],
             };
             let is_bulk = targets.len() > 1;
+            // `RowStatus::Warn` is reserved for the suspended case in the Flux
+            // projector (see `ready_message_cells`), so it doubles as the signal
+            // for which of Suspend/Resume to show. `None` (mixed selection, or
+            // no row data) falls back to showing both.
+            let suspend_state: Option<bool> = rows_opt.and_then(|rows| {
+                rows.with_untracked(|rm| {
+                    let mut states = target_uids.iter().filter_map(|uid| rm.get(uid)).map(|r| r.status == RowStatus::Warn);
+                    let first = states.next()?;
+                    states.all(|s| s == first).then_some(first)
+                })
+            });
+            let show_suspend = suspend_state != Some(true);
+            let show_resume = suspend_state != Some(false);
 
             let open = { let t = m.target.clone(); move |_| { detail.set(Some(t.clone())); do_close(); } };
             let has_logs = is_pod || is_workload || kk.is_job();
@@ -243,8 +263,8 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                             <button class="ctx-item" on:click=force>"Force"</button>
                             <button class="ctx-item" on:click=reset>"Reset"</button>
                         })}
-                        <button class="ctx-item" on:click=suspend>"Suspend"</button>
-                        <button class="ctx-item" on:click=resume>"Resume"</button>
+                        {show_suspend.then(|| view! { <button class="ctx-item" on:click=suspend>"Suspend"</button> })}
+                        {show_resume.then(|| view! { <button class="ctx-item" on:click=resume>"Resume"</button> })}
                     })}
                     {is_eso.then(|| view! { <button class="ctx-item" on:click=refresh>"Refresh"</button> })}
                     <button class="ctx-item danger" on:click=delete>"Delete"</button>

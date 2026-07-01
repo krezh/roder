@@ -299,6 +299,22 @@ pub(crate) fn KindTable(
 
     let rows = t.rows;
     let selected = t.selected;
+    // `RowStatus::Warn` is reserved for the suspended case in the Flux projector
+    // (see `ready_message_cells`), so it doubles as the signal for which of
+    // Suspend/Resume to show. `None` (mixed selection) falls back to both.
+    let bulk_suspend_state = move || -> Option<bool> {
+        let uids = selected.get();
+        rows.with(|rm| {
+            let mut states = uids
+                .iter()
+                .filter_map(|u| rm.get(u))
+                .map(|r| r.status == RowStatus::Warn);
+            let first = states.next()?;
+            states.all(|s| s == first).then_some(first)
+        })
+    };
+    let bulk_show_suspend = move || bulk_suspend_state() != Some(true);
+    let bulk_show_resume = move || bulk_suspend_state() != Some(false);
     let last_clicked = t.last_clicked;
     let sort = t.sort;
     let entering = t.entering;
@@ -548,8 +564,12 @@ pub(crate) fn KindTable(
                             <button class="act" on:click=move |_| do_bulk("flux-force")>"Force"</button>
                             <button class="act" on:click=move |_| do_bulk("flux-reset")>"Reset"</button>
                         })}
-                        <button class="act" on:click=move |_| do_bulk("flux-suspend")>"Suspend"</button>
-                        <button class="act" on:click=move |_| do_bulk("flux-resume")>"Resume"</button>
+                        {move || bulk_show_suspend().then(|| view! {
+                            <button class="act" on:click=move |_| do_bulk("flux-suspend")>"Suspend"</button>
+                        })}
+                        {move || bulk_show_resume().then(|| view! {
+                            <button class="act" on:click=move |_| do_bulk("flux-resume")>"Resume"</button>
+                        })}
                     })}
                     <button class="act danger" on:click=move |_| {
                         let n = selected.get_untracked().len();

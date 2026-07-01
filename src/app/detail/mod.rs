@@ -106,6 +106,8 @@ pub(crate) fn RowDetail(target: DetailTarget) -> impl IntoView {
     let is_workload = kk.is_workload();
     let is_scalable = kk.is_scalable();
     let is_flux = kk.is_flux();
+    let is_helmrelease = kk.is_helmrelease();
+    let has_source_ref = kk.has_source_ref();
     let is_eso = kk.is_eso();
     let is_pod = kk.is_pod();
     // Pod-owning resources get a live "Pods" tab listing their pods by selector.
@@ -213,6 +215,13 @@ pub(crate) fn RowDetail(target: DetailTarget) -> impl IntoView {
                 {is_flux.then(|| view! {
                     <Show when=can_patch fallback=|| ()>
                         <button class="act" on:click=move |_| run("flux-reconcile", serde_json::json!({}))>"Reconcile"</button>
+                        {has_source_ref.then(|| view! {
+                            <button class="act" on:click=move |_| run("flux-reconcile-with-source", serde_json::json!({}))>"Reconcile w/ source"</button>
+                        })}
+                        {is_helmrelease.then(|| view! {
+                            <button class="act" on:click=move |_| run("flux-force", serde_json::json!({}))>"Force"</button>
+                            <button class="act" on:click=move |_| run("flux-reset", serde_json::json!({}))>"Reset"</button>
+                        })}
                         <button class="act" on:click=move |_| run("flux-suspend", serde_json::json!({}))>"Suspend"</button>
                         <button class="act" on:click=move |_| run("flux-resume", serde_json::json!({}))>"Resume"</button>
                     </Show>

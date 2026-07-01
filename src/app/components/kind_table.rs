@@ -293,6 +293,8 @@ pub(crate) fn KindTable(
     let kk = KindKind::new(&kind.group, &kind.kind);
     let bulk_workload = kk.is_workload();
     let bulk_flux = kk.is_flux();
+    let bulk_helmrelease = kk.is_helmrelease();
+    let bulk_has_source_ref = kk.has_source_ref();
     let key_sv = StoredValue::new(kind.key.clone());
 
     let rows = t.rows;
@@ -539,6 +541,13 @@ pub(crate) fn KindTable(
                     })}
                     {bulk_flux.then(|| view! {
                         <button class="act" on:click=move |_| do_bulk("flux-reconcile")>"Reconcile"</button>
+                        {bulk_has_source_ref.then(|| view! {
+                            <button class="act" on:click=move |_| do_bulk("flux-reconcile-with-source")>"Reconcile w/ source"</button>
+                        })}
+                        {bulk_helmrelease.then(|| view! {
+                            <button class="act" on:click=move |_| do_bulk("flux-force")>"Force"</button>
+                            <button class="act" on:click=move |_| do_bulk("flux-reset")>"Reset"</button>
+                        })}
                         <button class="act" on:click=move |_| do_bulk("flux-suspend")>"Suspend"</button>
                         <button class="act" on:click=move |_| do_bulk("flux-resume")>"Resume"</button>
                     })}

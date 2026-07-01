@@ -44,4 +44,52 @@ impl<'a> KindKind<'a> {
     pub(crate) fn is_scalable(&self) -> bool {
         self.group == "apps" && matches!(self.kind, "Deployment" | "StatefulSet" | "ReplicaSet")
     }
+
+    /// Only HelmRelease supports `flux reconcile --force` / `--reset`.
+    pub(crate) fn is_helmrelease(&self) -> bool {
+        self.is_flux() && self.kind == "HelmRelease"
+    }
+
+    /// Only Kustomization and HelmRelease reference a source that
+    /// `flux reconcile --with-source` can reconcile first.
+    pub(crate) fn has_source_ref(&self) -> bool {
+        self.is_flux() && matches!(self.kind, "Kustomization" | "HelmRelease")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::KindKind;
+
+    #[test]
+    fn is_helmrelease_true_for_flux_helmrelease() {
+        let kk = KindKind::new("helm.toolkit.fluxcd.io", "HelmRelease");
+        assert!(kk.is_helmrelease());
+    }
+
+    #[test]
+    fn is_helmrelease_false_for_kustomization() {
+        let kk = KindKind::new("kustomize.toolkit.fluxcd.io", "Kustomization");
+        assert!(!kk.is_helmrelease());
+    }
+
+    #[test]
+    fn is_helmrelease_false_for_non_flux_group() {
+        let kk = KindKind::new("apps", "HelmRelease");
+        assert!(!kk.is_helmrelease());
+    }
+
+    #[test]
+    fn has_source_ref_true_for_kustomization_and_helmrelease() {
+        assert!(KindKind::new("kustomize.toolkit.fluxcd.io", "Kustomization").has_source_ref());
+        assert!(KindKind::new("helm.toolkit.fluxcd.io", "HelmRelease").has_source_ref());
+    }
+
+    #[test]
+    fn has_source_ref_false_for_source_kinds() {
+        assert!(!KindKind::new("source.toolkit.fluxcd.io", "GitRepository").has_source_ref());
+        assert!(!KindKind::new("source.toolkit.fluxcd.io", "OCIRepository").has_source_ref());
+        assert!(!KindKind::new("source.toolkit.fluxcd.io", "HelmRepository").has_source_ref());
+        assert!(!KindKind::new("source.toolkit.fluxcd.io", "Bucket").has_source_ref());
+    }
 }

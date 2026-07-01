@@ -63,6 +63,10 @@ pub struct Backend {
     /// Short-TTL SelfSubjectAccessReview cache keyed (verb, key, namespace).
     /// RwLock so concurrent permission reads don't serialize.
     can_cache: tokio::sync::RwLock<HashMap<CanCacheKey, (std::time::Instant, bool)>>,
+    /// Signature of the last-streamed attempt per (namespace, pod, container), so a
+    /// crashed/stuck container's static output is shown once per attempt instead of
+    /// being replayed every time a client reconnects to a still-broken pod.
+    log_seen: tokio::sync::RwLock<HashMap<(String, String, String), String>>,
 }
 
 impl Backend {
@@ -94,6 +98,7 @@ impl Backend {
             registry,
             overview_cache: tokio::sync::RwLock::new(None),
             can_cache: tokio::sync::RwLock::new(HashMap::new()),
+            log_seen: tokio::sync::RwLock::new(HashMap::new()),
         })
     }
 
@@ -482,6 +487,59 @@ impl Backend {
         self.merge_patch(key, ns, name, patch).await
     }
 
+    /// `flux reconcile helmrelease --force`: force a one-off Helm install/upgrade.
+    pub async fn flux_force(
+        &self,
+        key: &str,
+        ns: Option<&str>,
+        name: &str,
+    ) -> Result<(), K8sError> {
+        let ts = now_rfc3339();
+        let patch = json!({ "metadata": { "annotations": {
+            "reconcile.fluxcd.io/requestedAt": ts,
+            "reconcile.fluxcd.io/forceAt": ts,
+        }}});
+        self.merge_patch(key, ns, name, patch).await
+    }
+
+    /// `flux reconcile helmrelease --reset`: reset the failure count on a stuck HelmRelease.
+    pub async fn flux_reset(
+        &self,
+        key: &str,
+        ns: Option<&str>,
+        name: &str,
+    ) -> Result<(), K8sError> {
+        let ts = now_rfc3339();
+        let patch = json!({ "metadata": { "annotations": {
+            "reconcile.fluxcd.io/requestedAt": ts,
+            "reconcile.fluxcd.io/resetAt": ts,
+        }}});
+        self.merge_patch(key, ns, name, patch).await
+    }
+
+    /// `flux reconcile <kind> --with-source`: reconcile the referenced source
+    /// (GitRepository/OCIRepository/HelmRepository/Bucket/HelmChart) first,
+    /// then the object itself.
+    pub async fn flux_reconcile_with_source(
+        &self,
+        key: &str,
+        ns: Option<&str>,
+        name: &str,
+    ) -> Result<(), K8sError> {
+        let obj = self.dyn_api(key, ns)?.get(name).await.map_err(api_err)?;
+        let data = serde_json::to_value(&obj).map_err(api_err)?;
+        let spec = data
+            .get("spec")
+            .ok_or_else(|| K8sError::Api("resource has no spec".into()))?;
+        let source = extract_source_ref(spec)
+            .ok_or_else(|| K8sError::Api("resource has no sourceRef to reconcile".into()))?;
+        let source_entry = self.entry_by_kind(&source.kind)?;
+        let source_ns = source.namespace.as_deref().or(ns);
+        self.flux_reconcile(&source_entry.kind.key, source_ns, &source.name)
+            .await?;
+        self.flux_reconcile(key, ns, name).await
+    }
+
     pub async fn eso_refresh(
         &self,
         key: &str,
@@ -584,46 +642,138 @@ impl Backend {
         Ok(())
     }
 
-    /// Whether a pod is currently Running — so its logs should be *followed* (a live
-    /// stream) rather than fetched once (a finished pod produces no more output, and
-    /// following it would end immediately and trigger an SSE reconnect loop). Unknown
-    /// pods (not in any cache) default to following, which is safe for live ones.
-    pub async fn pod_running(&self, ns: &str, name: &str) -> bool {
+    /// Whether a pod is not (yet) in a terminal phase, so its logs should be
+    /// *followed* (a live stream) rather than fetched once. Only `Succeeded`/`Failed`
+    /// pods are done for good; everything else — including `Pending` (image still
+    /// pulling, init containers running) — may still produce its first log line, or
+    /// crash, the moment the container starts. Unknown pods (not in any cache)
+    /// default to following, which is safe for live ones.
+    pub async fn pod_active(&self, ns: &str, name: &str) -> bool {
         match self.registry.cached_object("/v1/Pod", Some(ns), name).await {
-            Some(obj) => {
+            Some(obj) => !matches!(
                 obj.data
                     .get("status")
                     .and_then(|s| s.get("phase"))
-                    .and_then(|p| p.as_str())
-                    == Some("Running")
-            }
+                    .and_then(|p| p.as_str()),
+                Some("Succeeded") | Some("Failed")
+            ),
             None => true,
         }
     }
 
-    /// Resolve the list of main (non-init) container names for a pod.
-    /// Tries the informer cache first, falls back to a live API call.
-    async fn pod_containers(&self, ns: &str, pod: &str) -> Vec<String> {
+    /// A pod's full object as JSON. Tries the informer cache first, falls back to
+    /// a live API call — used for the `spec`/`status` introspection the log
+    /// container list needs (informer objects and `Pod` don't share a type).
+    async fn pod_json(&self, ns: &str, pod: &str) -> Option<serde_json::Value> {
         if let Some(obj) = self.registry.cached_object("/v1/Pod", Some(ns), pod).await {
-            if let Some(arr) = obj
-                .data
-                .get("spec")
-                .and_then(|s| s.get("containers"))
-                .and_then(|c| c.as_array())
-            {
-                return arr
-                    .iter()
-                    .filter_map(|c| c.get("name")?.as_str().map(str::to_string))
-                    .collect();
-            }
+            return Some(obj.data);
         }
         let api: Api<Pod> = Api::namespaced(self.client(), ns);
-        api.get(pod)
-            .await
-            .ok()
-            .and_then(|p| p.spec)
-            .map(|s| s.containers.into_iter().map(|c| c.name).collect())
-            .unwrap_or_default()
+        serde_json::to_value(api.get(pod).await.ok()?).ok()
+    }
+
+    /// Every container to stream logs for, in the order the pod runs them: init
+    /// containers first, then main containers — paired with whether that
+    /// container's output can only be reached via `previous`. Containers that
+    /// haven't run at all yet (still waiting their turn) are omitted, and a
+    /// container whose crash/attempt was already streamed before is omitted too —
+    /// see [`Backend::already_reported`].
+    async fn pod_log_containers(&self, ns: &str, pod: &str) -> Vec<(String, bool)> {
+        let Some(data) = self.pod_json(ns, pod).await else {
+            return Vec::new();
+        };
+        let names = |field: &str| -> Vec<String> {
+            data.get("spec")
+                .and_then(|s| s.get(field))
+                .and_then(|c| c.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|c| c.get("name")?.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let mut out = Vec::new();
+        for name in names("initContainers")
+            .into_iter()
+            .chain(names("containers"))
+        {
+            match container_log_plan(&data, &name) {
+                LogPlan::Skip => {}
+                LogPlan::Live => out.push((name, false)),
+                LogPlan::Static {
+                    previous,
+                    signature,
+                } => {
+                    let key = (ns.to_string(), pod.to_string(), name.clone());
+                    if !self.already_reported(key, signature).await {
+                        out.push((name, previous));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Whether `signature` for `(namespace, pod, container)` was already reported
+    /// last time — and if not, remembers it. Used so a crashed/stuck container's
+    /// static output isn't re-sent on every reconnect to a still-broken pod.
+    async fn already_reported(&self, key: (String, String, String), signature: String) -> bool {
+        let mut seen = self.log_seen.write().await;
+        if seen.get(&key) == Some(&signature) {
+            true
+        } else {
+            seen.insert(key, signature);
+            false
+        }
+    }
+
+    /// Open one container's log stream, tagging each line with `prefix` (empty for
+    /// a single-container view). On failure, produce a one-line placeholder
+    /// instead of erroring the whole pane — deduped the same way as
+    /// [`Backend::pod_log_containers`], so a container that's still stuck doesn't
+    /// repeat the same message on every reconnect.
+    async fn open_container_log(
+        &self,
+        ns: &str,
+        pod: &str,
+        name: &str,
+        previous: bool,
+        follow: bool,
+        prefix: &str,
+    ) -> Pin<Box<dyn Stream<Item = String> + Send>> {
+        let api: Api<Pod> = Api::namespaced(self.client(), ns);
+        let lp = LogParams {
+            follow,
+            tail_lines: Some(500),
+            timestamps: false,
+            container: Some(name.to_string()),
+            previous,
+            ..Default::default()
+        };
+        match api.log_stream(pod, &lp).await {
+            Ok(reader) => {
+                let prefix = prefix.to_string();
+                Box::pin(
+                    reader
+                        .lines()
+                        .filter_map(|r| async move { r.ok() })
+                        .map(move |line| format!("{prefix}{line}")),
+                )
+            }
+            Err(e) => {
+                let key = (ns.to_string(), pod.to_string(), name.to_string());
+                let msg = e.to_string();
+                if self.already_reported(key, msg.clone()).await {
+                    return Box::pin(futures::stream::empty());
+                }
+                tracing::debug!("failed to open log stream for container {name}: {msg}");
+                let prefix = prefix.to_string();
+                Box::pin(futures::stream::once(async move {
+                    format!("{prefix}[roder] failed to stream logs: {msg}")
+                }))
+            }
+        }
     }
 
     /// Open an interactive exec session into a pod container. Returns an
@@ -740,9 +890,13 @@ impl Backend {
     }
 
     /// Live pod logs as SSE. When a specific container is requested it is streamed
-    /// without a prefix. When the pod has multiple containers and none was specified,
-    /// all containers are streamed in parallel with `container │ ` line prefixes so
-    /// the frontend can show a container pill per line.
+    /// without a prefix. Otherwise every container in the pod is streamed — init
+    /// containers first (in spec order), then main containers — with `container │ `
+    /// line prefixes, so an init error (or a container that hasn't started yet) is
+    /// visible immediately instead of only once the main container finally starts.
+    /// A container that hasn't run at all yet is omitted rather than reported as an
+    /// error (it's just waiting its turn), and a crashed/stuck container's output
+    /// is only ever streamed once per attempt — see [`Backend::pod_log_containers`].
     pub async fn logs(
         &self,
         ns: &str,
@@ -750,15 +904,22 @@ impl Backend {
         container: Option<String>,
         follow: bool,
     ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>, K8sError> {
-        let api: Api<Pod> = Api::namespaced(self.client(), ns);
-
         if let Some(name) = container {
-            // Explicit container selection — stream it without any prefix.
+            // Explicit container selection — stream it without any prefix. (No UI
+            // path sends this today; kept for completeness / direct API use.)
+            let previous = match self.pod_json(ns, pod).await {
+                Some(data) => {
+                    matches!(container_log_plan(&data, &name), LogPlan::Static { previous, .. } if previous)
+                }
+                None => false,
+            };
+            let api: Api<Pod> = Api::namespaced(self.client(), ns);
             let lp = LogParams {
                 follow,
                 tail_lines: Some(500),
                 timestamps: false,
                 container: Some(name),
+                previous,
                 ..Default::default()
             };
             let lines = api
@@ -770,50 +931,29 @@ impl Backend {
             return Ok(Box::pin(lines));
         }
 
-        let containers = self.pod_containers(ns, pod).await;
-
-        if containers.len() <= 1 {
-            // Single container — stream without prefix.
-            let lp = LogParams {
-                follow,
-                tail_lines: Some(500),
-                timestamps: false,
-                container: containers.into_iter().next(),
-                ..Default::default()
-            };
-            let lines = api
-                .log_stream(pod, &lp)
-                .await
-                .map_err(api_err)?
-                .lines()
-                .filter_map(|r| async move { r.ok() });
-            return Ok(Box::pin(lines));
+        let containers = self.pod_log_containers(ns, pod).await;
+        if containers.is_empty() {
+            // Nothing to show right now — every container is either still waiting
+            // its turn, or its last attempt was already streamed. An empty stream
+            // ends at once; the caller's `follow`/`eof` handling decides whether to
+            // retry (see `server::api::logs`).
+            return Ok(Box::pin(futures::stream::empty()));
         }
 
-        // Multiple containers — stream all with `container │ ` prefix.
+        // Prefix lines only when merging more than one container, matching the
+        // pre-existing single-container (no pill) presentation.
+        let prefixed = containers.len() > 1;
         let mut streams: Vec<Pin<Box<dyn Stream<Item = String> + Send>>> = Vec::new();
-        for name in containers {
-            let lp = LogParams {
-                follow,
-                tail_lines: Some(500),
-                timestamps: false,
-                container: Some(name.clone()),
-                ..Default::default()
+        for (name, previous) in containers {
+            let prefix = if prefixed {
+                format!("{name} │ ")
+            } else {
+                String::new()
             };
-            match api.log_stream(pod, &lp).await {
-                Ok(reader) => {
-                    let s = reader
-                        .lines()
-                        .filter_map(|r| async move { r.ok() })
-                        .map(move |line| format!("{name} │ {line}"));
-                    streams.push(Box::pin(s));
-                }
-                Err(e) => {
-                    tracing::debug!("failed to open log stream for container {name}: {e}");
-                    let msg = format!("{name} │ [roder] failed to stream logs: {e}");
-                    streams.push(Box::pin(futures::stream::once(async move { msg })));
-                }
-            }
+            streams.push(
+                self.open_container_log(ns, pod, &name, previous, follow, &prefix)
+                    .await,
+            );
         }
         Ok(Box::pin(futures::stream::select_all(streams)))
     }
@@ -972,6 +1112,19 @@ impl Backend {
             .ok_or_else(|| K8sError::Api(format!("unknown resource kind: {key}")))
     }
 
+    /// Resolve a Flux sourceRef's `kind` (e.g. "GitRepository") to a catalog
+    /// entry, without needing its `apiVersion` — the same way Flux's own
+    /// controllers resolve sourceRef generically across `source.toolkit.fluxcd.io`.
+    fn entry_by_kind(&self, kind: &str) -> Result<CatalogEntry, K8sError> {
+        self.catalog
+            .load()
+            .entries
+            .iter()
+            .find(|e| e.kind.group.ends_with("fluxcd.io") && e.kind.kind == kind)
+            .cloned()
+            .ok_or_else(|| K8sError::Api(format!("no Flux source kind found: {kind}")))
+    }
+
     /// Delete all "dead" pods (matching k9s's `toastPhases`) and finished Jobs.
     /// Best-effort: individual delete failures are silently skipped.
     pub async fn sanitize(&self, namespace: Option<String>) -> Result<CleanupSummary, K8sError> {
@@ -1054,6 +1207,76 @@ async fn detect_shell(api: &Api<Pod>, pod: &str, container: Option<&str>) -> Str
 
 fn api_err<E: std::fmt::Display>(e: E) -> K8sError {
     K8sError::Api(e.to_string())
+}
+
+/// Whether `name` (an init or main container) is currently `waiting` — i.e. not
+/// running and not freshly terminated, so the kubelet has nothing to show for the
+/// *current* attempt and `previous` logs are the only way to see its last output.
+/// Whether/how `name` (an init or main container) should be logged: `None` if it
+/// simply hasn't had its turn yet — no status reported, or `waiting` with no prior
+/// attempt — which isn't an error, just sequencing, so it shouldn't synthesize one.
+/// `Some(previous)` if it has run at least once, with `previous = true` when the
+/// *current* attempt has nothing to show (mid-backoff after a crash) and the last
+/// attempt's output is only reachable via the `previous` log.
+/// How to log a container given its current status.
+enum LogPlan {
+    /// Hasn't run at all yet — just waiting its turn; not an error, don't report it.
+    Skip,
+    /// Currently running — stream it live.
+    Live,
+    /// A finished attempt: terminated (and not yet superseded by a new attempt),
+    /// or — if already backing off toward a restart — only reachable via
+    /// `previous`. `signature` fingerprints the attempt so a repeat fetch of the
+    /// same crash can be recognized and skipped.
+    Static { previous: bool, signature: String },
+}
+
+fn container_log_plan(pod_data: &serde_json::Value, name: &str) -> LogPlan {
+    let Some(status) = ["initContainerStatuses", "containerStatuses"]
+        .iter()
+        .find_map(|field| {
+            pod_data
+                .get("status")?
+                .get(*field)?
+                .as_array()?
+                .iter()
+                .find(|c| c.get("name").and_then(|n| n.as_str()) == Some(name))
+        })
+    else {
+        return LogPlan::Skip;
+    };
+    let state = status.get("state");
+    if state.and_then(|s| s.get("running")).is_some() {
+        return LogPlan::Live;
+    }
+    if let Some(terminated) = state.and_then(|s| s.get("terminated")) {
+        return LogPlan::Static {
+            previous: false,
+            signature: attempt_signature(terminated),
+        };
+    }
+    // `waiting`: nothing current to show; fall back to the last completed attempt.
+    match status.get("lastState").and_then(|s| s.get("terminated")) {
+        Some(terminated) => LogPlan::Static {
+            previous: true,
+            signature: attempt_signature(terminated),
+        },
+        None => LogPlan::Skip,
+    }
+}
+
+/// A stable fingerprint for one container attempt (exit code + time it ended), so
+/// a repeat fetch of the same crash can be recognized and skipped.
+fn attempt_signature(terminated: &serde_json::Value) -> String {
+    let code = terminated
+        .get("exitCode")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(-1);
+    let at = terminated
+        .get("finishedAt")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    format!("{code}@{at}")
 }
 
 /// Matches k9s's `toastPhases`: pods that are dead or permanently stuck.
@@ -1174,5 +1397,109 @@ fn ready_condition(data: &serde_json::Value) -> Option<bool> {
         "True" => Some(true),
         "False" => Some(false),
         _ => None,
+    }
+}
+
+/// A Flux source reference resolved from a reconciling object's spec.
+struct SourceRef {
+    kind: String,
+    name: String,
+    namespace: Option<String>,
+}
+
+/// Find the sourceRef a Kustomization or HelmRelease reconciles against, trying
+/// each field Flux supports in turn: `spec.sourceRef` (Kustomization),
+/// `spec.chart.spec.sourceRef` (HelmRelease templated chart), and
+/// `spec.chartRef` (HelmRelease direct OCIRepository/HelmChart reference).
+fn extract_source_ref(spec: &serde_json::Value) -> Option<SourceRef> {
+    const PATHS: &[&[&str]] = &[
+        &["sourceRef"],
+        &["chart", "spec", "sourceRef"],
+        &["chartRef"],
+    ];
+    for path in PATHS {
+        let mut cur = Some(spec);
+        for seg in *path {
+            cur = cur.and_then(|c| c.get(seg));
+        }
+        let Some(cur) = cur else { continue };
+        let kind = cur.get("kind").and_then(|v| v.as_str());
+        let name = cur.get("name").and_then(|v| v.as_str());
+        if let (Some(kind), Some(name)) = (kind, name) {
+            return Some(SourceRef {
+                kind: kind.to_string(),
+                name: name.to_string(),
+                namespace: cur
+                    .get("namespace")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+            });
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod source_ref_tests {
+    use super::extract_source_ref;
+    use serde_json::json;
+
+    #[test]
+    fn kustomization_source_ref() {
+        let spec = json!({ "sourceRef": { "kind": "GitRepository", "name": "flux-system" } });
+        let sr = extract_source_ref(&spec).expect("source ref");
+        assert_eq!(sr.kind, "GitRepository");
+        assert_eq!(sr.name, "flux-system");
+        assert_eq!(sr.namespace, None);
+    }
+
+    #[test]
+    fn kustomization_source_ref_with_namespace() {
+        let spec = json!({ "sourceRef": {
+            "kind": "GitRepository", "name": "podinfo", "namespace": "apps"
+        }});
+        let sr = extract_source_ref(&spec).expect("source ref");
+        assert_eq!(sr.namespace.as_deref(), Some("apps"));
+    }
+
+    #[test]
+    fn helmrelease_templated_chart_source_ref() {
+        let spec = json!({ "chart": { "spec": {
+            "chart": "podinfo",
+            "sourceRef": { "kind": "HelmRepository", "name": "podinfo" }
+        }}});
+        let sr = extract_source_ref(&spec).expect("source ref");
+        assert_eq!(sr.kind, "HelmRepository");
+        assert_eq!(sr.name, "podinfo");
+    }
+
+    #[test]
+    fn helmrelease_direct_chart_ref() {
+        let spec = json!({ "chartRef": { "kind": "OCIRepository", "name": "podinfo" } });
+        let sr = extract_source_ref(&spec).expect("source ref");
+        assert_eq!(sr.kind, "OCIRepository");
+        assert_eq!(sr.name, "podinfo");
+    }
+
+    #[test]
+    fn prefers_source_ref_over_chart_ref_when_both_present() {
+        // Shouldn't happen in practice, but sourceRef (Kustomization's own
+        // field) should win if a spec somehow has both.
+        let spec = json!({
+            "sourceRef": { "kind": "GitRepository", "name": "a" },
+            "chartRef": { "kind": "OCIRepository", "name": "b" },
+        });
+        let sr = extract_source_ref(&spec).expect("source ref");
+        assert_eq!(sr.kind, "GitRepository");
+    }
+
+    #[test]
+    fn none_when_no_source_ref_present() {
+        assert!(extract_source_ref(&json!({ "suspend": false })).is_none());
+    }
+
+    #[test]
+    fn none_when_source_ref_missing_required_fields() {
+        assert!(extract_source_ref(&json!({ "sourceRef": { "kind": "GitRepository" } })).is_none());
     }
 }

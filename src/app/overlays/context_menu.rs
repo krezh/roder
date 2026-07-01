@@ -37,6 +37,8 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             let is_workload = kk.is_workload();
             let is_scalable = kk.is_scalable();
             let is_flux = kk.is_flux();
+            let is_helmrelease = kk.is_helmrelease();
+            let has_source_ref = kk.has_source_ref();
             let is_eso = kk.is_eso();
             let is_cronjob = kk.is_cronjob();
             let style = format!("left:{}px;top:{}px", m.x, m.y);
@@ -110,6 +112,9 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             }
             let restart   = bulk_act!("restart");
             let reconcile = bulk_act!("flux-reconcile");
+            let reconcile_src = bulk_act!("flux-reconcile-with-source");
+            let force     = bulk_act!("flux-force");
+            let reset     = bulk_act!("flux-reset");
             let suspend   = bulk_act!("flux-suspend");
             let resume    = bulk_act!("flux-resume");
             let refresh   = bulk_act!("eso-refresh");
@@ -233,6 +238,11 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                     {is_cronjob.then(|| view! { <button class="ctx-item" on:click=trigger>"Trigger"</button> })}
                     {is_flux.then(|| view! {
                         <button class="ctx-item" on:click=reconcile>"Reconcile"</button>
+                        {has_source_ref.then(|| view! { <button class="ctx-item" on:click=reconcile_src>"Reconcile w/ source"</button> })}
+                        {is_helmrelease.then(|| view! {
+                            <button class="ctx-item" on:click=force>"Force"</button>
+                            <button class="ctx-item" on:click=reset>"Reset"</button>
+                        })}
                         <button class="ctx-item" on:click=suspend>"Suspend"</button>
                         <button class="ctx-item" on:click=resume>"Resume"</button>
                     })}

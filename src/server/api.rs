@@ -315,6 +315,9 @@ pub async fn action(
             "flux-suspend" => b.flux_suspend(key, ns, name, true).await,
             "flux-resume" => b.flux_suspend(key, ns, name, false).await,
             "flux-reconcile" => b.flux_reconcile(key, ns, name).await,
+            "flux-reconcile-with-source" => b.flux_reconcile_with_source(key, ns, name).await,
+            "flux-force" => b.flux_force(key, ns, name).await,
+            "flux-reset" => b.flux_reset(key, ns, name).await,
             "eso-refresh" => b.eso_refresh(key, ns, name).await,
             "cronjob-trigger" => b.cronjob_trigger(key, ns, name).await,
             other => {
@@ -359,12 +362,14 @@ pub struct LogQuery {
 /// Live pod logs as SSE (follows the log stream).
 pub async fn logs(State(state): State<AppState>, Query(q): Query<LogQuery>) -> Response {
     let b = backend_or_return!(state);
-    let res = if let Some(pod) = q.pod.as_deref() {
-        // Only follow a running pod; a finished pod's stream ends at once.
-        let follow = b.pod_running(&q.namespace, pod).await;
-        b.logs(&q.namespace, pod, q.container, follow).await
+    let (res, follow) = if let Some(pod) = q.pod.as_deref() {
+        // Follow anything not yet in a terminal phase; a pod that's still starting
+        // (Pending/ContainerCreating) may produce its first log line, or crash, at
+        // any moment, so it needs to be watched just like a Running one.
+        let follow = b.pod_active(&q.namespace, pod).await;
+        (b.logs(&q.namespace, pod, q.container, follow).await, follow)
     } else if let (Some(key), Some(name)) = (q.key.as_deref(), q.name.as_deref()) {
-        b.logs_workload(key, &q.namespace, name, true).await
+        (b.logs_workload(key, &q.namespace, name, true).await, true)
     } else {
         return (StatusCode::BAD_REQUEST, "logs: need pod, or key+name").into_response();
     };
@@ -376,9 +381,18 @@ pub async fn logs(State(state): State<AppState>, Query(q): Query<LogQuery>) -> R
             format!("[roder] failed to get logs: {e}")
         })),
     };
-    // After the log stream ends (e.g. a completed pod), emit an `eof` event so the
-    // browser closes the EventSource instead of auto-reconnecting and replaying.
     let lines = stream.map(|line| Ok::<_, Infallible>(SseEvent::default().data(line)));
+    if follow {
+        // Still following: the stream ending here (container not started yet, a
+        // dropped connection, ...) doesn't mean there will never be more output, so
+        // skip `eof` and let the browser's EventSource auto-reconnect and retry
+        // instead of going dark until the user manually refreshes.
+        return Sse::new(lines)
+            .keep_alive(KeepAlive::default())
+            .into_response();
+    }
+    // A one-shot fetch of a pod that has already finished for good: emit `eof` so
+    // the browser closes the EventSource instead of reconnecting and replaying.
     // Non-empty data: an SSE event with an empty data buffer is never dispatched.
     let eof = tokio_stream::once(Ok::<_, Infallible>(
         SseEvent::default().event("eof").data("1"),

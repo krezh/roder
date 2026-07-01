@@ -255,13 +255,6 @@ impl Backend {
             .unwrap_or_default())
     }
 
-    pub async fn kind_stats(
-        &self,
-        namespace: Option<&str>,
-    ) -> std::collections::HashMap<String, roder_core::KindStats> {
-        self.registry.kind_stats(namespace).await
-    }
-
     /// Look up a catalog entry by key. Returns an owned clone because the catalog
     /// is hot-swappable (the `ArcSwap` guard is only valid transiently).
     fn entry(&self, key: &str) -> Result<CatalogEntry, K8sError> {

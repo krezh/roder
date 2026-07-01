@@ -56,7 +56,6 @@ async fn main() {
         .route("/api/permissions", get(api::permissions))
         .route("/api/logs", get(api::logs))
         .route("/api/metrics", get(api::metrics_history))
-        .route("/api/catalog-stats", get(api::catalog_stats))
         .route("/api/alerts", get(api::alerts))
         .route("/api/action", post(api::action))
         .route("/api/exec", get(api::exec_ws))

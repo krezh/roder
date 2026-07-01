@@ -279,13 +279,6 @@ pub struct HealthRollup {
     pub failing: u32,
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct KindStats {
-    pub count: u32,
-    pub errors: u32,
-    pub warnings: u32,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FiringAlert {
     pub fingerprint: String,

@@ -146,16 +146,6 @@
   .cat-favorites {
     .cat-label { color: var(--accent); }
   }
-  .kind-err,
-  .kind-warn {
-    flex: 0 0 auto;
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    margin-left: 4px;
-  }
-  .kind-err { background: var(--error); }
-  .kind-warn { background: var(--warn); }
   .sidebar-sep {
     border: none;
     border-top: 1px solid var(--border);

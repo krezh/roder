@@ -430,19 +430,6 @@ pub async fn metrics_history(
     }
 }
 
-#[derive(Deserialize)]
-pub struct CatalogStatsQuery {
-    namespace: Option<String>,
-}
-
-pub async fn catalog_stats(
-    State(state): State<AppState>,
-    Query(q): Query<CatalogStatsQuery>,
-) -> Response {
-    let b = backend_or_return!(state);
-    Json(b.kind_stats(ns_filter(&q.namespace)).await).into_response()
-}
-
 // ---- pod exec (WebSocket terminal) ---------------------------------------
 
 #[derive(Deserialize)]

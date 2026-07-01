@@ -1,24 +1,22 @@
 //! Left navigation: the resource catalog grouped by category with collapsible categories.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use leptos::prelude::*;
-use roder_core::{Category, KindStats, ResourceKind};
+use roder_core::{Category, ResourceKind};
 
 use crate::app::state::{Catalog, NavOpen, PaneConfig, WorkspaceConf};
 use crate::data;
 
-/// Render a single kind entry `<li>` with navigation, context-menu, count badge, and status dot.
+/// Render a single kind entry `<li>` with navigation and context-menu.
 fn kind_li(
     k: ResourceKind,
     selected_kind: RwSignal<Option<ResourceKind>>,
     nav_open: RwSignal<bool>,
     kind_ctx: RwSignal<Option<(ResourceKind, i32, i32)>>,
-    stats: RwSignal<HashMap<String, KindStats>>,
 ) -> impl IntoView {
     let k2 = k.clone();
     let k3 = k.clone();
-    let key = k.key.clone();
     let kind_name = k.kind.clone();
 
     let active = move || {
@@ -60,15 +58,6 @@ fn kind_li(
     view! {
         <li class="kind" class:active=active on:click=on_click on:contextmenu=on_ctx>
             {kind_name}
-            {move || stats.with(|m| m.get(&key).copied()).and_then(|s| {
-                if s.errors > 0 {
-                    Some(view! { <span class="kind-err" title=format!("{} error(s)", s.errors)></span> }.into_any())
-                } else if s.warnings > 0 {
-                    Some(view! { <span class="kind-warn" title=format!("{} warning(s)", s.warnings)></span> }.into_any())
-                } else {
-                    None
-                }
-            })}
         </li>
     }
 }
@@ -95,33 +84,6 @@ pub(crate) fn Sidebar() -> impl IntoView {
             data::storage_set("roder.pinned-kinds", &json);
         }
     });
-
-    // --- Kind stats (count badges + error/warn indicators), refreshed every 30 s ---
-    let stats: RwSignal<HashMap<String, KindStats>> = RwSignal::new(HashMap::new());
-    #[cfg(target_arch = "wasm32")]
-    {
-        let selected_ns = expect_context::<RwSignal<Option<String>>>();
-        Effect::new(move |_| {
-            set_interval(
-                move || {
-                    let ns = selected_ns.get_untracked();
-                    leptos::task::spawn_local(async move {
-                        let url = match ns.as_deref() {
-                            Some(ns) if !ns.is_empty() => {
-                                format!("/api/catalog-stats?namespace={}", data::percent_encode(ns))
-                            }
-                            _ => "/api/catalog-stats".to_string(),
-                        };
-                        if let Ok(map) = data::fetch_json::<HashMap<String, KindStats>>(&url).await
-                        {
-                            stats.set(map);
-                        }
-                    });
-                },
-                std::time::Duration::from_secs(30),
-            );
-        });
-    }
 
     // --- Category open/closed state ---
     let open_cats = RwSignal::new(
@@ -177,7 +139,7 @@ pub(crate) fn Sidebar() -> impl IntoView {
                     let n = pins.len();
                     let items = pins
                         .into_iter()
-                        .map(|k| kind_li(k, selected_kind, nav_open, kind_ctx, stats))
+                        .map(|k| kind_li(k, selected_kind, nav_open, kind_ctx))
                         .collect_view();
                     view! {
                         <div class="cat cat-favorites open">
@@ -210,7 +172,7 @@ pub(crate) fn Sidebar() -> impl IntoView {
                     let cat_click = cat.clone();
                     let items = kinds
                         .into_iter()
-                        .map(|k| kind_li(k, selected_kind, nav_open, kind_ctx, stats))
+                        .map(|k| kind_li(k, selected_kind, nav_open, kind_ctx))
                         .collect_view();
                     let is_open = move || open_cats.get().contains(&cat_open);
                     out.push(view! {

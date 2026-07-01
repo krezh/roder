@@ -206,7 +206,7 @@ pub(crate) fn RowDetail(target: DetailTarget) -> impl IntoView {
         }
         leptos::task::spawn_local(async move {
             match data::post_action(&body).await {
-                Ok(()) => {
+                Ok(_) => {
                     status.set(Some(Ok(format!("{action} ✓"))));
                     if action == "delete" {
                         detail.set(None);

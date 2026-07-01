@@ -110,7 +110,7 @@ pub async fn probe_error(_url: String) -> String {
 // ---- POST (mutations) -----------------------------------------------------
 
 #[cfg(target_arch = "wasm32")]
-pub async fn post_action(body: &serde_json::Value) -> Result<(), String> {
+pub async fn post_action(body: &serde_json::Value) -> Result<String, String> {
     use gloo_net::http::Request;
     let resp = Request::post("/api/action")
         .json(body)
@@ -119,7 +119,7 @@ pub async fn post_action(body: &serde_json::Value) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
     if resp.ok() {
-        Ok(())
+        Ok(resp.text().await.unwrap_or_default())
     } else {
         redirect_to_login_if_unauthorized(resp.status());
         Err(resp.text().await.unwrap_or_else(|_| resp.status_text()))
@@ -127,7 +127,7 @@ pub async fn post_action(body: &serde_json::Value) -> Result<(), String> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub async fn post_action(_body: &serde_json::Value) -> Result<(), String> {
+pub async fn post_action(_body: &serde_json::Value) -> Result<String, String> {
     Err("not available on the server".to_string())
 }
 

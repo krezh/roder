@@ -32,7 +32,8 @@
 
 .palette-btn { @extend %chip-btn; }
 
-.sweep-btn {
+// Chip button with a hover tooltip anchored below it (Sweep, Sync).
+%tooltip-chip-btn {
   @extend %chip-btn;
   position: relative;
   .tooltip {
@@ -44,6 +45,10 @@
   }
   &:hover .tooltip { display: block; }
 }
+
+.sweep-btn { @extend %tooltip-chip-btn; }
+
+.sync-btn { @extend %tooltip-chip-btn; }
 
 .errfilter {
   @extend %chip-btn;

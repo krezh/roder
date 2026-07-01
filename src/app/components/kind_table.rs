@@ -8,6 +8,7 @@ use crate::app::events::fire_action;
 use crate::app::events::RowMap;
 use crate::app::hooks::{table_window, use_sse_subscription, use_table_state};
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
+use crate::app::overlays::toast::{show_toast, Toast, ToastKind};
 use crate::app::state::{
     open_logs, CtxMenu, DetailTarget, FilterFocus, LogPods, LogTarget, OnlyProblems,
     ResourceFilter, SortKey, TableRows, TableSelected, Tick,
@@ -90,6 +91,7 @@ pub(crate) fn KindTable(
     let resource_filter = expect_context::<ResourceFilter>().0;
     let log_pods = expect_context::<LogPods>().0;
     let confirm = expect_context::<RwSignal<Option<Confirm>>>();
+    let toast = expect_context::<RwSignal<Option<Toast>>>();
     let selected_ns_ctx = use_context::<RwSignal<Option<String>>>();
 
     let t = use_table_state();
@@ -121,6 +123,7 @@ pub(crate) fn KindTable(
         let sel_kb = t.selected;
         let detail_kb = detail;
         let log_pods_kb = log_pods;
+        let toast_kb = toast;
         Effect::new(move |_| {
             let h = window_event_listener(leptos::ev::keydown, move |e| {
                 let key = e.key();
@@ -136,9 +139,11 @@ pub(crate) fn KindTable(
                         });
                         if !names.is_empty() {
                             crate::app::util::clipboard::copy_to_clipboard(&names.join("\n"));
+                            show_toast(toast_kb, "Copied to clipboard", ToastKind::Ok);
                         }
                     } else if let Some(t) = detail_kb.with_untracked(|d| d.clone()) {
                         crate::app::util::clipboard::copy_to_clipboard(&t.name);
+                        show_toast(toast_kb, "Copied to clipboard", ToastKind::Ok);
                     }
                 } else if key == "Enter" && !data::is_text_input_focused() {
                     let uids = sel_kb.with_untracked(|s| s.clone());
@@ -326,18 +331,17 @@ pub(crate) fn KindTable(
     let do_bulk = move |action: &'static str| {
         let key = key_sv.get_value();
         let uids = selected.get_untracked();
-        rows.with_untracked(|v| {
-            for r in v.values().filter(|r| uids.contains(&r.uid)) {
-                fire_action(
-                    action,
-                    &DetailTarget {
-                        key: key.clone(),
-                        namespace: r.namespace.clone(),
-                        name: r.name.clone(),
-                    },
-                );
-            }
+        let targets: Vec<DetailTarget> = rows.with_untracked(|v| {
+            v.values()
+                .filter(|r| uids.contains(&r.uid))
+                .map(|r| DetailTarget {
+                    key: key.clone(),
+                    namespace: r.namespace.clone(),
+                    name: r.name.clone(),
+                })
+                .collect()
         });
+        fire_action(toast, action, &targets);
         selected.set(std::collections::BTreeSet::new());
     };
 

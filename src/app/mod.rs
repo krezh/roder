@@ -32,6 +32,7 @@ use overlays::exec::ExecWindow;
 use overlays::ns_palette::NsPalette;
 use overlays::palette::CommandPalette;
 use overlays::shortcuts::ShortcutsHelp;
+use overlays::toast::{Toast, ToastView};
 use overlays::AlertsPanel;
 use state::{
     AlertsData, AlertsOpen, Catalog, ConnectionState, CtxMenu, ExecOpen, ExecTarget, FilterFocus,
@@ -81,6 +82,7 @@ pub fn App() -> impl IntoView {
     let tick = RwSignal::new(0u32);
     let only_problems = RwSignal::new(false);
     let confirm = RwSignal::new(None::<Confirm>);
+    let toast = RwSignal::new(None::<Toast>);
     let pod_modal = RwSignal::new(None::<DetailTarget>);
     provide_context(PodModalTarget(pod_modal));
     let exec_open = RwSignal::new(None::<ExecTarget>);
@@ -108,6 +110,7 @@ pub fn App() -> impl IntoView {
     provide_context(Tick(tick));
     provide_context(OnlyProblems(only_problems));
     provide_context(confirm);
+    provide_context(toast);
     provide_context(selected_kind);
     provide_context(selected_ns);
     provide_context(detail);
@@ -364,6 +367,7 @@ pub fn App() -> impl IntoView {
                 <ExecWindow />
                 <ShortcutsHelp />
                 <AlertsPanel />
+                <ToastView />
             </div>
             <TooltipLayer />
         </Router>

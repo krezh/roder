@@ -5,6 +5,9 @@ use std::collections::HashMap;
 use leptos::prelude::*;
 use roder_core::{ResourceRow, WatchEvent};
 
+use crate::app::overlays::toast::{
+    show_toast, show_toast_detail, show_toast_full, show_toast_list, Toast, ToastKind,
+};
 use crate::app::state::DetailTarget;
 use crate::data;
 
@@ -13,24 +16,118 @@ pub(crate) type UidSet = RwSignal<std::collections::BTreeSet<String>>;
 /// each fetch themselves from this one signal).
 pub(crate) type RowMap = RwSignal<HashMap<String, ResourceRow>>;
 
-/// Fire-and-forget mutation (context menu / bulk actions).
-pub(crate) fn fire_action(action: &'static str, t: &DetailTarget) {
-    fire_action_with(action, t, serde_json::Value::Null);
+/// Past-tense verb shown in the toast for each action (the toast icon already
+/// conveys success/failure, so these must not embed their own ✓/✕).
+fn action_label(action: &str) -> &str {
+    match action {
+        "delete" => "Deleted",
+        "restart" => "Restarted",
+        "scale" => "Scaled",
+        "flux-reconcile" => "Reconciled",
+        "flux-reconcile-with-source" => "Reconciled (with source)",
+        "flux-force" => "Forced",
+        "flux-reset" => "Reset",
+        "flux-suspend" => "Suspended",
+        "flux-resume" => "Resumed",
+        "eso-refresh" => "Refreshed",
+        "cronjob-trigger" => "Triggered",
+        other => other,
+    }
 }
 
-/// Like [`fire_action`] but merges extra fields into the request body (e.g. `{"replicas": 3}`).
-pub(crate) fn fire_action_with(action: &'static str, t: &DetailTarget, extra: serde_json::Value) {
-    let mut body = serde_json::json!({
-        "action": action, "key": t.key, "namespace": t.namespace, "name": t.name,
-    });
-    if let (Some(o), Some(ex)) = (body.as_object_mut(), extra.as_object()) {
-        for (k, v) in ex {
-            o.insert(k.clone(), v.clone());
-        }
+/// Summarizes a target count for the toast title; the individual names (when
+/// there's more than one) are rendered separately as a list, not joined inline.
+fn describe_names(names: &[String]) -> String {
+    match names {
+        [] => "0 resources".to_string(),
+        [n] => n.clone(),
+        _ => format!("{} resources", names.len()),
     }
-    leptos::task::spawn_local(async move {
-        let _ = data::post_action(&body).await;
-    });
+}
+
+/// Fire a mutation against every target concurrently, then report one aggregated
+/// toast once they've all landed (rather than one per row on bulk actions).
+pub(crate) fn fire_action(
+    toast: RwSignal<Option<Toast>>,
+    action: &'static str,
+    targets: &[DetailTarget],
+) {
+    fire_action_with(toast, action, targets, serde_json::Value::Null);
+}
+
+/// Like [`fire_action`] but merges extra fields into each request body (e.g. `{"replicas": 3}`).
+pub(crate) fn fire_action_with(
+    toast: RwSignal<Option<Toast>>,
+    action: &'static str,
+    targets: &[DetailTarget],
+    extra: serde_json::Value,
+) {
+    let total = targets.len();
+    if total == 0 {
+        return;
+    }
+    let all_names: Vec<String> = targets.iter().map(|t| t.name.clone()).collect();
+    let replicas = extra.get("replicas").and_then(|v| v.as_i64());
+
+    // Shared by every target's task (wasm is single-threaded, so Rc/RefCell is fine)
+    // so the last one to finish can report a single aggregated toast.
+    let remaining = std::rc::Rc::new(std::cell::Cell::new(total));
+    let failed_names = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+    let last_err = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+
+    for t in targets {
+        let mut body = serde_json::json!({
+            "action": action, "key": t.key, "namespace": t.namespace, "name": t.name,
+        });
+        if let (Some(o), Some(ex)) = (body.as_object_mut(), extra.as_object()) {
+            for (k, v) in ex {
+                o.insert(k.clone(), v.clone());
+            }
+        }
+        let name = t.name.clone();
+        let remaining = remaining.clone();
+        let failed_names = failed_names.clone();
+        let last_err = last_err.clone();
+        let all_names = all_names.clone();
+        leptos::task::spawn_local(async move {
+            if let Err(e) = data::post_action(&body).await {
+                failed_names.borrow_mut().push(name);
+                *last_err.borrow_mut() = e;
+            }
+            remaining.set(remaining.get() - 1);
+            if remaining.get() == 0 {
+                let label = action_label(action);
+                let failed = failed_names.borrow();
+                if failed.is_empty() {
+                    let target_desc = describe_names(&all_names);
+                    let msg = match replicas {
+                        Some(n) => format!("{label} {target_desc} to {n}"),
+                        None => format!("{label} {target_desc}"),
+                    };
+                    if all_names.len() > 1 {
+                        show_toast_list(toast, msg, all_names.clone(), ToastKind::Ok);
+                    } else {
+                        show_toast(toast, msg, ToastKind::Ok);
+                    }
+                } else if failed.len() == total {
+                    show_toast_detail(
+                        toast,
+                        format!("{label} failed"),
+                        Some(last_err.borrow().clone()),
+                        ToastKind::Err,
+                    );
+                } else {
+                    let title = format!("{label} failed for {}", describe_names(&failed));
+                    let msg = last_err.borrow().clone();
+                    if failed.len() > 1 {
+                        show_toast_full(toast, title, failed.clone(), Some(msg), ToastKind::Err);
+                    } else {
+                        show_toast_detail(toast, title, Some(msg), ToastKind::Err);
+                    }
+                }
+            }
+        });
+    }
 }
 
 /// Shift-click range selection: select every row between the anchor (last

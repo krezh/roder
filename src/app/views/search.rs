@@ -12,6 +12,7 @@ use crate::app::components::table_row::{NameCell, ResourceRow as ResourceRowView
 use crate::app::events::{apply_event, fire_action};
 use crate::app::hooks::{table_window, use_table_state, Coalescer};
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
+use crate::app::overlays::toast::Toast;
 use crate::app::state::{
     open_logs, ConnectionState, CtxMenu, DetailTarget, LogPods, LogTarget, MultiKindSearch,
     OnlyProblems, ResourceFilter, SortKey, TableRows, TableSelected, Tick,
@@ -141,6 +142,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
     let only_problems = expect_context::<OnlyProblems>().0;
     let resource_filter = expect_context::<ResourceFilter>().0;
     let confirm = expect_context::<RwSignal<Option<Confirm>>>();
+    let toast = expect_context::<RwSignal<Option<Toast>>>();
 
     let t = use_table_state();
 
@@ -477,18 +479,18 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
     // Bulk action helper
     let do_bulk = move |action: &'static str| {
         let uids = selected.get_untracked();
-        merged_rows.with_untracked(|m| {
-            for uid in &uids {
-                if let Some(mr) = m.get(uid) {
-                    let t = DetailTarget {
+        let targets: Vec<DetailTarget> = merged_rows.with_untracked(|m| {
+            uids.iter()
+                .filter_map(|uid| {
+                    m.get(uid).map(|mr| DetailTarget {
                         key: mr.kind.key.clone(),
                         namespace: mr.row.namespace.clone(),
                         name: mr.row.name.clone(),
-                    };
-                    fire_action(action, &t);
-                }
-            }
+                    })
+                })
+                .collect()
         });
+        fire_action(toast, action, &targets);
         selected.set(std::collections::BTreeSet::new());
     };
 

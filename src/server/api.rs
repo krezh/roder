@@ -303,7 +303,17 @@ pub async fn action(
             None => return (StatusCode::BAD_REQUEST, "missing yaml").into_response(),
         }
     } else if req.action == "sanitize" {
-        b.sanitize(req.namespace.clone()).await.map(|_| ())
+        return match b.sanitize(req.namespace.clone()).await {
+            Ok(summary) => {
+                (StatusCode::OK, serde_json::to_string(&summary).unwrap()).into_response()
+            }
+            Err(e) => bad_gateway(e),
+        };
+    } else if req.action == "flux-reconcile-all" {
+        return match b.flux_reconcile_all(ns).await {
+            Ok(n) => (StatusCode::OK, n.to_string()).into_response(),
+            Err(e) => bad_gateway(e),
+        };
     } else {
         let (Some(key), Some(name)) = (req.key.as_deref(), req.name.as_deref()) else {
             return (StatusCode::BAD_REQUEST, "missing key or name").into_response();

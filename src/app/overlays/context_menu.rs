@@ -5,6 +5,7 @@ use roder_core::{ResourceKind, RowStatus};
 
 use crate::app::events::{fire_action, fire_action_with};
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
+use crate::app::overlays::toast::{show_toast, show_toast_detail, Toast, ToastKind};
 use crate::app::state::{
     open_logs, Catalog, CtxMenu, DetailTarget, ExecOpen, ExecTarget, LogPods, LogTarget, TableRows,
     TableSelected,
@@ -26,6 +27,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
     // Provided at App level; ResourceView fills in the Option on mount.
     let table_selected = expect_context::<TableSelected>().0;
     let table_rows = expect_context::<TableRows>().0;
+    let toast = expect_context::<RwSignal<Option<Toast>>>();
 
     let (snapshot, closing, do_close) = super::use_option_overlay(ctx);
 
@@ -117,14 +119,18 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             };
             let copy = {
                 let names: Vec<String> = targets.iter().map(|t| t.name.clone()).collect();
-                move |_| { copy_to_clipboard(&names.join("\n")); do_close(); }
+                move |_| {
+                    copy_to_clipboard(&names.join("\n"));
+                    show_toast(toast, "Copied to clipboard", ToastKind::Ok);
+                    do_close();
+                }
             };
             // Bulk-aware single-action closures — each captures its own clone of targets.
             macro_rules! bulk_act {
                 ($action:literal) => {{
                     let ts = targets.clone();
                     move |_| {
-                        for t in &ts { fire_action($action, t); }
+                        fire_action(toast, $action, &ts);
                         if let Some(sel) = table_selected.get_value() { sel.set(Default::default()); }
                         do_close();
                     }
@@ -147,7 +153,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                     let label = if n == 1 { "Delete this resource?".to_string() }
                                 else { format!("Delete {n} resources?") };
                     ask_confirm(confirm, label, move || {
-                        for t in &ts { fire_action("delete", t); }
+                        fire_action(toast, "delete", &ts);
                         if let Some(sel) = table_selected.get_value() { sel.set(Default::default()); }
                     });
                     do_close();
@@ -222,10 +228,11 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                                             }
                                         }
                                     }
-                                    Err(_) => {
+                                    Err(e) => {
                                         if still_pending() {
                                             exec_open.set(None);
                                         }
+                                        show_toast_detail(toast, "Debug shell failed", Some(e), ToastKind::Err);
                                     }
                                 }
                             });
@@ -249,7 +256,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                                         }
                                     } />
                                 <button on:click=move |_| {
-                                    fire_action_with("scale", &t, serde_json::json!({ "replicas": scale_n.get_untracked() }));
+                                    fire_action_with(toast, "scale", std::slice::from_ref(&t), serde_json::json!({ "replicas": scale_n.get_untracked() }));
                                     do_close();
                                 }>"→"</button>
                             </div>

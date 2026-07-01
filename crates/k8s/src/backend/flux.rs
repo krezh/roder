@@ -21,15 +21,25 @@ impl Backend {
             .await
     }
 
+    /// `flux reconcile [--force] [--reset]`: `force`/`reset` mirror the CLI
+    /// flags and can be combined in one call.
     pub async fn flux_reconcile(
         &self,
         key: &str,
         ns: Option<&str>,
         name: &str,
+        force: bool,
+        reset: bool,
     ) -> Result<(), K8sError> {
-        let patch = json!({ "metadata": { "annotations": {
-            "reconcile.fluxcd.io/requestedAt": now_rfc3339()
-        }}});
+        let ts = now_rfc3339();
+        let mut annotations = json!({ "reconcile.fluxcd.io/requestedAt": ts });
+        if force {
+            annotations["reconcile.fluxcd.io/forceAt"] = json!(ts);
+        }
+        if reset {
+            annotations["reconcile.fluxcd.io/resetAt"] = json!(ts);
+        }
+        let patch = json!({ "metadata": { "annotations": annotations }});
         self.merge_patch(key, ns, name, patch).await
     }
 
@@ -40,12 +50,7 @@ impl Backend {
         ns: Option<&str>,
         name: &str,
     ) -> Result<(), K8sError> {
-        let ts = now_rfc3339();
-        let patch = json!({ "metadata": { "annotations": {
-            "reconcile.fluxcd.io/requestedAt": ts,
-            "reconcile.fluxcd.io/forceAt": ts,
-        }}});
-        self.merge_patch(key, ns, name, patch).await
+        self.flux_reconcile(key, ns, name, true, false).await
     }
 
     /// `flux reconcile helmrelease --reset`: reset the failure count on a stuck HelmRelease.
@@ -55,12 +60,7 @@ impl Backend {
         ns: Option<&str>,
         name: &str,
     ) -> Result<(), K8sError> {
-        let ts = now_rfc3339();
-        let patch = json!({ "metadata": { "annotations": {
-            "reconcile.fluxcd.io/requestedAt": ts,
-            "reconcile.fluxcd.io/resetAt": ts,
-        }}});
-        self.merge_patch(key, ns, name, patch).await
+        self.flux_reconcile(key, ns, name, false, true).await
     }
 
     /// `flux reconcile <kind> --with-source`: reconcile the referenced source
@@ -71,6 +71,8 @@ impl Backend {
         key: &str,
         ns: Option<&str>,
         name: &str,
+        force: bool,
+        reset: bool,
     ) -> Result<(), K8sError> {
         let obj = self.dyn_api(key, ns)?.get(name).await.map_err(api_err)?;
         let data = serde_json::to_value(&obj).map_err(api_err)?;
@@ -81,9 +83,17 @@ impl Backend {
             .ok_or_else(|| K8sError::Api("resource has no sourceRef to reconcile".into()))?;
         let source_entry = self.entry_by_kind(&source.kind)?;
         let source_ns = source.namespace.as_deref().or(ns);
-        self.flux_reconcile(&source_entry.kind.key, source_ns, &source.name)
-            .await?;
-        self.flux_reconcile(key, ns, name).await
+        // force/reset are flags on the resource's own reconcile (matching
+        // `flux reconcile --with-source --force`), not the source's.
+        self.flux_reconcile(
+            &source_entry.kind.key,
+            source_ns,
+            &source.name,
+            false,
+            false,
+        )
+        .await?;
+        self.flux_reconcile(key, ns, name, force, reset).await
     }
 
     /// `flux reconcile <kind> --all`, for every Flux kind at once: annotate every

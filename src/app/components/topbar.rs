@@ -252,7 +252,7 @@ fn TopUsage() -> impl IntoView {
                         <span class="tu-stat tu-nodes"
                             class:tu-nodes-warn=move || !nodes_ok
                             on:click=go_nodes>
-                            <b>{ready}</b>"/"<b>{total}</b>" nodes"
+                            "Nodes " <b>{ready}</b>"/"<b>{total}</b>
                         </span>
                         <div class="tooltip usage-tip">
                             {nodes.into_iter().map(|n| {

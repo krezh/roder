@@ -250,6 +250,8 @@ pub struct ActionRequest {
     name: Option<String>,
     replicas: Option<i32>,
     yaml: Option<String>,
+    force: Option<bool>,
+    reset: Option<bool>,
 }
 
 /// Resolve the acting identity for the audit log.
@@ -324,8 +326,26 @@ pub async fn action(
             "restart" => b.rollout_restart(key, ns, name).await,
             "flux-suspend" => b.flux_suspend(key, ns, name, true).await,
             "flux-resume" => b.flux_suspend(key, ns, name, false).await,
-            "flux-reconcile" => b.flux_reconcile(key, ns, name).await,
-            "flux-reconcile-with-source" => b.flux_reconcile_with_source(key, ns, name).await,
+            "flux-reconcile" => {
+                b.flux_reconcile(
+                    key,
+                    ns,
+                    name,
+                    req.force.unwrap_or(false),
+                    req.reset.unwrap_or(false),
+                )
+                .await
+            }
+            "flux-reconcile-with-source" => {
+                b.flux_reconcile_with_source(
+                    key,
+                    ns,
+                    name,
+                    req.force.unwrap_or(false),
+                    req.reset.unwrap_or(false),
+                )
+                .await
+            }
             "flux-force" => b.flux_force(key, ns, name).await,
             "flux-reset" => b.flux_reset(key, ns, name).await,
             "eso-refresh" => b.eso_refresh(key, ns, name).await,

@@ -137,10 +137,26 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                 }};
             }
             let restart   = bulk_act!("restart");
-            let reconcile = bulk_act!("flux-reconcile");
-            let reconcile_src = bulk_act!("flux-reconcile-with-source");
-            let force     = bulk_act!("flux-force");
-            let reset     = bulk_act!("flux-reset");
+            let with_source_checked = RwSignal::new(false);
+            let force_checked = RwSignal::new(false);
+            let reset_checked = RwSignal::new(false);
+            let reconcile = {
+                let ts = targets.clone();
+                move |_| {
+                    let action = if with_source_checked.get_untracked() {
+                        "flux-reconcile-with-source"
+                    } else {
+                        "flux-reconcile"
+                    };
+                    let extra = serde_json::json!({
+                        "force": force_checked.get_untracked(),
+                        "reset": reset_checked.get_untracked(),
+                    });
+                    fire_action_with(toast, action, &ts, extra);
+                    if let Some(sel) = table_selected.get_value() { sel.set(Default::default()); }
+                    do_close();
+                }
+            };
             let suspend   = bulk_act!("flux-suspend");
             let resume    = bulk_act!("flux-resume");
             let refresh   = bulk_act!("eso-refresh");
@@ -264,12 +280,21 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                     })}
                     {is_cronjob.then(|| view! { <button class="ctx-item" on:click=trigger>"Trigger"</button> })}
                     {is_flux.then(|| view! {
-                        <button class="ctx-item" on:click=reconcile>"Reconcile"</button>
-                        {has_source_ref.then(|| view! { <button class="ctx-item" on:click=reconcile_src>"Reconcile w/ source"</button> })}
-                        {is_helmrelease.then(|| view! {
-                            <button class="ctx-item" on:click=force>"Force"</button>
-                            <button class="ctx-item" on:click=reset>"Reset"</button>
-                        })}
+                        <div class="ctx-item ctx-reconcile">
+                            <button class="ctx-reconcile-btn" on:click=reconcile>"Reconcile"</button>
+                            <span class="ctx-chips">
+                                {has_source_ref.then(|| view! {
+                                    <span class="ctx-chip" class:active=move || with_source_checked.get()
+                                        on:click=move |e: leptos::ev::MouseEvent| { e.stop_propagation(); with_source_checked.update(|v| *v = !*v); }>"src"</span>
+                                })}
+                                {is_helmrelease.then(|| view! {
+                                    <span class="ctx-chip" class:active=move || force_checked.get()
+                                        on:click=move |e: leptos::ev::MouseEvent| { e.stop_propagation(); force_checked.update(|v| *v = !*v); }>"force"</span>
+                                    <span class="ctx-chip" class:active=move || reset_checked.get()
+                                        on:click=move |e: leptos::ev::MouseEvent| { e.stop_propagation(); reset_checked.update(|v| *v = !*v); }>"reset"</span>
+                                })}
+                            </span>
+                        </div>
                         {show_suspend.then(|| view! { <button class="ctx-item" on:click=suspend>"Suspend"</button> })}
                         {show_resume.then(|| view! { <button class="ctx-item" on:click=resume>"Resume"</button> })}
                     })}

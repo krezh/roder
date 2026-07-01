@@ -136,6 +136,7 @@
     border-left: 2px solid transparent;
     &:hover {
       background: color-mix(in srgb, var(--accent) 12%, transparent);
+      color: var(--accent);
     }
     &.active {
       background: var(--panel-2);

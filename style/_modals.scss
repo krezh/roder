@@ -393,7 +393,7 @@
   gap: 0.4rem;
   align-items: baseline;
   &:hover {
-    background: var(--panel-2);
+    color: var(--accent);
   }
   &.danger:hover {
     color: var(--error);
@@ -405,12 +405,52 @@
     padding-bottom: 0.2rem;
     border-bottom: 1px solid var(--border);
     margin-bottom: 0.15rem;
-    &:hover { background: none; }
+    &:hover { color: var(--muted); }
   }
   .ctx-sub {
     color: var(--muted);
     font-size: 0.78rem;
     margin-left: auto;
+  }
+}
+.ctx-reconcile {
+  align-items: center;
+  gap: 0.3rem;
+  cursor: default;
+}
+.ctx-reconcile-btn {
+  background: none;
+  border: none;
+  color: var(--fg);
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+  &:hover {
+    color: var(--accent);
+  }
+}
+.ctx-chips {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: auto;
+}
+.ctx-chip {
+  font-size: 0.68rem;
+  line-height: 1;
+  padding: 0.2rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  cursor: pointer;
+  &:hover {
+    border-color: var(--accent);
+    color: var(--fg);
+  }
+  &.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--bg);
   }
 }
 .ctx-scale {

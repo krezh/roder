@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- build ----------------------------------------------------------------
-FROM ghcr.io/rust-lang/rust:1.96.0-trixie@sha256:6df234c1eb92b0545468fab8c18fc5f9adfb994e7d4f67d81d45fe2fcabf5657 AS build
+FROM ghcr.io/rust-lang/rust:1.96.1-trixie@sha256:58fe97504a0e4cbba5d85599619a589923d3e779472a6fb0840d58d1c4ba99d7 AS build
 
 # cargo-leptos + the wasm target.
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \

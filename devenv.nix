@@ -10,6 +10,26 @@
   ];
 
   claude.code.enable = true;
+  # Lets Claude drive the running `devenv up` dev server (localhost:8080) in a
+  # real headless browser instead of guessing from source — click through UI
+  # changes, take screenshots, read console/network errors.
+  # Setting mcpServers.* replaces the module's whole default (which only
+  # includes mcp.devenv.sh), so it's re-declared here alongside playwright.
+  claude.code.mcpServers = {
+    "mcp.devenv.sh" = {
+      type = "http";
+      url = "https://mcp.devenv.sh";
+    };
+    playwright = {
+      type = "stdio";
+      command = "${pkgs.playwright-mcp}/bin/playwright-mcp";
+      args = [
+        "--headless"
+        "--isolated"
+        "--allowed-hosts=localhost:8080"
+      ];
+    };
+  };
 
   languages.rust = {
     enable = true;

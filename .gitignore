@@ -16,6 +16,7 @@ node_modules
 .devenv*
 devenv.local.nix
 devenv.local.yaml
+.playwright-mcp
 
 # direnv
 .direnv

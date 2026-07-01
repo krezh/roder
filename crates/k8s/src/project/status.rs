@@ -17,8 +17,7 @@ pub(crate) fn generic_status(data: &Value) -> RowStatus {
         Some("Running" | "Active" | "Bound" | "Succeeded" | "Ready") => RowStatus::Ok,
         Some("Pending") => RowStatus::Pending,
         Some("Failed" | "Lost") => RowStatus::Error,
-        Some(_) => RowStatus::Unknown,
-        None => RowStatus::Unknown,
+        _ => RowStatus::Unknown,
     }
 }
 

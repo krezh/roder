@@ -597,24 +597,14 @@ fn level_word(s: &str) -> Option<&'static str> {
         .split(|c: char| !c.is_ascii_alphabetic())
         .next()
         .unwrap_or("");
-    match word {
-        "error" | "ERROR" | "Error" | "fatal" | "FATAL" | "Fatal" | "panic" | "PANIC" | "Panic"
-        | "crit" | "CRIT" | "Crit" | "critical" | "CRITICAL" | "Critical" => Some("error"),
-
-        "warn" | "WARN" | "Warn" | "warning" | "WARNING" | "Warning" => Some("warn"),
-
-        "info" | "INFO" | "Info" => Some("info"),
-
-        "debug" | "DEBUG" | "Debug" | "trace" | "TRACE" | "Trace" | "dbg" | "DBG" => Some("debug"),
-
-        _ if !word.is_empty() => match word.to_ascii_lowercase().as_str() {
-            "error" | "fatal" | "panic" | "crit" | "critical" => Some("error"),
-            "warn" | "warning" => Some("warn"),
-            "info" => Some("info"),
-            "debug" | "trace" | "dbg" => Some("debug"),
-            _ => None,
-        },
-
+    if word.is_empty() {
+        return None;
+    }
+    match word.to_ascii_lowercase().as_str() {
+        "error" | "fatal" | "panic" | "crit" | "critical" => Some("error"),
+        "warn" | "warning" => Some("warn"),
+        "info" => Some("info"),
+        "debug" | "trace" | "dbg" => Some("debug"),
         _ => None,
     }
 }

@@ -116,16 +116,10 @@ fn classify(group: &str, kind: &str) -> Category {
     if group.is_empty() {
         return match kind {
             "Pod" | "ReplicationController" => Category::Workloads,
-            "ConfigMap" | "Secret" | "ResourceQuota" | "LimitRange" | "ServiceAccount" => {
-                if kind == "ServiceAccount" {
-                    Category::Rbac
-                } else {
-                    Category::Config
-                }
-            }
+            "ConfigMap" | "Secret" | "ResourceQuota" | "LimitRange" => Category::Config,
+            "ServiceAccount" => Category::Rbac,
             "Service" | "Endpoints" => Category::Network,
             "PersistentVolumeClaim" | "PersistentVolume" => Category::Storage,
-            "Node" | "Namespace" | "Event" | "ComponentStatus" => Category::Cluster,
             _ => Category::Cluster,
         };
     }
@@ -138,9 +132,10 @@ fn classify(group: &str, kind: &str) -> Category {
 ///
 /// Examples: `monitoring.coreos.com` → `coreos.com`, `kyverno.io` → `kyverno.io`
 fn group_base_domain(group: &str) -> String {
-    let parts: Vec<&str> = group.split('.').collect();
-    match parts.len() {
-        0 | 1 => group.to_string(),
-        n => format!("{}.{}", parts[n - 2], parts[n - 1]),
+    if let Some((prefix, last)) = group.rsplit_once('.') {
+        if let Some((_, second)) = prefix.rsplit_once('.') {
+            return format!("{second}.{last}");
+        }
     }
+    group.to_string()
 }

@@ -192,8 +192,7 @@ impl InformerRegistry {
         };
 
         let columns = self.columns.load();
-        let columns_map: &ColumnMap = &columns;
-        let crd = printer_columns::cols_for(columns_map, group, kind).to_vec();
+        let crd = printer_columns::cols_for(&columns, group, kind).to_vec();
         let mut active = self.active.lock().await;
         let entry = active.entry(key.clone()).or_insert_with(|| {
             start_informer(
@@ -254,26 +253,30 @@ impl InformerRegistry {
         namespace: Option<&str>,
         name: &str,
     ) -> Option<DynamicObject> {
-        let active = self.active.lock().await;
-        for entry in active.values() {
-            if entry.resource_key != resource_key {
-                continue;
-            }
-            // A namespace-scoped informer can't hold an object from another namespace.
-            if let (Some(en), Some(want)) = (entry.namespace.as_deref(), namespace) {
-                if en != want {
-                    continue;
+        // Clone the Arc handles under the lock so we can drop the Mutex before
+        // awaiting the inner RwLocks — holding a Mutex across an async await
+        // blocks every other subscriber, reaper, and refresh task.
+        let (by_name, objects) = {
+            let active = self.active.lock().await;
+            let entry = active.values().find(|e| {
+                if e.resource_key != resource_key {
+                    return false;
                 }
-            }
-            // O(1) name lookup using the secondary index.
-            let lookup = (namespace.map(|s| s.to_string()), name.to_string());
-            if let Some(uid) = entry.by_name.read().await.get(&lookup).cloned() {
-                if let Some(obj) = entry.objects.read().await.get(&uid).cloned() {
-                    return Some(obj);
+                // A namespace-scoped informer can't hold an object from another namespace.
+                if let (Some(en), Some(want)) = (e.namespace.as_deref(), namespace) {
+                    if en != want {
+                        return false;
+                    }
                 }
-            }
-        }
-        None
+                true
+            })?;
+            (entry.by_name.clone(), entry.objects.clone())
+        };
+        // O(1) name lookup using the secondary index.
+        let lookup = (namespace.map(|s| s.to_string()), name.to_string());
+        let uid = by_name.read().await.get(&lookup).cloned()?;
+        let objs = objects.read().await;
+        objs.get(&uid).cloned()
     }
 
     /// Per-kind row counts and error/warn tallies for all currently-active informers.
@@ -654,17 +657,10 @@ fn enrichments(
     pod_cache: &UsageWithTrend,
     pvc_cache: &PvcUsageMap,
 ) -> (Option<UsageEntry>, Option<PvcUsage>) {
-    let usage = if is_pod {
-        usage_for(obj, pod_cache)
-    } else {
-        None
-    };
-    let pvc = if is_pvc {
-        pvc_usage_for(obj, pvc_cache)
-    } else {
-        None
-    };
-    (usage, pvc)
+    (
+        is_pod.then(|| usage_for(obj, pod_cache)).flatten(),
+        is_pvc.then(|| pvc_usage_for(obj, pvc_cache)).flatten(),
+    )
 }
 
 /// Background task: refresh pod usage from metrics-server and re-broadcast changed

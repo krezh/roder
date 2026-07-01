@@ -127,7 +127,7 @@ pub async fn watch(State(state): State<AppState>, Query(q): Query<WatchQuery>) -
         columns: (**columns.load()).clone(),
         rows: handle.snapshot,
     };
-    let init = tokio_stream::once(to_event(&snapshot));
+    let init = tokio_stream::once(sse_event(&snapshot));
     // On broadcast lag (slow consumer), re-read the current state and send a
     // fresh Snapshot so the client gets a consistent view instead of silently
     // dropping deltas.
@@ -136,7 +136,7 @@ pub async fn watch(State(state): State<AppState>, Query(q): Query<WatchQuery>) -
         let columns = columns.clone();
         async move {
             match res {
-                Ok(ev) => to_event(&ev),
+                Ok(ev) => sse_event(&ev),
                 Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(_)) => {
                     // Consumer fell behind — send a fresh snapshot so the client
                     // gets a consistent view instead of silently dropping deltas.
@@ -145,7 +145,7 @@ pub async fn watch(State(state): State<AppState>, Query(q): Query<WatchQuery>) -
                         columns: (**columns.load()).clone(),
                         rows: current.values().cloned().collect(),
                     };
-                    to_event(&resync)
+                    sse_event(&resync)
                 }
             }
         }
@@ -204,7 +204,7 @@ pub async fn watch_multi(
             columns: (**columns.load()).clone(),
             rows: handle.snapshot,
         };
-        let init = tokio_stream::once(to_multi_event(&MultiWatchEvent {
+        let init = tokio_stream::once(sse_event(&MultiWatchEvent {
             key: key.clone(),
             event: snapshot,
         }));
@@ -223,7 +223,7 @@ pub async fn watch_multi(
                         }
                     }
                 };
-                to_multi_event(&MultiWatchEvent { key, event: ev })
+                sse_event(&MultiWatchEvent { key, event: ev })
             }
         });
         streams.push(Box::pin(init.chain(live)));
@@ -234,7 +234,7 @@ pub async fn watch_multi(
         .into_response()
 }
 
-fn to_multi_event(ev: &MultiWatchEvent) -> Result<SseEvent, Infallible> {
+fn sse_event<T: serde::Serialize>(ev: &T) -> Result<SseEvent, Infallible> {
     Ok(SseEvent::default()
         .json_data(ev)
         .unwrap_or_else(|_| SseEvent::default().data("{}")))
@@ -416,14 +416,7 @@ pub async fn catalog_stats(
     Query(q): Query<CatalogStatsQuery>,
 ) -> Response {
     let b = backend_or_return!(state);
-    let ns = q.namespace.as_deref().filter(|s| !s.is_empty());
-    Json(b.kind_stats(ns).await).into_response()
-}
-
-fn to_event(ev: &WatchEvent) -> Result<SseEvent, Infallible> {
-    Ok(SseEvent::default()
-        .json_data(ev)
-        .unwrap_or_else(|_| SseEvent::default().data("{}")))
+    Json(b.kind_stats(ns_filter(&q.namespace)).await).into_response()
 }
 
 // ---- pod exec (WebSocket terminal) ---------------------------------------

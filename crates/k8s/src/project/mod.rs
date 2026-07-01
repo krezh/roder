@@ -209,13 +209,6 @@ fn explicit_view(group: &str, kind: &str) -> Option<KindView> {
 /// it's a CRD) plus any hand-written columns as additions, else the hand-written or
 /// generic view. `crd` is empty for built-ins. Header set must mirror [`project_row`].
 pub fn columns_for(group: &str, kind: &str, crd: &[PrinterCol]) -> Vec<String> {
-    merged_headers(group, kind, crd)
-}
-
-/// Shared header resolution so `columns_for` and `project_row` never drift: for a
-/// CRD, exactly its own declared printer columns; for a built-in (`crd` empty), the
-/// hand-written / generic view (built-ins have no CRD to read columns from).
-fn merged_headers(group: &str, kind: &str, crd: &[PrinterCol]) -> Vec<String> {
     if crd.is_empty() {
         return view_for(group, kind)
             .headers
@@ -322,7 +315,7 @@ pub fn project_row(
         project_cells(group, kind, data, deleting, usage, pvc_usage, crd);
     debug_assert_eq!(
         cells.len(),
-        merged_headers(group, kind, crd).len(),
+        columns_for(group, kind, crd).len(),
         "cell/header count mismatch for {group}/{kind}"
     );
 

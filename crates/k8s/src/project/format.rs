@@ -38,7 +38,7 @@ pub(crate) fn human_bytes(b: f64) -> String {
 }
 
 /// kubectl-style access-mode abbreviations.
-pub(crate) fn short_access_mode(m: &str) -> String {
+pub(crate) fn short_access_mode(m: &str) -> &str {
     match m {
         "ReadWriteOnce" => "RWO",
         "ReadOnlyMany" => "ROX",
@@ -46,7 +46,6 @@ pub(crate) fn short_access_mode(m: &str) -> String {
         "ReadWriteOncePod" => "RWOP",
         other => other,
     }
-    .to_string()
 }
 
 /// Endpoints `subsets[]` flattened to `ip:port` entries (newline-joined for the tooltip).

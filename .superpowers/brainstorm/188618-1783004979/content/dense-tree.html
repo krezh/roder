@@ -1,0 +1,87 @@
+<style>
+  .rd-icon2 { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:6px; font-size:12px; margin-right:8px; vertical-align:middle; flex-shrink:0; }
+  .ic-kust { background:#1f3a5f; color:#79c0ff; }
+  .ic-hr   { background:#1f3b2b; color:#3fb950; }
+  .ic-dep  { background:#2a2440; color:#b083f0; }
+  .ic-svc  { background:#3a2f1f; color:#e0a84c; }
+  .ic-ns   { background:#1b212b; color:#8b949e; }
+  .ic-cfg  { background:#1b212b; color:#8b949e; }
+  .ic-sec  { background:#3a1f1f; color:#e0716c; }
+  .chunky { background:#161b22; border:1.5px solid #232b36; border-radius:10px; padding:7px 10px; display:flex; align-items:center; gap:7px; max-width:230px; margin-bottom:8px; font-family:-apple-system,sans-serif; }
+  .chunky.owner { border-color:#3fb95077; box-shadow:0 0 0 1px #3fb95022; }
+  .chunky .t { font-size:0.78rem; font-weight:600; color:#e6edf3; }
+  .chunky .k { font-size:0.65rem; color:#8b949e; }
+  .compact-row { display:flex; align-items:center; background:#161b22; border:1px solid #232b36; border-radius:6px; padding:3px 8px; margin-bottom:4px; font-family:-apple-system,sans-serif; max-width:260px; }
+  .compact-row .n { font-size:0.76rem; font-weight:600; color:#e6edf3; }
+  .compact-row .k { font-size:0.62rem; color:#8b949e; margin-left:6px; text-transform:uppercase; }
+  .dot { width:6px; height:6px; border-radius:50%; background:#3fb950; margin-left:auto; }
+</style>
+
+<h2>Chunky cards at real density</h2>
+<p class="subtitle">Using your actual <code>cluster-apps &rarr; attic</code> branch (18 resources, 3 levels deep) &mdash; same content on both sides, to show what "every node is a full card" costs vs. reserving the full treatment for Kustomizations/HelmReleases and keeping leaves compact.</p>
+
+<div class="split">
+  <div class="mockup" data-choice="all-chunky" onclick="toggleSelect(this)" style="cursor:pointer;">
+    <div class="mockup-header">A &mdash; Every node is a full card</div>
+    <div class="mockup-body" style="background:#0e1116; padding:1rem; max-height:520px; overflow-y:auto;">
+      <div class="chunky owner"><span class="rd-icon2 ic-kust">&#9635;</span><div><div class="t">attic</div><div class="k">Kustomization &middot; flux-system</div></div><span class="dot"></span></div>
+      <div style="margin-left:20px; border-left:2px solid #232b36; padding-left:14px;">
+        <div class="chunky"><span class="rd-icon2 ic-cfg">&#9724;</span><div><div class="t">attic-configmap</div><div class="k">ConfigMap</div></div></div>
+        <div class="chunky"><span class="rd-icon2 ic-sec">&#9632;</span><div><div class="t">attic-postgres</div><div class="k">Secret</div></div></div>
+        <div class="chunky"><span class="rd-icon2 ic-cfg">&#9724;</span><div><div class="t">attic-config</div><div class="k">PersistentVolumeClaim</div></div></div>
+        <div class="chunky"><span class="rd-icon2 ic-sec">&#9632;</span><div><div class="t">attic-postgres-cert</div><div class="k">Certificate</div></div></div>
+        <div class="chunky"><span class="rd-icon2 ic-sec">&#9632;</span><div><div class="t">attic</div><div class="k">ExternalSecret</div></div></div>
+        <div class="chunky"><span class="rd-icon2 ic-sec">&#9632;</span><div><div class="t">attic-volsync</div><div class="k">ExternalSecret</div></div></div>
+        <div class="chunky"><span class="rd-icon2 ic-svc">&#8644;</span><div><div class="t">attic</div><div class="k">BackendTrafficPolicy</div></div></div>
+        <div class="chunky owner"><span class="rd-icon2 ic-hr">&#9670;</span><div><div class="t">attic</div><div class="k">HelmRelease &middot; default</div></div><span class="dot"></span></div>
+        <div style="margin-left:20px; border-left:2px solid #232b36; padding-left:14px;">
+          <div class="chunky"><span class="rd-icon2 ic-dep">&#9635;</span><div><div class="t">attic</div><div class="k">ServiceAccount</div></div></div>
+          <div class="chunky"><span class="rd-icon2 ic-svc">&#8644;</span><div><div class="t">attic</div><div class="k">Service</div></div></div>
+          <div class="chunky"><span class="rd-icon2 ic-dep">&#9635;</span><div><div class="t">attic</div><div class="k">Deployment</div></div></div>
+          <div class="chunky"><span class="rd-icon2 ic-svc">&#8644;</span><div><div class="t">attic</div><div class="k">HTTPRoute</div></div></div>
+        </div>
+        <div class="chunky owner"><span class="rd-icon2 ic-kust">&#9635;</span><div><div class="t">attic-db</div><div class="k">Kustomization &middot; default</div></div><span class="dot"></span></div>
+        <div style="margin-left:20px; border-left:2px solid #232b36; padding-left:14px;">
+          <div class="chunky"><span class="rd-icon2 ic-dep">&#9635;</span><div><div class="t">attic</div><div class="k">Database &middot; databases</div></div></div>
+        </div>
+        <div class="chunky"><span class="rd-icon2 ic-svc">&#8644;</span><div><div class="t">attic</div><div class="k">OCIRepository</div></div></div>
+        <div class="chunky"><span class="rd-icon2 ic-cfg">&#9724;</span><div><div class="t">attic-dst</div><div class="k">ReplicationDestination</div></div></div>
+        <div class="chunky"><span class="rd-icon2 ic-cfg">&#9724;</span><div><div class="t">attic</div><div class="k">ReplicationSource</div></div></div>
+      </div>
+    </div>
+    <div class="card-body"><p>18 resources &asymp; 700&ndash;900px tall just for this one branch. Your cluster has 135 Kustomizations &mdash; a root umbrella tree would run to many thousands of pixels of scrolling with this treatment applied everywhere.</p></div>
+  </div>
+
+  <div class="mockup" data-choice="owner-chunky-leaf-compact" onclick="toggleSelect(this)" style="cursor:pointer;">
+    <div class="mockup-header">B &mdash; Full card for owners, compact row for leaves</div>
+    <div class="mockup-body" style="background:#0e1116; padding:1rem; max-height:520px; overflow-y:auto;">
+      <div class="chunky owner"><span class="rd-icon2 ic-kust">&#9635;</span><div><div class="t">attic</div><div class="k">Kustomization &middot; flux-system</div></div><span class="dot"></span></div>
+      <div style="margin-left:20px; border-left:2px solid #232b36; padding-left:14px;">
+        <div class="compact-row"><span class="rd-icon2 ic-cfg" style="width:16px;height:16px;font-size:10px;">&#9724;</span><span class="n">attic-configmap</span><span class="k">ConfigMap</span></div>
+        <div class="compact-row"><span class="rd-icon2 ic-sec" style="width:16px;height:16px;font-size:10px;">&#9632;</span><span class="n">attic-postgres</span><span class="k">Secret</span></div>
+        <div class="compact-row"><span class="rd-icon2 ic-cfg" style="width:16px;height:16px;font-size:10px;">&#9724;</span><span class="n">attic-config</span><span class="k">PVC</span></div>
+        <div class="compact-row"><span class="rd-icon2 ic-sec" style="width:16px;height:16px;font-size:10px;">&#9632;</span><span class="n">attic-postgres-cert</span><span class="k">Certificate</span></div>
+        <div class="compact-row"><span class="rd-icon2 ic-sec" style="width:16px;height:16px;font-size:10px;">&#9632;</span><span class="n">attic</span><span class="k">ExternalSecret</span></div>
+        <div class="compact-row"><span class="rd-icon2 ic-sec" style="width:16px;height:16px;font-size:10px;">&#9632;</span><span class="n">attic-volsync</span><span class="k">ExternalSecret</span></div>
+        <div class="compact-row"><span class="rd-icon2 ic-svc" style="width:16px;height:16px;font-size:10px;">&#8644;</span><span class="n">attic</span><span class="k">BackendTrafficPolicy</span></div>
+        <div class="chunky owner" style="margin-top:6px;"><span class="rd-icon2 ic-hr">&#9670;</span><div><div class="t">attic</div><div class="k">HelmRelease &middot; default</div></div><span class="dot"></span></div>
+        <div style="margin-left:20px; border-left:2px solid #232b36; padding-left:14px;">
+          <div class="compact-row"><span class="rd-icon2 ic-dep" style="width:16px;height:16px;font-size:10px;">&#9635;</span><span class="n">attic</span><span class="k">ServiceAccount</span></div>
+          <div class="compact-row"><span class="rd-icon2 ic-svc" style="width:16px;height:16px;font-size:10px;">&#8644;</span><span class="n">attic</span><span class="k">Service</span></div>
+          <div class="compact-row"><span class="rd-icon2 ic-dep" style="width:16px;height:16px;font-size:10px;">&#9635;</span><span class="n">attic</span><span class="k">Deployment</span></div>
+          <div class="compact-row"><span class="rd-icon2 ic-svc" style="width:16px;height:16px;font-size:10px;">&#8644;</span><span class="n">attic</span><span class="k">HTTPRoute</span></div>
+        </div>
+        <div class="chunky owner" style="margin-top:6px;"><span class="rd-icon2 ic-kust">&#9635;</span><div><div class="t">attic-db</div><div class="k">Kustomization &middot; default</div></div><span class="dot"></span></div>
+        <div style="margin-left:20px; border-left:2px solid #232b36; padding-left:14px;">
+          <div class="compact-row"><span class="rd-icon2 ic-dep" style="width:16px;height:16px;font-size:10px;">&#9635;</span><span class="n">attic</span><span class="k">Database &middot; databases</span></div>
+        </div>
+        <div class="compact-row"><span class="rd-icon2 ic-svc" style="width:16px;height:16px;font-size:10px;">&#8644;</span><span class="n">attic</span><span class="k">OCIRepository</span></div>
+        <div class="compact-row"><span class="rd-icon2 ic-cfg" style="width:16px;height:16px;font-size:10px;">&#9724;</span><span class="n">attic-dst</span><span class="k">ReplicationDestination</span></div>
+        <div class="compact-row"><span class="rd-icon2 ic-cfg" style="width:16px;height:16px;font-size:10px;">&#9724;</span><span class="n">attic</span><span class="k">ReplicationSource</span></div>
+      </div>
+    </div>
+    <div class="card-body"><p>Same 18 resources in &asymp;40% less height. Kustomizations/HelmReleases &mdash; the ones with status and expandable children &mdash; keep the glowing card treatment; everything else (the numerous leaves) reads as a dense, scannable row. Scales to your 135-Kustomization cluster without the tree becoming a very long scroll.</p></div>
+  </div>
+</div>
+
+<p class="subtitle">Click A or B, or tell me in the terminal.</p>

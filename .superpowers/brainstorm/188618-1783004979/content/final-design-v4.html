@@ -1,0 +1,70 @@
+<style>
+  .rd-icon2 { display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:6px; font-size:11px; margin-right:7px; vertical-align:middle; flex-shrink:0; }
+  .cat-flux    { background:#1f3a5f; color:#79c0ff; }
+  .cat-config  { background:#1b212b; color:#8b949e; }
+  .cat-rbac    { background:#3a1f2a; color:#f27a9e; }
+  .cat-certmanager { background:#1f2f3a; color:#5cc8e0; }
+  .cat-externalsecrets { background:#2f2a1a; color:#e0c25c; }
+
+  /* Cards now stretch to fill the available row width (100% of their level's
+     container) instead of a small fixed px box — pills still land on one
+     consistent right edge because that edge is now the real window edge,
+     not an arbitrary card boundary. */
+  .level { display:flex; flex-direction:column; }
+  .chunky { width:100%; box-sizing:border-box; background:#161b22; border:1.5px solid #232b36; border-radius:9px; padding:6px 12px; display:flex; align-items:center; gap:8px; margin-bottom:6px; font-family:-apple-system,sans-serif; cursor:pointer; }
+  .chunky.owner { border-color:#3fb95077; box-shadow:0 0 0 1px #3fb95022; }
+  .chunky .t { font-size:0.8rem; font-weight:600; color:#e6edf3; }
+  .chunky .k { font-size:0.66rem; color:#8b949e; }
+  .trailer { margin-left:auto; display:flex; align-items:center; gap:8px; flex-shrink:0; }
+  .chevron { color:#6e7681; font-size:0.72rem; }
+  .count { font-size:0.64rem; font-weight:700; color:#a8b3bf; background:#1b212b; border:1px solid #2a323d; border-radius:8px; padding:2px 8px; }
+  .compact-row { width:100%; box-sizing:border-box; display:flex; align-items:center; background:#161b22; border:1px solid #232b36; border-radius:6px; padding:4px 10px; font-family:-apple-system,sans-serif; margin-bottom:4px; }
+  .compact-row .n { font-size:0.78rem; font-weight:600; color:#e6edf3; }
+  .compact-row .ns { font-size:0.7rem; color:#6e7681; margin-left:10px; }
+  .compact-row .k { font-size:0.62rem; font-weight:700; color:#a8b3bf; margin-left:auto; text-transform:uppercase; background:#1b212b; border:1px solid #2a323d; border-radius:8px; padding:2px 8px; flex-shrink:0; }
+  .branch { margin-left:20px; border-left:2px solid #232b36; padding-left:14px; }
+  .toolbar { display:flex; gap:6px; margin-bottom:10px; align-items:center; }
+  .toolbar button { background:#161b22; border:1px solid #232b36; color:#8b949e; font-size:0.7rem; padding:3px 9px; border-radius:6px; font-family:-apple-system,sans-serif; }
+  .win-title { font-family:-apple-system,sans-serif; font-weight:600; font-size:0.85rem; color:#e6edf3; margin-bottom:10px; padding-bottom:8px; border-bottom:1px solid #232b36; }
+</style>
+
+<h2>Cards now fill the available width</h2>
+<p class="subtitle">Rows stretch to 100% of their level's container instead of a small fixed box &mdash; the trailer (chevron/count) still lands on one consistent right edge, but that edge is now the real tree-window edge, so the wide modal actually gets used instead of leaving a blank strip on the right.</p>
+
+<div class="mockup">
+  <div class="mockup-body" style="background:#0e1116; padding:1.2rem; width:640px;">
+    <div class="win-title">Resource Tree &mdash; cluster-apps</div>
+    <div class="toolbar"><button>Expand all</button><button>Collapse all</button></div>
+
+    <div class="level">
+    <div class="chunky owner"><span class="rd-icon2 cat-flux">&#9635;</span><div><div class="t">cluster-apps</div><div class="k">Kustomization &middot; flux-system</div></div><div class="trailer"><span class="chevron">&#9662;</span></div></div>
+    <div class="branch">
+      <div class="level">
+      <div class="compact-row"><span class="rd-icon2 cat-config" style="width:16px;height:16px;font-size:10px;">&#9724;</span><span class="n">downloads</span><span class="k">Namespace</span></div>
+      <div class="compact-row"><span class="rd-icon2 cat-rbac" style="width:16px;height:16px;font-size:10px;">&#9670;</span><span class="n">oidc-cluster-admin</span><span class="k">ClusterRoleBinding</span></div>
+
+      <div class="chunky owner"><span class="rd-icon2 cat-flux">&#9635;</span><div><div class="t">alloy</div><div class="k">Kustomization</div></div><div class="trailer"><span class="count">4</span><span class="chevron">&#9656;</span></div></div>
+
+      <div class="chunky owner"><span class="rd-icon2 cat-flux">&#9635;</span><div><div class="t">attic</div><div class="k">Kustomization</div></div><div class="trailer"><span class="chevron">&#9662;</span></div></div>
+      <div class="branch">
+        <div class="level">
+        <div class="compact-row"><span class="rd-icon2 cat-config" style="width:16px;height:16px;font-size:10px;">&#9724;</span><span class="n">attic-configmap</span><span class="ns">default</span><span class="k">ConfigMap</span></div>
+        <div class="compact-row"><span class="rd-icon2 cat-config" style="width:16px;height:16px;font-size:10px;">&#128274;</span><span class="n">attic-postgres</span><span class="ns">default</span><span class="k">Secret</span></div>
+        <div class="compact-row"><span class="rd-icon2 cat-certmanager" style="width:16px;height:16px;font-size:10px;">&#128274;</span><span class="n">attic-postgres-cert</span><span class="ns">default</span><span class="k">Certificate</span></div>
+        <div class="compact-row"><span class="rd-icon2 cat-externalsecrets" style="width:16px;height:16px;font-size:10px;">&#128274;</span><span class="n">attic</span><span class="ns">default</span><span class="k">ExternalSecret</span></div>
+
+        <div class="chunky owner"><span class="rd-icon2 cat-flux">&#9670;</span><div><div class="t">attic</div><div class="k">HelmRelease &middot; default</div></div><div class="trailer"><span class="count">4</span><span class="chevron">&#9656;</span></div></div>
+        <div class="chunky owner"><span class="rd-icon2 cat-flux">&#9635;</span><div><div class="t">attic-db</div><div class="k">Kustomization</div></div><div class="trailer"><span class="count">1</span><span class="chevron">&#9656;</span></div></div>
+        </div>
+      </div>
+
+      <div class="chunky owner"><span class="rd-icon2 cat-flux">&#9635;</span><div><div class="t">atuin</div><div class="k">Kustomization</div></div><div class="trailer"><span class="count">6</span><span class="chevron">&#9656;</span></div></div>
+      <div class="chunky owner"><span class="rd-icon2 cat-flux">&#9635;</span><div><div class="t">authentik</div><div class="k">Kustomization</div></div><div class="trailer"><span class="count">9</span><span class="chevron">&#9656;</span></div></div>
+      <div style="font-size:0.72rem; color:#6e7681; font-style:italic; padding:4px 0;">&hellip; 131 more Kustomizations &hellip;</div>
+      </div>
+    </div>
+    </div>
+  </div>
+</div>
+
+<p class="subtitle">I also snuck the namespace back onto the leaf rows (it fits now that there's room) &mdash; let me know if that's welcome or noise. If this still feels too narrow, the tree window itself can also just be made wider than the current 60vw/900px cap.</p>

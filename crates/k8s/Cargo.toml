@@ -23,6 +23,8 @@ serde_json = { workspace = true }
 sonic-rs = "0.5"
 serde_yaml = "0.9"
 futures = "0.3"
+base64 = "0.22"
+flate2 = "1"
 time = { version = "0.3", features = ["formatting", "parsing"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }

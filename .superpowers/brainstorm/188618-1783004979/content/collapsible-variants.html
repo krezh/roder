@@ -1,0 +1,74 @@
+<style>
+  .rd-icon2 { display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:6px; font-size:11px; margin-right:7px; vertical-align:middle; flex-shrink:0; }
+  .ic-kust { background:#1f3a5f; color:#79c0ff; }
+  .ic-hr   { background:#1f3b2b; color:#3fb950; }
+  .chunky { background:#161b22; border:1.5px solid #232b36; border-radius:9px; padding:6px 9px; display:flex; align-items:center; gap:6px; max-width:280px; margin-bottom:6px; font-family:-apple-system,sans-serif; cursor:pointer; }
+  .chunky.owner { border-color:#3fb95077; box-shadow:0 0 0 1px #3fb95022; }
+  .chunky .t { font-size:0.76rem; font-weight:600; color:#e6edf3; }
+  .chunky .k { font-size:0.63rem; color:#8b949e; }
+  .chevron { margin-left:auto; color:#6e7681; font-size:0.7rem; }
+  .count { font-size:0.6rem; color:#6e7681; background:#1b212b; border-radius:8px; padding:1px 6px; margin-left:auto; }
+  .compact-row { display:flex; align-items:center; background:#161b22; border:1px solid #232b36; border-radius:6px; padding:3px 8px; font-family:-apple-system,sans-serif; }
+  .compact-row .n { font-size:0.74rem; font-weight:600; color:#e6edf3; }
+  .compact-row .k { font-size:0.6rem; color:#8b949e; margin-left:5px; text-transform:uppercase; }
+  .branch { margin-left:18px; border-left:2px solid #232b36; padding-left:12px; }
+  .grid-leaves { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:6px; }
+  .toolbar { display:flex; gap:6px; margin-bottom:10px; }
+  .toolbar button { background:#161b22; border:1px solid #232b36; color:#8b949e; font-size:0.7rem; padding:3px 9px; border-radius:6px; font-family:-apple-system,sans-serif; }
+  .searchbox { background:#161b22; border:1px solid #232b36; border-radius:6px; padding:5px 9px; font-size:0.75rem; color:#e6edf3; width:100%; margin-bottom:10px; font-family:-apple-system,sans-serif; box-sizing:border-box; }
+  .dim { opacity: 0.35; }
+  .hl { background:#1f3a5f66 !important; border-color:#4c8bf5 !important; }
+</style>
+
+<h2>Collapsible tree &mdash; interaction variants</h2>
+<p class="subtitle">Building on the approved direction (chunky owner cards, compact leaf rows, collapse to manage height). These vary how you navigate a 135-Kustomization tree once most of it is collapsed.</p>
+
+<div class="split">
+  <div class="mockup" data-choice="count-badges" onclick="toggleSelect(this)">
+    <div class="mockup-header">1 &mdash; Child-count badges + expand/collapse all</div>
+    <div class="mockup-body" style="background:#0e1116; padding:1.2rem;">
+      <div class="toolbar"><button>Expand all</button><button>Collapse all</button></div>
+      <div class="chunky owner"><span class="rd-icon2 ic-kust">&#9635;</span><div><div class="t">alloy</div><div class="k">Kustomization</div></div><span class="count">4</span><span class="chevron">&#9656;</span></div>
+      <div class="chunky owner"><span class="rd-icon2 ic-kust">&#9635;</span><div><div class="t">attic</div><div class="k">Kustomization</div></div><span class="count">18</span><span class="chevron">&#9656;</span></div>
+      <div class="chunky owner"><span class="rd-icon2 ic-kust">&#9635;</span><div><div class="t">atuin</div><div class="k">Kustomization</div></div><span class="count">6</span><span class="chevron">&#9656;</span></div>
+      <div class="chunky owner"><span class="rd-icon2 ic-kust">&#9635;</span><div><div class="t">authentik</div><div class="k">Kustomization</div></div><span class="count">9</span><span class="chevron">&#9656;</span></div>
+    </div>
+    <div class="card-body"><p>Each collapsed owner shows its total descendant count, so you can tell "attic has a big tree" without opening it. A top toolbar expands/collapses everything at once for the two extremes.</p></div>
+  </div>
+
+  <div class="mockup" data-choice="first-level" onclick="toggleSelect(this)">
+    <div class="mockup-header">2 &mdash; Root + direct children open, deeper collapsed</div>
+    <div class="mockup-body" style="background:#0e1116; padding:1.2rem;">
+      <div class="chunky owner"><span class="rd-icon2 ic-kust">&#9635;</span><div><div class="t">cluster-apps</div><div class="k">Kustomization</div></div><span class="chevron">&#9662;</span></div>
+      <div class="branch">
+        <div class="chunky owner"><span class="rd-icon2 ic-kust">&#9635;</span><div><div class="t">alloy</div><div class="k">Kustomization</div></div><span class="count">4</span><span class="chevron">&#9656;</span></div>
+        <div class="chunky owner"><span class="rd-icon2 ic-kust">&#9635;</span><div><div class="t">attic</div><div class="k">Kustomization</div></div><span class="count">18</span><span class="chevron">&#9656;</span></div>
+        <div class="chunky owner"><span class="rd-icon2 ic-kust">&#9635;</span><div><div class="t">atuin</div><div class="k">Kustomization</div></div><span class="count">6</span><span class="chevron">&#9656;</span></div>
+        <div class="chunky owner"><span class="rd-icon2 ic-kust">&#9635;</span><div><div class="t">authentik</div><div class="k">Kustomization</div></div><span class="count">9</span><span class="chevron">&#9656;</span></div>
+        <div class="chunky owner" style="opacity:0.6;"><div style="font-size:0.72rem; color:#6e7681; font-style:italic;">&hellip; 131 more</div></div>
+      </div>
+    </div>
+    <div class="card-body"><p>No clicking needed to see "what does cluster-apps own" &mdash; the first level is free. Only the second level down (each Kustomization's own resources) needs a click. Best default for the common case of scanning the app list, at the cost of a longer initial view than fully-collapsed.</p></div>
+  </div>
+
+  <div class="mockup" data-choice="search-expand" onclick="toggleSelect(this)">
+    <div class="mockup-header">3 &mdash; Search box auto-expands matches</div>
+    <div class="mockup-body" style="background:#0e1116; padding:1.2rem;">
+      <input class="searchbox" placeholder="Filter by name or kind&hellip;" value="postgres">
+      <div class="chunky owner dim"><span class="rd-icon2 ic-kust">&#9635;</span><div><div class="t">alloy</div><div class="k">Kustomization</div></div><span class="chevron">&#9656;</span></div>
+      <div class="chunky owner hl"><span class="rd-icon2 ic-kust">&#9635;</span><div><div class="t">attic</div><div class="k">Kustomization</div></div><span class="chevron">&#9662;</span></div>
+      <div class="branch">
+        <div class="compact-row hl" style="margin-bottom:4px; max-width:230px;"><span class="n">attic-postgres</span><span class="k">Secret</span></div>
+        <div class="compact-row hl" style="max-width:230px;"><span class="n">attic-postgres-cert</span><span class="k">Certificate</span></div>
+      </div>
+      <div class="chunky owner hl" style="margin-top:6px;"><span class="rd-icon2 ic-kust">&#9635;</span><div><div class="t">atuin</div><div class="k">Kustomization</div></div><span class="chevron">&#9662;</span></div>
+      <div class="branch">
+        <div class="compact-row hl" style="max-width:230px;"><span class="n">atuin-postgres</span><span class="k">Secret</span></div>
+      </div>
+      <div class="chunky owner dim"><span class="rd-icon2 ic-kust">&#9635;</span><div><div class="t">authentik</div><div class="k">Kustomization</div></div><span class="chevron">&#9656;</span></div>
+    </div>
+    <div class="card-body"><p>Typing filters the whole tree by name/kind: matching branches auto-expand and highlight, everything else stays collapsed and dims. Best for "where is X" in a big cluster &mdash; probably wants to combine with option 1 or 2's default state for when the box is empty.</p></div>
+  </div>
+</div>
+
+<p class="subtitle">These stack &mdash; e.g. option 2's default state + option 3's search, with option 1's count badges throughout. Which pieces do you want?</p>

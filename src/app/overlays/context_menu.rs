@@ -8,7 +8,7 @@ use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::overlays::toast::{show_toast, show_toast_detail, Toast, ToastKind};
 use crate::app::state::{
     open_logs, Catalog, CtxMenu, DetailTarget, ExecOpen, ExecTarget, LogPods, LogTarget, TableRows,
-    TableSelected,
+    TableSelected, TreeOpen,
 };
 use crate::app::util::clipboard::copy_to_clipboard;
 use crate::app::util::format::parse_key;
@@ -24,6 +24,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
     let catalog = expect_context::<Catalog>().0;
     let log_pods = expect_context::<LogPods>().0;
     let exec_open = expect_context::<ExecOpen>().0;
+    let tree_open = expect_context::<TreeOpen>().0;
     // Provided at App level; ResourceView fills in the Option on mount.
     let table_selected = expect_context::<TableSelected>().0;
     let table_rows = expect_context::<TableRows>().0;
@@ -40,6 +41,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             let is_scalable = kk.is_scalable();
             let is_flux = kk.is_flux();
             let is_helmrelease = kk.is_helmrelease();
+            let is_kustomization = kk.is_kustomization();
             let has_source_ref = kk.has_source_ref();
             let is_eso = kk.is_eso();
             let is_cronjob = kk.is_cronjob();
@@ -90,6 +92,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             let show_resume = suspend_state != Some(false);
 
             let open = { let t = m.target.clone(); move |_| { detail.set(Some(t.clone())); do_close(); } };
+            let open_tree = { let t = m.target.clone(); move |_| { tree_open.set(Some(t.clone())); do_close(); } };
             let has_logs = is_pod || is_workload || kk.is_job();
             let logs = {
                 let ts = targets.clone();
@@ -203,6 +206,9 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                         <div class="ctx-item ctx-bulk-header">{targets.len()}" resources"</div>
                     })}
                     {(!is_bulk).then(|| view! { <button class="ctx-item" on:click=open>"Open details"</button> })}
+                    {(!is_bulk && (is_kustomization || is_helmrelease)).then(|| view! {
+                        <button class="ctx-item" on:click=open_tree>"Resource Tree"</button>
+                    })}
                     {has_logs.then(|| view! { <button class="ctx-item" on:click=logs>"Logs"</button> })}
                     {shell.map(|s| view! { <button class="ctx-item" on:click=s>"Shell"</button> })}
                     {(!is_bulk && is_pod).then(|| {

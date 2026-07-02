@@ -27,11 +27,13 @@ use crate::project::ts_string;
 
 mod exec;
 mod flux;
+mod helm_release;
 mod logs;
 mod mutations;
 mod overview;
 mod permissions;
 mod sanitize;
+mod tree;
 
 /// The resource catalog, hot-swapped when CRDs change so newly-installed
 /// operators appear (and removed ones disappear) without restarting roder.

@@ -33,7 +33,7 @@ use self::core::{
     storageclass_cells,
 };
 use self::eso::{eso_generic_cells, external_secret_cells};
-use self::flux::ready_message_cells;
+pub(crate) use self::flux::ready_message_cells;
 use self::format::humanize_since;
 use self::gateway::{gateway_cells, gatewayclass_cells, httproute_cells};
 use self::pods::pod_cells;

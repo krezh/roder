@@ -1,0 +1,87 @@
+<style>
+  .rd-icon2 { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:6px; font-size:12px; margin-right:8px; vertical-align:middle; flex-shrink:0; }
+  .ic-kust { background:#1f3a5f; color:#79c0ff; }
+  .ic-hr   { background:#1f3b2b; color:#3fb950; }
+  .ic-dep  { background:#2a2440; color:#b083f0; }
+  .ic-svc  { background:#3a2f1f; color:#e0a84c; }
+  .ic-cfg  { background:#1b212b; color:#8b949e; }
+  .ic-sec  { background:#3a1f1f; color:#e0716c; }
+  .chunky { background:#161b22; border:1.5px solid #232b36; border-radius:10px; padding:7px 10px; display:flex; align-items:center; gap:7px; max-width:230px; margin-bottom:8px; font-family:-apple-system,sans-serif; }
+  .chunky.owner { border-color:#3fb95077; box-shadow:0 0 0 1px #3fb95022; }
+  .chunky .t { font-size:0.78rem; font-weight:600; color:#e6edf3; }
+  .chunky .k { font-size:0.65rem; color:#8b949e; }
+  .compact-row { display:flex; align-items:center; background:#161b22; border:1px solid #232b36; border-radius:6px; padding:3px 8px; margin-bottom:4px; font-family:-apple-system,sans-serif; max-width:260px; }
+  .compact-row .n { font-size:0.76rem; font-weight:600; color:#e6edf3; }
+  .compact-row .k { font-size:0.62rem; color:#8b949e; margin-left:6px; text-transform:uppercase; }
+  .dot { width:6px; height:6px; border-radius:50%; background:#3fb950; margin-left:auto; }
+  .branch { margin-left:20px; border-left:2px solid #232b36; padding-left:14px; }
+  .fade { color:#6e7681; font-size:0.72rem; font-style:italic; padding:2px 0 8px; }
+</style>
+
+<h2>Option B with several sibling Kustomizations</h2>
+<p class="subtitle">The real shape of your cluster: <code>cluster-apps</code> owns 15+ namespaces (compact rows) and 15+ Kustomizations (each its own chunky owner card, each expanding its own compact leaves). Showing 4 of the real siblings back-to-back so you can judge the repeating rhythm, with the rest collapsed/noted &mdash; the actual tree wouldn't truncate, this is just to keep the mockup a reasonable size.</p>
+
+<div class="mockup">
+  <div class="mockup-header">cluster-apps &rarr; (namespaces&hellip;) &rarr; alloy, attic, atuin, authentik&hellip;</div>
+  <div class="mockup-body" style="background:#0e1116; padding:1.2rem; max-height:620px; overflow-y:auto;">
+    <div class="chunky owner"><span class="rd-icon2 ic-kust">&#9635;</span><div><div class="t">cluster-apps</div><div class="k">Kustomization &middot; flux-system</div></div><span class="dot"></span></div>
+    <div class="branch">
+      <div class="compact-row"><span class="n">ai</span><span class="k">Namespace</span></div>
+      <div class="compact-row"><span class="n">auth</span><span class="k">Namespace</span></div>
+      <div class="compact-row"><span class="n">cert-manager</span><span class="k">Namespace</span></div>
+      <div class="fade">&hellip; 14 more namespaces, ClusterRoleBinding, PVC, admission policies &hellip;</div>
+
+      <div class="chunky owner"><span class="rd-icon2 ic-kust">&#9635;</span><div><div class="t">alloy</div><div class="k">Kustomization &middot; flux-system</div></div><span class="dot"></span></div>
+      <div class="branch">
+        <div class="compact-row"><span class="n">alloy</span><span class="k">Service</span></div>
+        <div class="compact-row"><span class="n">alloy</span><span class="k">DaemonSet</span></div>
+        <div class="compact-row"><span class="n">alloy</span><span class="k">ServiceMonitor</span></div>
+        <div class="compact-row"><span class="n">alloy</span><span class="k">OCIRepository</span></div>
+      </div>
+
+      <div class="chunky owner"><span class="rd-icon2 ic-kust">&#9635;</span><div><div class="t">attic</div><div class="k">Kustomization &middot; flux-system</div></div><span class="dot"></span></div>
+      <div class="branch">
+        <div class="compact-row"><span class="n">attic-configmap</span><span class="k">ConfigMap</span></div>
+        <div class="compact-row"><span class="n">attic-postgres</span><span class="k">Secret</span></div>
+        <div class="compact-row"><span class="n">attic-postgres-cert</span><span class="k">Certificate</span></div>
+        <div class="fade">&hellip; 4 more &hellip;</div>
+        <div class="chunky owner" style="margin-top:2px;"><span class="rd-icon2 ic-hr">&#9670;</span><div><div class="t">attic</div><div class="k">HelmRelease &middot; default</div></div><span class="dot"></span></div>
+        <div class="branch">
+          <div class="compact-row"><span class="n">attic</span><span class="k">Deployment</span></div>
+          <div class="compact-row"><span class="n">attic</span><span class="k">Service</span></div>
+          <div class="fade">&hellip; 2 more &hellip;</div>
+        </div>
+        <div class="chunky owner" style="margin-top:2px;"><span class="rd-icon2 ic-kust">&#9635;</span><div><div class="t">attic-db</div><div class="k">Kustomization &middot; default</div></div><span class="dot"></span></div>
+        <div class="branch">
+          <div class="compact-row"><span class="n">attic</span><span class="k">Database &middot; databases</span></div>
+        </div>
+        <div class="fade">&hellip; 3 more &hellip;</div>
+      </div>
+
+      <div class="chunky owner"><span class="rd-icon2 ic-kust">&#9635;</span><div><div class="t">atuin</div><div class="k">Kustomization &middot; flux-system</div></div><span class="dot"></span></div>
+      <div class="branch">
+        <div class="compact-row"><span class="n">atuin-postgres</span><span class="k">Secret</span></div>
+        <div class="chunky owner" style="margin-top:2px;"><span class="rd-icon2 ic-hr">&#9670;</span><div><div class="t">atuin</div><div class="k">HelmRelease &middot; default</div></div><span class="dot"></span></div>
+        <div class="branch">
+          <div class="compact-row"><span class="n">atuin</span><span class="k">Deployment</span></div>
+          <div class="compact-row"><span class="n">atuin</span><span class="k">Service</span></div>
+        </div>
+      </div>
+
+      <div class="chunky owner"><span class="rd-icon2 ic-kust">&#9635;</span><div><div class="t">authentik</div><div class="k">Kustomization &middot; flux-system</div></div><span class="dot"></span></div>
+      <div class="branch">
+        <div class="compact-row"><span class="n">authentik-db</span><span class="k">Secret</span></div>
+        <div class="chunky owner" style="margin-top:2px;"><span class="rd-icon2 ic-hr">&#9670;</span><div><div class="t">authentik</div><div class="k">HelmRelease &middot; auth</div></div><span class="dot"></span></div>
+        <div class="branch">
+          <div class="compact-row"><span class="n">authentik-server</span><span class="k">Deployment</span></div>
+          <div class="compact-row"><span class="n">authentik-worker</span><span class="k">Deployment</span></div>
+          <div class="compact-row"><span class="n">authentik</span><span class="k">Service</span></div>
+        </div>
+      </div>
+
+      <div class="fade" style="padding-top:4px;">&hellip; 130 more Kustomizations, same rhythm &hellip;</div>
+    </div>
+  </div>
+</div>
+
+<p class="subtitle">The chunky-card treatment stays reserved for things that <em>can have children</em> (Kustomization/HelmRelease) &mdash; so as sibling count grows, what grows is a scannable column of "owner card + its compact leaves", not a wall of identical big boxes. Good, or does a 135-sibling version of this still feel too heavy? Options: collapse each owner section by default (click to expand), or keep everything open like this.</p>

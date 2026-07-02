@@ -76,6 +76,10 @@ pub(crate) struct ExecTarget {
 #[derive(Clone, Copy)]
 pub(crate) struct ExecOpen(pub(crate) RwSignal<Option<ExecTarget>>);
 
+/// Which Kustomization/HelmRelease the resource-tree overlay is open for.
+#[derive(Clone, Copy)]
+pub(crate) struct TreeOpen(pub(crate) RwSignal<Option<DetailTarget>>);
+
 /// Whether the keyboard shortcuts help overlay is open.
 #[derive(Clone, Copy)]
 pub(crate) struct ShortcutsOpen(pub(crate) RwSignal<bool>);

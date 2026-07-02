@@ -27,14 +27,16 @@
 .pmodal.closing,
 .modal.closing,
 .shortcuts-modal.closing,
-.exec-window.closing {
+.exec-window.closing,
+.tree-window.closing {
   animation: overlay-out 0.16s ease-in forwards;
 }
 .palette-scrim.closing,
 .pmodal-scrim.closing,
 .modal-scrim.closing,
 .shortcuts-scrim.closing,
-.exec-scrim.closing {
+.exec-scrim.closing,
+.tree-scrim.closing {
   animation: scrim-out 0.16s ease-in forwards;
 }
 .ctx-menu.closing {

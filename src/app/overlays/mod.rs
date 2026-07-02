@@ -6,6 +6,7 @@ pub(crate) mod ns_palette;
 pub(crate) mod palette;
 pub(crate) mod shortcuts;
 pub(crate) mod toast;
+pub(crate) mod tree;
 
 pub(crate) use alerts::AlertsPanel;
 

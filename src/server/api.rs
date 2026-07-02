@@ -103,6 +103,27 @@ pub async fn detail(State(state): State<AppState>, Query(q): Query<DetailQuery>)
 }
 
 #[derive(Deserialize)]
+pub struct ResourceTreeQuery {
+    key: String,
+    namespace: Option<String>,
+    name: String,
+}
+
+/// Full recursive ownership tree for a Kustomization/HelmRelease, resolved
+/// server-side in one shot (see `Backend::resource_tree`).
+pub async fn resource_tree(
+    State(state): State<AppState>,
+    Query(q): Query<ResourceTreeQuery>,
+) -> Response {
+    let b = backend_or_return!(state);
+    let ns = ns_filter(&q.namespace);
+    match b.resource_tree(&q.key, ns, &q.name).await {
+        Ok(tree) => Json(tree).into_response(),
+        Err(e) => bad_gateway(e),
+    }
+}
+
+#[derive(Deserialize)]
 pub struct WatchQuery {
     key: String,
     namespace: Option<String>,

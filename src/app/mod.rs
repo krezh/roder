@@ -36,11 +36,13 @@ use overlays::ns_palette::NsPalette;
 use overlays::palette::CommandPalette;
 use overlays::shortcuts::ShortcutsHelp;
 use overlays::toast::{Toast, ToastView};
+use overlays::tree::ResourceTreeWindow;
 use overlays::AlertsPanel;
 use state::{
     AlertsData, AlertsOpen, Catalog, ConnectionState, CtxMenu, ExecOpen, ExecTarget, FilterFocus,
     LogPods, LogTarget, NavOpen, NsPaletteOpen, OnlyProblems, PaletteOpen, PodModalTarget,
-    ResourceFilter, ShortcutsOpen, TableRows, TableSelected, Tick, WorkspaceConf, WorkspaceConfig,
+    ResourceFilter, ShortcutsOpen, TableRows, TableSelected, Tick, TreeOpen, WorkspaceConf,
+    WorkspaceConfig,
 };
 use views::resource::ResourceView;
 use views::search::SearchResultsView;
@@ -121,6 +123,8 @@ pub fn App() -> impl IntoView {
     provide_context(PodModalTarget(pod_modal));
     let exec_open = RwSignal::new(None::<ExecTarget>);
     provide_context(ExecOpen(exec_open));
+    let tree_open = RwSignal::new(None::<DetailTarget>);
+    provide_context(TreeOpen(tree_open));
     let shortcuts_open = RwSignal::new(false);
     provide_context(ShortcutsOpen(shortcuts_open));
     let alerts_open = RwSignal::new(false);
@@ -403,6 +407,7 @@ pub fn App() -> impl IntoView {
                         <ConfirmDialog />
                         <PodModal />
                         <ExecWindow />
+                        <ResourceTreeWindow />
                         <ShortcutsHelp />
                         <AlertsPanel />
                         <ToastView />

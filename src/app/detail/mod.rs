@@ -78,7 +78,7 @@ pub(crate) fn DetailDrawer() -> impl IntoView {
                 <button class="detailbar-close" on:click=move |_| detail.set(None)>"✕"</button>
             </div>
             <div class="detailbar-body">
-                {move || detail.get().map(|t| view! { <RowDetail target=t /> })}
+                {move || detail.get().map(|t| view! { <RowDetail target=t on_delete=move || detail.set(None) /> })}
             </div>
         </div>
     }
@@ -86,9 +86,19 @@ pub(crate) fn DetailDrawer() -> impl IntoView {
 
 /// Inline detail for an expanded row: actions, a describe-style Info view (default),
 /// YAML, and pod logs — selectable via tabs.
+///
+/// `on_delete` needs `Send + Sync` (unlike similar close-callback params
+/// elsewhere, e.g. `TreeContent`'s `do_close`) because it's captured into the
+/// `run` closure below, which in turn is captured by several `<Show
+/// fallback=...>...</Show>` blocks in the actions section — `Show`'s children
+/// go through `TypedChildrenFn`, whose `ToChildren` impl requires `Sync` in
+/// addition to the `Send` that `.into_any()` alone would need for the tab
+/// content further down.
 #[component]
-pub(crate) fn RowDetail(target: DetailTarget) -> impl IntoView {
-    let detail = expect_context::<RwSignal<Option<DetailTarget>>>();
+pub(crate) fn RowDetail(
+    target: DetailTarget,
+    on_delete: impl Fn() + Copy + 'static + Send + Sync,
+) -> impl IntoView {
     let requested_tab = expect_context::<RwSignal<Option<Tab>>>();
     let confirm = expect_context::<RwSignal<Option<Confirm>>>();
     let status = RwSignal::new(None::<Result<String, String>>);
@@ -209,7 +219,7 @@ pub(crate) fn RowDetail(target: DetailTarget) -> impl IntoView {
                 Ok(_) => {
                     status.set(Some(Ok(format!("{action} ✓"))));
                     if action == "delete" {
-                        detail.set(None);
+                        on_delete();
                     }
                     if action == "flux-suspend" || action == "flux-resume" {
                         obj.refetch();

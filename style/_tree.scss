@@ -15,6 +15,9 @@
   overflow: hidden;
   animation: overlay-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
+.tree-window.with-detail {
+  width: min(90vw, 1460px);
+}
 .tree-scrim {
   position: fixed;
   inset: 0;
@@ -66,10 +69,48 @@
     }
   }
 }
-.tree-body {
+.tree-panes {
   flex: 1 1 0;
-  overflow: auto;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+.tree-pane {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-y: auto;
   padding: 0.75rem;
+}
+.tree-detail-pane {
+  flex: 0 0 460px;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 0.75rem 1rem;
+  border-left: 1px solid var(--border);
+}
+.tree-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.tree-detail-title {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.tree-detail-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1rem;
+  flex: 0 0 auto;
+  &:hover {
+    color: var(--error);
+  }
 }
 .tree-status {
   padding: 1rem;
@@ -136,7 +177,7 @@
   flex: 1 1 auto;
 }
 .tree-name {
-  font-size: 0.8rem;
+  font-size: 0.98rem;
   font-weight: 600;
   color: var(--fg);
   white-space: nowrap;
@@ -144,7 +185,7 @@
   text-overflow: ellipsis;
 }
 .tree-kind-line {
-  font-size: 0.66rem;
+  font-size: 0.85rem;
   color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
@@ -162,13 +203,16 @@
   font-size: 0.7rem;
 }
 .tree-count {
-  font-size: 0.62rem;
+  font-size: 0.78rem;
   font-weight: 700;
   color: var(--fg-dim, var(--muted));
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 1px 7px;
+}
+.tree-selected {
+  box-shadow: 0 0 0 2px var(--accent);
 }
 
 /* ---- indentation for an expanded owner's children ---- */

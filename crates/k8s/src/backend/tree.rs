@@ -218,10 +218,7 @@ impl Backend {
                         // of the whole subtree fetch so the bound applies
                         // cluster-wide to this one tree resolution, not just
                         // to the immediate GET.
-                        let _permit = semaphore
-                            .acquire()
-                            .await
-                            .expect("semaphore never closed");
+                        let _permit = semaphore.acquire().await.expect("semaphore never closed");
                         self.build_owner_node(
                             OwnerRef {
                                 key,

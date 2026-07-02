@@ -19,7 +19,7 @@ pub(crate) fn MobileDetailView() -> impl IntoView {
                 <span class="mobile-detail-title">{move || detail.get().map(|t| t.name).unwrap_or_default()}</span>
             </div>
             <div class="mobile-detail-body">
-                {move || detail.get().map(|t| view! { <RowDetail target=t /> })}
+                {move || detail.get().map(|t| view! { <RowDetail target=t on_delete=move || detail.set(None) /> })}
             </div>
         </div>
     }

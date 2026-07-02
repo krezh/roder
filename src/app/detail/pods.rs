@@ -28,7 +28,7 @@ pub(crate) fn PodModal() -> impl IntoView {
                         <span class="pmodal-title">{name}</span>
                         <button class="pmodal-close" on:click=move |_| do_close()>"✕"</button>
                     </div>
-                    <RowDetail target=target />
+                    <RowDetail target=target on_delete=move || do_close() />
                 </div>
             }
         })}

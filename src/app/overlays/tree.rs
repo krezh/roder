@@ -9,6 +9,7 @@ use leptos::prelude::*;
 use roder_core::{ResourceTreeNode, RowStatus};
 
 use crate::app::components::icons::TreeKindIcon;
+use crate::app::detail::RowDetail;
 use crate::app::overlays::use_option_overlay;
 use crate::app::state::{DetailTarget, TreeOpen};
 use crate::app::util::predicate::KindKind;
@@ -74,15 +75,41 @@ fn status_border_class(status: RowStatus) -> &'static str {
 #[derive(Clone, Copy)]
 struct TreeExpandCommand(RwSignal<(u32, bool)>);
 
+/// The resource currently shown in the tree's own attached detail pane —
+/// scoped to one tree-window instance, entirely separate from the
+/// app-global `DetailTarget` signal the main `DetailDrawer` reads. Opening a
+/// leaf from within the tree must never touch (or be touched by) the global
+/// drawer elsewhere in the app.
+#[derive(Clone, Copy)]
+struct TreeDetailTarget(RwSignal<Option<DetailTarget>>);
+
+/// True if `target` is `node` itself, or lives anywhere in its subtree —
+/// used to highlight the full ownership path from the tree's root down to
+/// whatever's currently selected in the attached detail pane, not just the
+/// selected leaf itself. A childless leaf's own "subtree" is just itself, so
+/// this one function covers both leaf-exact-match and owner-ancestor checks.
+fn subtree_contains(node: &ResourceTreeNode, target: &DetailTarget) -> bool {
+    let is_self = node.key.as_deref() == Some(target.key.as_str())
+        && node.namespace == target.namespace
+        && node.name == target.name;
+    is_self || node.children.iter().any(|c| subtree_contains(c, target))
+}
+
 #[component]
 pub(crate) fn ResourceTreeWindow() -> impl IntoView {
     let tree_open = expect_context::<TreeOpen>().0;
     let (snapshot, closing, do_close) = use_option_overlay(tree_open);
+    let tree_detail = TreeDetailTarget(RwSignal::new(None::<DetailTarget>));
+    provide_context(tree_detail);
 
     view! {
         <Show when=move || snapshot.get().is_some()>
             <div class="tree-scrim" class:closing=move || closing.get() on:click=move |_| do_close()></div>
-            <div class="tree-window" class:closing=move || closing.get()>
+            <div
+                class="tree-window"
+                class:closing=move || closing.get()
+                class:with-detail=move || tree_detail.0.get().is_some()
+            >
                 {move || snapshot.get().map(|target| view! { <TreeContent target=target do_close=do_close /> })}
             </div>
         </Show>
@@ -118,6 +145,8 @@ fn TreeContent(target: DetailTarget, do_close: impl Fn() + Copy + 'static) -> im
         });
     };
 
+    let tree_detail = expect_context::<TreeDetailTarget>();
+
     view! {
         <div class="tree-head">
             <span class="tree-title">"Resource Tree — " {title}</span>
@@ -127,12 +156,26 @@ fn TreeContent(target: DetailTarget, do_close: impl Fn() + Copy + 'static) -> im
             <button on:click=move |_| fire(true)>"Expand all"</button>
             <button on:click=move |_| fire(false)>"Collapse all"</button>
         </div>
-        <div class="tree-body">
-            {move || match root.get() {
-                None => view! { <div class="tree-status">"Resolving tree…"</div> }.into_any(),
-                Some(None) => view! { <div class="tree-status tree-err">"Failed to load resource tree."</div> }.into_any(),
-                Some(Some(node)) => view! { <OwnerCard node=node is_root=true /> }.into_any(),
-            }}
+        <div class="tree-panes">
+            <div class="tree-pane">
+                {move || match root.get() {
+                    None => view! { <div class="tree-status">"Resolving tree…"</div> }.into_any(),
+                    Some(None) => view! { <div class="tree-status tree-err">"Failed to load resource tree."</div> }.into_any(),
+                    Some(Some(node)) => view! { <OwnerCard node=node is_root=true /> }.into_any(),
+                }}
+            </div>
+            {move || tree_detail.0.get().map(|dt| {
+                let name = dt.name.clone();
+                view! {
+                    <div class="tree-detail-pane">
+                        <div class="tree-detail-head">
+                            <span class="tree-detail-title">{name}</span>
+                            <button class="tree-detail-close" on:click=move |_| tree_detail.0.set(None)>"✕"</button>
+                        </div>
+                        <RowDetail target=dt on_delete=move || tree_detail.0.set(None) />
+                    </div>
+                }
+            })}
         </div>
     }
 }
@@ -141,8 +184,11 @@ fn TreeContent(target: DetailTarget, do_close: impl Fn() + Copy + 'static) -> im
 /// status-colored border, and a trailer that's either just a chevron
 /// (expanded) or a descendant-count badge + chevron (collapsed). Clicking the
 /// card toggles its own children; clicking a leaf's name (in `LeafChip`)
-/// opens the detail drawer instead — cards themselves aren't drawer-clickable
-/// since their primary click action is expand/collapse.
+/// opens the attached detail pane instead — cards themselves don't open the
+/// detail pane since their primary click action is expand/collapse. Gets a
+/// `tree-selected` highlight when the detail pane's target is this node or
+/// anywhere in its subtree, so the whole ownership path to a selection is
+/// visible, not just the selected leaf.
 ///
 /// Returns `AnyView` (not `impl IntoView`): this component's children can
 /// recurse back into `OwnerCard` (via `group_children`), and an opaque
@@ -150,6 +196,7 @@ fn TreeContent(target: DetailTarget, do_close: impl Fn() + Copy + 'static) -> im
 #[component]
 fn OwnerCard(node: ResourceTreeNode, is_root: bool) -> AnyView {
     let cmd = expect_context::<TreeExpandCommand>();
+    let tree_detail = expect_context::<TreeDetailTarget>();
     let expanded = RwSignal::new(is_root);
     let last_seen_epoch = StoredValue::new(0u32);
     Effect::new(move |_| {
@@ -173,11 +220,23 @@ fn OwnerCard(node: ResourceTreeNode, is_root: bool) -> AnyView {
         None => node.kind.clone(),
     };
     let error = node.error.clone();
+    let node_snapshot = node.clone();
+    let selected = move || {
+        tree_detail
+            .0
+            .get()
+            .map(|dt| subtree_contains(&node_snapshot, &dt))
+            .unwrap_or(false)
+    };
     let children = node.children;
     let groups = group_children(children);
 
     view! {
-        <div class=format!("tree-owner-card {border_class}") on:click=move |_| expanded.update(|e| *e = !*e)>
+        <div
+            class=format!("tree-owner-card {border_class}")
+            class:tree-selected=selected
+            on:click=move |_| expanded.update(|e| *e = !*e)
+        >
             <TreeKindIcon category=category kind=kind small=false />
             <div class="tree-owner-text">
                 <div class="tree-name">{name}</div>
@@ -214,21 +273,31 @@ fn render_group(group: &ChildGroup) -> AnyView {
 
 /// A leaf resource: a compact, content-sized chip (not a full card) — several
 /// wrap onto one line via the parent `.tree-leaf-flow` container. Clicking it
-/// opens the resource in the (separate, right-docked) detail drawer; the tree
-/// window stays open. Structurally identical to `OwnerCard`'s text block
-/// (name above kind, same classes/sizes) but with the smaller icon and no
-/// border/trailer — leaves carry no live status, by design (see spec).
+/// opens the resource in the tree's own attached detail pane (`TreeDetailTarget`,
+/// separate from the app-global `DetailTarget` drawer) alongside the tree list.
+/// Structurally identical to `OwnerCard`'s text block (name above kind, same
+/// classes/sizes) but with the smaller icon and no border/trailer — leaves
+/// carry no live status, by design (see spec). Gets a `tree-selected`
+/// highlight when it's the current detail-pane target.
 #[component]
 fn LeafChip(node: ResourceTreeNode) -> impl IntoView {
-    let detail = expect_context::<RwSignal<Option<DetailTarget>>>();
+    let tree_detail = expect_context::<TreeDetailTarget>();
     let clickable = node.key.is_some();
+    let node_snapshot = node.clone();
+    let selected = move || {
+        tree_detail
+            .0
+            .get()
+            .map(|dt| subtree_contains(&node_snapshot, &dt))
+            .unwrap_or(false)
+    };
     let open = {
         let key = node.key.clone();
         let ns = node.namespace.clone();
         let name = node.name.clone();
         move |_| {
             if let Some(key) = key.clone() {
-                detail.set(Some(DetailTarget {
+                tree_detail.0.set(Some(DetailTarget {
                     key,
                     namespace: ns.clone(),
                     name: name.clone(),
@@ -237,7 +306,12 @@ fn LeafChip(node: ResourceTreeNode) -> impl IntoView {
         }
     };
     view! {
-        <div class="tree-leaf-chip" class:tree-leaf-disabled=!clickable on:click=open>
+        <div
+            class="tree-leaf-chip"
+            class:tree-leaf-disabled=!clickable
+            class:tree-selected=selected
+            on:click=open
+        >
             <TreeKindIcon category=node.category kind=node.kind.clone() small=true />
             <div class="tree-owner-text">
                 <div class="tree-name">{node.name}</div>
@@ -356,6 +430,52 @@ mod shaping_tests {
         };
         let groups = group_children(vec![errored_owner]);
         assert_eq!(groups.len(), 1);
-        assert!(matches!(&groups[0], ChildGroup::Owner(n) if n.name == "broken" && n.error.is_some()));
+        assert!(
+            matches!(&groups[0], ChildGroup::Owner(n) if n.name == "broken" && n.error.is_some())
+        );
+    }
+
+    #[test]
+    fn subtree_contains_true_for_the_node_itself() {
+        let node = leaf("a");
+        let target = DetailTarget {
+            key: "v1/ConfigMap".into(),
+            namespace: None,
+            name: "a".into(),
+        };
+        assert!(subtree_contains(&node, &target));
+    }
+
+    #[test]
+    fn subtree_contains_true_for_a_nested_descendant() {
+        let node = owner("root", vec![leaf("a"), owner("mid", vec![leaf("b")])]);
+        let target = DetailTarget {
+            key: "v1/ConfigMap".into(),
+            namespace: None,
+            name: "b".into(),
+        };
+        assert!(subtree_contains(&node, &target));
+    }
+
+    #[test]
+    fn subtree_contains_false_for_an_unrelated_target() {
+        let node = owner("root", vec![leaf("a")]);
+        let target = DetailTarget {
+            key: "v1/ConfigMap".into(),
+            namespace: None,
+            name: "z".into(),
+        };
+        assert!(!subtree_contains(&node, &target));
+    }
+
+    #[test]
+    fn subtree_contains_false_when_key_matches_but_name_differs() {
+        let node = leaf("a");
+        let target = DetailTarget {
+            key: "v1/ConfigMap".into(),
+            namespace: None,
+            name: "different".into(),
+        };
+        assert!(!subtree_contains(&node, &target));
     }
 }

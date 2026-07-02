@@ -48,14 +48,17 @@
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.6);
-  z-index: 62;
+  /* Above .tree-window (65) and .pmodal (67): RowDetail's "Shell" button is
+     reachable both from a tree leaf's attached detail pane and from PodModal
+     (PodModal embeds RowDetail directly), so ExecWindow must outrank both. */
+  z-index: 68;
   animation: scrim-in 0.15s ease;
 }
 .exec-window {
   position: fixed;
   inset: 0;
   margin: auto;
-  z-index: 63;
+  z-index: 69;
   width: 70vw;
   height: 70vh;
   display: flex;
@@ -315,14 +318,14 @@
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.5);
-  z-index: 60;
+  z-index: 66;
   animation: scrim-in 0.15s ease;
 }
 .pmodal {
   position: fixed;
   inset: 0;
   margin: auto;
-  z-index: 61;
+  z-index: 67;
   width: min(760px, 92vw);
   height: fit-content;
   max-height: 85vh;
@@ -489,14 +492,18 @@
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.5);
-  z-index: 40;
+  /* ConfirmDialog is invoked from RowDetail's Delete button, which itself is
+     reachable from the plain drawer, PodModal (66/67), a tree leaf's attached
+     detail pane (64/65), and the context menu (70/71) — so it must outrank
+     every one of those overlays. Stays below alerts (79/80) and toast (90). */
+  z-index: 72;
   animation: scrim-in 0.15s ease;
 }
 .modal {
   position: fixed;
   inset: 0;
   margin: auto;
-  z-index: 41;
+  z-index: 73;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;

@@ -27,5 +27,7 @@ devenv.local.yaml
 # heaptrack profiling recordings
 heaptrack.*.zst
 
-# superpowers brainstorming visual-companion sessions (ephemeral mockups)
-/.superpowers/
+
+.superpowers/
+docs/
+.claude/scheduled_tasks.lock

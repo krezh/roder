@@ -16,6 +16,7 @@ use crate::app::table_logic;
 use crate::app::util::color::{dot_class, pct_thresh_color};
 use crate::app::util::format::parse_key;
 use crate::app::util::predicate::KindKind;
+use crate::app::util::text_width::text_width;
 use crate::data;
 
 /// Full-featured live resource table. Handles its own SSE subscription, virtual
@@ -292,23 +293,32 @@ pub(crate) fn KindTable(
             } else {
                 String::new()
             };
+            let mut ns_max_w = text_width(&ns_max);
             let mut name_max = "Name".to_string();
+            let mut name_max_w = text_width(&name_max);
             let mut cell_maxes: Vec<String> = cols_now.clone();
+            let mut cell_max_w: Vec<f64> = cell_maxes.iter().map(|s| text_width(s)).collect();
             let mut col_has_trend = vec![false; ncells];
             rows.with_untracked(|m| {
                 for r in m.values() {
                     if namespaced {
                         let ns = r.namespace.as_deref().unwrap_or("");
-                        if ns.len() > ns_max.len() {
+                        let w = text_width(ns);
+                        if w > ns_max_w {
                             ns_max = ns.to_string();
+                            ns_max_w = w;
                         }
                     }
-                    if r.name.len() > name_max.len() {
+                    let w = text_width(&r.name);
+                    if w > name_max_w {
                         name_max = r.name.clone();
+                        name_max_w = w;
                     }
                     for (i, c) in r.cells.iter().take(ncells).enumerate() {
-                        if c.len() > cell_maxes[i].len() {
+                        let w = text_width(c);
+                        if w > cell_max_w[i] {
                             cell_maxes[i] = c.clone();
+                            cell_max_w[i] = w;
                         }
                         if matches!(r.trends.get(i), Some(Trend::Up | Trend::Down)) {
                             col_has_trend[i] = true;
@@ -339,12 +349,14 @@ pub(crate) fn KindTable(
             // Sticky: columns only ever widen within a kind; reset when the column
             // set changes (kind switch). This prevents metric values bouncing
             // between wide ("100%") and narrow ("5%") from jittering the layout.
+            // Compared by rendered width, not string length — the table's font is
+            // proportional, so a shorter string can render wider than a longer one.
             sizer.update(|old| {
                 if old.len() != n_tracks {
                     *old = new_vals;
                 } else {
                     for (o, n) in old.iter_mut().zip(new_vals.iter()) {
-                        if n.len() > o.len() {
+                        if text_width(n) > text_width(o) {
                             *o = n.clone();
                         }
                     }

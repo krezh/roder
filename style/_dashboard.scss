@@ -151,6 +151,19 @@
   &:hover .usage-tip {
     display: block;
   }
+  &.tu-stale { border-color: var(--warn); }
+  .tu-warn {
+    position: relative;
+    color: var(--warn);
+    font-size: 0.8rem;
+    cursor: default;
+    .tooltip { display: none; position: absolute; top: 100%; right: 0; margin-top: 6px; }
+    &:hover .tooltip { display: block; }
+  }
+  &.tu-error {
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
 }
 /* The one reusable tooltip look — used by the global hover tooltip and by any
    bespoke tooltip bubble (e.g. the cluster-usage per-node popover). */

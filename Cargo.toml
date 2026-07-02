@@ -116,6 +116,10 @@ web-sys = { version = "0.3", features = [
   "DomRect",
   "MediaQueryList",
   "MediaQueryListEvent",
+  "CssStyleDeclaration",
+  "HtmlCanvasElement",
+  "CanvasRenderingContext2d",
+  "TextMetrics",
 ], optional = true }
 
 # Native (server) binary only — target-gated out of the wasm/hydrate build, and

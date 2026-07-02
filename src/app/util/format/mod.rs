@@ -62,6 +62,19 @@ pub(crate) fn pct(used: Option<f64>, total: Option<f64>) -> f64 {
     }
 }
 
+/// Cluster-wide CPU/mem usage % = sum(used) / sum(capacity) across nodes.
+pub(crate) fn cluster_usage_pct(nodes: &[roder_core::NodeSummary]) -> (f64, f64) {
+    let cpu = pct(
+        Some(nodes.iter().filter_map(|n| n.cpu_used).sum()),
+        Some(nodes.iter().filter_map(|n| n.cpu_cores).sum()),
+    );
+    let mem = pct(
+        Some(nodes.iter().filter_map(|n| n.mem_used).sum()),
+        Some(nodes.iter().filter_map(|n| n.mem_bytes).sum()),
+    );
+    (cpu, mem)
+}
+
 pub(crate) fn fmt_cores(used: Option<f64>, total: Option<f64>) -> String {
     match (used, total) {
         (Some(u), Some(t)) => format!("{u:.1} / {t:.0}"),

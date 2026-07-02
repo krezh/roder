@@ -13,7 +13,7 @@ use crate::app::state::{
     AlertsData, AlertsOpen, Catalog, ConnectionState, NavOpen, NsPaletteOpen, OnlyProblems,
     PaletteOpen,
 };
-use crate::app::util::format::pct;
+use crate::app::util::format::{cluster_usage_pct, pct};
 use crate::data;
 
 #[component]
@@ -202,6 +202,9 @@ pub(crate) fn TopUsage() -> impl IntoView {
     let catalog = expect_context::<Catalog>().0;
 
     let overview = RwSignal::new(None::<roder_core::ClusterOverview>);
+    // True when the most recent fetch failed — the displayed numbers (if any)
+    // are then last-known-good rather than current.
+    let stale = RwSignal::new(false);
     // Seed from the last-known overview so cluster usage doesn't flash empty on
     // refresh while the first `/api/overview` round-trip is in flight.
     Effect::new(move |_| {
@@ -211,29 +214,51 @@ pub(crate) fn TopUsage() -> impl IntoView {
             overview.set(Some(cached));
         }
     });
-    let ov = LocalResource::new(|| async {
-        data::fetch_json::<roder_core::ClusterOverview>("/api/overview").await
-    });
-    Effect::new(move |_| {
-        if let Some(Ok(o)) = ov.get() {
+
+    let apply = move |res: Result<roder_core::ClusterOverview, String>| match res {
+        Ok(o) => {
             if let Ok(json) = serde_json::to_string(&o) {
                 data::storage_set("roder.overview", &json);
             }
             overview.set(Some(o));
+            stale.set(false);
+        }
+        Err(_) => stale.set(true),
+    };
+
+    let ov = LocalResource::new(|| async {
+        data::fetch_json::<roder_core::ClusterOverview>("/api/overview").await
+    });
+    Effect::new(move |_| {
+        if let Some(res) = ov.get() {
+            apply(res);
         }
     });
 
+    // Poll for fresh cluster usage on the same cadence as the backend's overview
+    // cache TTL (8s, see overview.rs), so CPU/mem/node counts stay live instead
+    // of freezing at whatever they were when the page first loaded.
+    Effect::new(move |_| {
+        set_interval(
+            move || {
+                #[cfg(target_arch = "wasm32")]
+                leptos::task::spawn_local(async move {
+                    apply(data::fetch_json::<roder_core::ClusterOverview>("/api/overview").await);
+                });
+            },
+            std::time::Duration::from_secs(10),
+        );
+    });
+
     view! {
-            {move || overview.get().map(|o| {
+            {move || match overview.get() {
+                None if stale.get() => view! {
+                    <div class="topusage tu-error">"Usage unavailable"</div>
+                }.into_any(),
+                None => ().into_any(),
+                Some(o) => {
                 let nodes = o.nodes.clone();
-                let cpu_p = pct(
-                    Some(nodes.iter().filter_map(|n| n.cpu_used).sum()),
-                    Some(nodes.iter().filter_map(|n| n.cpu_cores).sum()),
-                );
-                let mem_p = pct(
-                    Some(nodes.iter().filter_map(|n| n.mem_used).sum()),
-                    Some(nodes.iter().filter_map(|n| n.mem_bytes).sum()),
-                );
+                let (cpu_p, mem_p) = cluster_usage_pct(&nodes);
                 let total = nodes.len();
                 let ready = nodes.iter().filter(|n| n.ready).count();
                 let nodes_ok = ready == total;
@@ -246,7 +271,7 @@ pub(crate) fn TopUsage() -> impl IntoView {
                     }
                 };
                 view! {
-                    <div class="topusage">
+                    <div class="topusage" class:tu-stale=move || stale.get()>
                         <span class="tu-stat">"CPU " <b>{format!("{cpu_p:.0}%")}</b></span>
                         <span class="tu-stat">"Mem " <b>{format!("{mem_p:.0}%")}</b></span>
                         <span class="tu-stat tu-nodes"
@@ -254,6 +279,11 @@ pub(crate) fn TopUsage() -> impl IntoView {
                             on:click=go_nodes>
                             "Nodes " <b>{ready}</b>"/"<b>{total}</b>
                         </span>
+                        {move || stale.get().then(|| view! {
+                            <span class="tu-warn">"⚠"
+                                <span class="tooltip">"Failed to refresh — showing last known values"</span>
+                            </span>
+                        })}
                         <div class="tooltip usage-tip">
                             {nodes.into_iter().map(|n| {
                                 let c = pct(n.cpu_used, n.cpu_cores);
@@ -273,8 +303,9 @@ pub(crate) fn TopUsage() -> impl IntoView {
                             }).collect_view()}
                         </div>
                     </div>
+                }.into_any()
                 }
-            })}
+            }}
     }
 }
 

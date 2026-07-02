@@ -4,7 +4,7 @@ use leptos::prelude::*;
 use roder_core::{ClusterOverview, HealthRollup, NodeSummary, RowStatus};
 
 use crate::app::components::table::StatusDot;
-use crate::app::util::format::{fmt_cores, fmt_mem, pct, talos_version};
+use crate::app::util::format::{cluster_usage_pct, fmt_cores, fmt_mem, pct, talos_version};
 use crate::data;
 
 #[component]
@@ -25,15 +25,7 @@ pub(crate) fn Dashboard() -> impl IntoView {
 
 fn dashboard_view(o: ClusterOverview) -> impl IntoView {
     let nodes = o.nodes.clone();
-    // Cluster-wide usage = sum of per-node used / capacity.
-    let cpu_p = pct(
-        Some(nodes.iter().filter_map(|n| n.cpu_used).sum()),
-        Some(nodes.iter().filter_map(|n| n.cpu_cores).sum()),
-    );
-    let mem_p = pct(
-        Some(nodes.iter().filter_map(|n| n.mem_used).sum()),
-        Some(nodes.iter().filter_map(|n| n.mem_bytes).sum()),
-    );
+    let (cpu_p, mem_p) = cluster_usage_pct(&nodes);
     view! {
         <div class="cards">
             <div class="card stat usage">

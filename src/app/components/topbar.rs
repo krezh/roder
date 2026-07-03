@@ -41,9 +41,9 @@ pub(crate) fn Topbar() -> impl IntoView {
             </button>
             <SanitizeButton />
             <SyncButton />
+            <TopUsage />
             <FailingBadge />
             <FluxFailingBadge />
-            <TopUsage />
             <AlertsButton />
             <Identity />
         </header>
@@ -185,7 +185,7 @@ pub(crate) fn FluxFailingBadge() -> impl IntoView {
                 };
                 view! {
                     <button class="fluxbadge" on:click=go>
-                        "✕ " {n} " Flux"
+                        {n} " Flux"
                         <span class="tooltip">"Flux resources failing — click to view"</span>
                     </button>
                 }
@@ -458,7 +458,7 @@ pub(crate) fn FailingBadge() -> impl IntoView {
                 view! {
                     <button class="failbadge" on:click=go
                         title="Pods failing — click to view">
-                        "✕ " {n} " failing"
+                        {n} " failing"
                     </button>
                 }
             })

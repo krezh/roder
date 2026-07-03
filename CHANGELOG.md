@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.1.21](https://github.com/krezh/roder/compare/0.1.20...0.1.21) (2026-07-03)
+
+
+### Features
+
+* **flux,logs:** add Force/Reset/Reconcile-with-source actions; smarter log streaming ([364aa2b](https://github.com/krezh/roder/commit/364aa2b70669597680ecab58014769b2f5f1d9fe))
+* **tree:** add Resource Tree — recursive Kustomization/HelmRelease ownership view ([73af29a](https://github.com/krezh/roder/commit/73af29a05a1f85e871c92114634ad7d5d64affd2))
+* **tree:** attach split-pane detail view to Resource Tree ([daad0fc](https://github.com/krezh/roder/commit/daad0fc0a3e98ec89bfe711c2f104b53c6ff5cf4))
+* **ui:** add mobile UI with breakpoint-based shell, card lists, and action sheet ([e941da4](https://github.com/krezh/roder/commit/e941da40bb04f75ab87058f9221ee4345738f55f))
+* **ui:** add toast notifications for topbar actions, bulk row actions, debug shell, and clipboard copy ([7bd8f93](https://github.com/krezh/roder/commit/7bd8f93e66c80cb1d1cc1d92f294a9c8fbc9ba35))
+* **ui:** cache topbar indicators across refresh ([c0e5ce2](https://github.com/krezh/roder/commit/c0e5ce29bb44d9662251bd3bb51cc02b09d3ec07))
+* **ui:** make Flux Suspend/Resume context-aware ([3cff7fe](https://github.com/krezh/roder/commit/3cff7fe8a2db2daff9cab68ae8d555c67d45aaba))
+
+
+### Bug Fixes
+
+* **cargo:** update rust crate rand (0.10.1 ➔ 0.10.2) ([#73](https://github.com/krezh/roder/issues/73)) ([7d549c5](https://github.com/krezh/roder/commit/7d549c546c72743fdcc1e38f8c99bd755d622f36))
+* **cargo:** update rust crate time (0.3.51 ➔ 0.3.52) ([#66](https://github.com/krezh/roder/issues/66)) ([4b0c42f](https://github.com/krezh/roder/commit/4b0c42fbb32eb437d14c09d15929e78a2ad39057))
+* **cargo:** update rust crate time (0.3.52 ➔ 0.3.53) ([#69](https://github.com/krezh/roder/issues/69)) ([fccc3ac](https://github.com/krezh/roder/commit/fccc3acebc54b2c92ca650032a94437207e06a03))
+* **container:** update image ghcr.io/rust-lang/rust (1.96.0 ➔ 1.96.1) ([#68](https://github.com/krezh/roder/issues/68)) ([79f1d0b](https://github.com/krezh/roder/commit/79f1d0bd1b1105f763ee49d272515f3f692ca3f5))
+* **container:** update image ghcr.io/rust-lang/rust (58fe975 ➔ 1f0dbad) ([#71](https://github.com/krezh/roder/issues/71)) ([ecaf488](https://github.com/krezh/roder/commit/ecaf4889c260484bf4a57fd53a1145608e7bd1de))
+* **ui:** fix the row jitter ([a8cef09](https://github.com/krezh/roder/commit/a8cef09cd0bf4ad83e64591fc19de801d0d4e802))
+
+
+### Code Refactoring
+
+* consolidate flux reconcile with force/reset parameters ([eb3167c](https://github.com/krezh/roder/commit/eb3167c2b42e9d719787601d42e3ebf14a84bfbe))
+* **k8s,ui:** split backend.rs and format.rs into cohesive submodules ([84d49f6](https://github.com/krezh/roder/commit/84d49f614ef10169eee324b0217bdc375b37937a))
+* **k8s:** simplify projection and informer helpers ([4fc68c7](https://github.com/krezh/roder/commit/4fc68c712ff6e1258374e7a549e22e207ef088ac))
+* remove badge icons and reorganize topbar layout ([dc7c9b3](https://github.com/krezh/roder/commit/dc7c9b397ddce4ee8e2cafa294095e0a17760414))
+* **ui:** remove per-kind error/warn status dot from sidebar ([173012e](https://github.com/krezh/roder/commit/173012e04227f14ce13495fbadc401e7a3a9384f))
+
 ## [0.1.20](https://github.com/krezh/roder/compare/0.1.19...0.1.20) (2026-06-28)
 
 

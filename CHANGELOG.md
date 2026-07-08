@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.22](https://github.com/krezh/roder/compare/0.1.21...0.1.22) (2026-07-08)
+
+
+### Styles
+
+* modern visual refresh ([af45080](https://github.com/krezh/roder/commit/af45080e2a33200cfd695772254eb7bfd4f2353f))
+
 ## [0.1.21](https://github.com/krezh/roder/compare/0.1.20...0.1.21) (2026-07-03)
 
 

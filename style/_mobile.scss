@@ -57,7 +57,7 @@
     white-space: nowrap;
     background: var(--panel-2);
     border: 1px solid var(--border);
-    border-radius: 999px;
+    border-radius: 0;
     color: var(--fg);
     font-size: 0.78rem;
     padding: 0.35rem 0.7rem;
@@ -112,7 +112,7 @@
     min-width: 0;
     background: var(--panel-2);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 0;
     color: var(--fg);
     padding: 0.5rem 0.6rem;
     min-height: 44px;
@@ -121,7 +121,7 @@
   .mobile-select-toggle {
     background: var(--panel-2);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 0;
     color: var(--fg);
     padding: 0.5rem 0.7rem;
     min-height: 44px;
@@ -147,7 +147,7 @@
   .mobile-card {
     background: var(--panel);
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: 0;
     padding: 0.6rem 0.7rem;
     /* Long-press opens the action sheet — suppress the browser's own
        text-selection / native context-menu callout so it doesn't fight
@@ -180,7 +180,7 @@
   .mc-check {
     width: 20px;
     height: 20px;
-    border-radius: 5px;
+    border-radius: 0;
     border: 1px solid var(--border);
     flex: 0 0 auto;
 
@@ -201,7 +201,7 @@
     font-size: 0.72rem;
     color: var(--muted);
     background: var(--panel-2);
-    border-radius: 999px;
+    border-radius: 0;
     padding: 0.1rem 0.5rem;
 
     &.mc-chip-kind {
@@ -269,7 +269,7 @@
     white-space: nowrap;
     background: var(--panel-2);
     border: 1px solid var(--border);
-    border-radius: 999px;
+    border-radius: 0;
     padding: 0.3rem 0.6rem;
     font-size: 0.78rem;
 
@@ -306,7 +306,7 @@
     overflow-y: auto;
     background: var(--panel);
     border-top: 1px solid var(--border);
-    border-radius: 14px 14px 0 0;
+    border-radius: 0;
     padding: 0.5rem 0 env(safe-area-inset-bottom);
     animation: sheet-slide-in 0.18s ease;
     &.closing {
@@ -317,7 +317,7 @@
   .sheet-handle {
     width: 36px;
     height: 4px;
-    border-radius: 2px;
+    border-radius: 0;
     background: var(--border);
     margin: 0.3rem auto 0.5rem;
   }
@@ -357,7 +357,7 @@
       width: 4rem;
       background: var(--panel-2);
       border: 1px solid var(--border);
-      border-radius: 6px;
+      border-radius: 0;
       color: var(--fg);
       padding: 0.3rem 0.4rem;
     }

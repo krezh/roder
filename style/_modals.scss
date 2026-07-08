@@ -65,8 +65,8 @@
   flex-direction: column;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+  border-radius: 0;
+  box-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.9);
   overflow: hidden;
   animation: overlay-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
@@ -157,8 +157,8 @@
   overflow: hidden;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+  border-radius: 0;
+  box-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.9);
   animation: overlay-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
 
   &.closing {
@@ -184,7 +184,7 @@
   background: var(--panel-2);
   border: 1px solid var(--border);
   color: var(--muted);
-  border-radius: 6px;
+  border-radius: 0;
   padding: 0.25rem 0.6rem;
   cursor: pointer;
   display: flex;
@@ -285,7 +285,7 @@
   line-height: 1;
   font-size: 0.8rem;
   padding: 0.2rem 0.45rem;
-  border-radius: 3px;
+  border-radius: 0;
   background: var(--panel-2);
   font-family: monospace;
 }
@@ -303,7 +303,7 @@
   font-weight: 700;
   text-transform: uppercase;
   padding: 0.2rem 0.4rem;
-  border-radius: 3px;
+  border-radius: 0;
   letter-spacing: 0.04em;
 }
 
@@ -332,8 +332,8 @@
   overflow: auto;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  border-radius: 0;
+  box-shadow: 0 16px 40px -8px rgba(0, 0, 0, 0.85);
   animation: overlay-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .pmodal-head {
@@ -377,8 +377,8 @@
   z-index: 71;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  border-radius: 0;
+  box-shadow: 0 14px 34px -8px rgba(0, 0, 0, 0.85);
   padding: 0.25rem;
   min-width: 190px;
   display: flex;
@@ -391,7 +391,7 @@
   color: var(--fg);
   text-align: left;
   padding: 0.35rem 0.6rem;
-  border-radius: 5px;
+  border-radius: 0;
   cursor: pointer;
   font-size: 0.85rem;
   display: flex;
@@ -444,7 +444,7 @@
   font-size: 0.68rem;
   line-height: 1;
   padding: 0.2rem 0.4rem;
-  border-radius: 999px;
+  border-radius: 0;
   border: 1px solid var(--border);
   color: var(--muted);
   cursor: pointer;
@@ -464,7 +464,7 @@
     background: var(--panel-2);
     border: 1px solid var(--border);
     color: var(--fg);
-    border-radius: 5px;
+    border-radius: 0;
     padding: 0.15rem 0.35rem;
     -webkit-appearance: textfield;
     -moz-appearance: textfield;
@@ -480,7 +480,7 @@
     background: var(--accent);
     border: none;
     color: var(--bg);
-    border-radius: 5px;
+    border-radius: 0;
     padding: 0.15rem 0.5rem;
     cursor: pointer;
     &:hover { opacity: 0.85; }
@@ -506,8 +506,8 @@
   z-index: 73;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  border-radius: 0;
+  box-shadow: 0 16px 40px -8px rgba(0, 0, 0, 0.85);
   padding: 1.1rem 1.2rem;
   width: min(380px, 92vw);
   height: fit-content;
@@ -540,8 +540,8 @@
   max-height: 80vh;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  border-radius: 0;
+  box-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.9);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -565,7 +565,7 @@
   font-size: 1.1rem;
   cursor: pointer;
   padding: 0.2rem 0.5rem;
-  border-radius: 4px;
+  border-radius: 0;
   &:hover {
     color: var(--error);
     background: var(--panel-2);
@@ -597,7 +597,7 @@
   kbd {
     background: var(--panel-2);
     border: 1px solid var(--border);
-    border-radius: 4px;
+    border-radius: 0;
     padding: 0.15rem 0.45rem;
     font-family: inherit;
     font-size: 0.75rem;
@@ -630,9 +630,9 @@
   background: var(--panel);
   border: 1px solid var(--border);
   color: var(--fg);
-  border-radius: 8px;
+  border-radius: 0;
   padding: 0.6rem 0.9rem;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 14px 34px -8px rgba(0, 0, 0, 0.85);
   cursor: pointer;
   animation: toast-in 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
   .toast-icon {

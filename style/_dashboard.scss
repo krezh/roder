@@ -2,25 +2,41 @@
 .dashboard {
   padding: 1rem 1.1rem;
 }
-.cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  gap: 0.8rem;
-}
 .card {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
   padding: 0.8rem 0.9rem;
+}
+/* Bordered divider-strip for the top KPI row: the wrap supplies the
+   right/bottom edge and drop shadow, each card supplies its own top/left
+   border — together every cell gets a full 1px border with no doubling, and
+   it still wraps cleanly at any width (each wrapped row becomes another
+   strip). Overrides the generic `.card` full-border above, since these tile
+   edge-to-edge instead of sitting in a gapped grid like `.nodes` does. */
+.cards {
+  display: flex;
+  flex-wrap: wrap;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 6px 14px -6px rgba(0, 0, 0, 0.5);
+
+  .card {
+    flex: 1 1 170px;
+    border-width: 1px 0 0 1px;
+  }
 }
 .stat {
   .stat-num {
+    font-family: "Monaspace Neon NF", ui-monospace, "Cascadia Code", monospace;
     font-size: 1.7rem;
-    font-weight: 700;
+    font-weight: 600;
   }
   .stat-label {
     color: var(--muted);
-    font-size: 0.8rem;
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
   }
   .stat-sub {
     margin-top: 0.3rem;
@@ -41,9 +57,11 @@
 }
 .section {
   margin: 1.4rem 0 0.6rem;
-  font-size: 0.95rem;
+  font-size: 0.76rem;
   color: var(--muted);
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 .nodes {
   display: grid;
@@ -68,7 +86,7 @@
     .bar {
       height: 6px;
       background: var(--panel-2);
-      border-radius: 4px;
+      border-radius: 0;
       overflow: hidden;
       .fill {
         height: 100%;
@@ -88,7 +106,7 @@
   color: var(--muted);
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 0;
   padding: 0.05rem 0.35rem;
 }
 /* Dashboard cluster-usage card (no tooltip). */
@@ -106,7 +124,7 @@
     flex: 1;
     height: 7px;
     background: var(--panel-2);
-    border-radius: 4px;
+    border-radius: 0;
     overflow: hidden;
     .fill {
       height: 100%;
@@ -129,7 +147,7 @@
   gap: 0.6rem;
   padding: 0.25rem 0.6rem;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 0;
   background: var(--panel-2);
   cursor: default;
   white-space: nowrap;
@@ -170,7 +188,7 @@
   position: fixed;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 0;
   padding: 0.45rem 0.7rem;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
   font-size: 0.9rem;
@@ -224,7 +242,7 @@
 .chart-container {
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 0;
   padding: 1rem;
 }
 .chart-svg {

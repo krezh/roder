@@ -10,8 +10,45 @@
   min-height: 0;
 }
 .resource-view > .view-head,
+.resource-view > .stat-strip,
 .resource-view > .bulkbar-wrap {
   flex: 0 0 auto;
+}
+
+/* Live status-breakdown strip under the view head: one bordered bar split
+   into segments by vertical dividers, same construction as the dashboard's
+   `.cards` strip (see _dashboard.scss) — right/bottom edge + shadow on the
+   wrap, top/left border on each segment. */
+.stat-strip {
+  display: flex;
+  margin: 0 0.9rem 0.6rem;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 6px 14px -6px rgba(0, 0, 0, 0.5);
+}
+.strip-seg {
+  flex: 1 1 0;
+  padding: 0.45rem 0.8rem;
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+}
+.strip-lbl {
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.strip-val {
+  font-family: "Monaspace Neon NF", ui-monospace, "Cascadia Code", monospace;
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin-top: 0.1rem;
+  font-variant-numeric: tabular-nums;
+  &.ok { color: var(--ok); }
+  &.pending { color: var(--pending); }
+  &.warn { color: var(--warn); }
+  &.err { color: var(--error); }
 }
 .table-wrap {
   flex: 1;
@@ -27,6 +64,7 @@
   display: grid;
   /* grid-template-columns is set inline per kind (column count varies). */
   width: 100%;
+  font-family: "Monaspace Neon NF", ui-monospace, "Cascadia Code", monospace;
   font-variant-numeric: tabular-nums;
   align-content: start;
   /* Fixed row height. The collapse animation interpolates the cell track between
@@ -66,7 +104,7 @@
   white-space: nowrap;
   min-width: 0;
   align-self: stretch;
-  font-weight: 500;
+  font-weight: 600;
 }
 .cw {
   display: grid;
@@ -84,7 +122,7 @@
   min-width: 0;
 }
 .cell-name {
-  font-weight: 500;
+  font-weight: 600;
   .cwi {
     display: flex;
     align-items: center;
@@ -103,13 +141,13 @@
 }
 .trend-arrow.trend-up {
   color: var(--error);
-  font-weight: 700;
+  font-weight: 600;
   margin-left: 1px;
   animation: trend-fade 2s ease forwards;
 }
 .trend-arrow.trend-down {
   color: var(--ok);
-  font-weight: 700;
+  font-weight: 600;
   margin-left: 1px;
   animation: trend-fade 2s ease forwards;
 }
@@ -148,10 +186,47 @@
   }
 }
 
+/* %CPU/%MEM saturation cell: value plus a small proportional bar underneath,
+   set by FlashTd's `pct_bar` prop. `.cwi`'s tall line-height is a centering
+   trick for plain single-line text; a flex column here overrides that so the
+   two-line (value + bar) content centers within the fixed row height instead. */
+.pctcell {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.16rem;
+  height: 100%;
+  line-height: 1.15;
+}
+.pct-bar {
+  height: 2px;
+  width: 36px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.pct-fill {
+  height: 100%;
+}
+
+/* Solid-fill status pill for Phase/Status/Ready columns — colored via an
+   inline `background`/`color` style set by FlashTd's `pill` prop, not by a
+   modifier class (the color is data-driven, not a fixed variant set). */
+.pill {
+  display: inline-block;
+  vertical-align: middle;
+  line-height: 1.3;
+  border-radius: 0;
+  padding: 0.16rem 0.55rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  background: var(--panel-2);
+  color: var(--fg);
+}
+
 /* ---- animations ---- */
 @keyframes cell-flash {
   0% {
-    background: var(--flash-bg, rgba(76, 139, 245, 0.45));
+    background: var(--flash-bg, rgba(232, 134, 63, 0.45));
   }
   100% {
     background: transparent;
@@ -159,7 +234,7 @@
 }
 .cell.flash {
   animation: cell-flash 1.5s ease;
-  border-radius: 4px;
+  border-radius: 0;
 }
 /* Hidden anchor row: always in the DOM, holds max-content text per column so
    max-content track widths stay stable while virtualized rows scroll in/out. */

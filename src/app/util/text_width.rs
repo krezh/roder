@@ -28,15 +28,23 @@ fn make_ctx() -> Option<web_sys::CanvasRenderingContext2d> {
         .ok()??
         .dyn_into::<web_sys::CanvasRenderingContext2d>()
         .ok()?;
-    // Match the table's actual cell font (`.cell { font-weight: 500 }`, family/size
-    // from `body`) so measured widths line up with what the grid really renders.
-    let body_font = document
-        .body()
-        .and_then(|b| window.get_computed_style(&b).ok().flatten())
-        .and_then(|s| s.get_property_value("font").ok());
-    if let Some(font) = body_font {
-        ctx.set_font(&format!("500 {font}"));
-    }
+    // Match the table's actual cell font (`.cell { font-weight: 500 }`). `.grid-table`
+    // sets its own font-family (Monaspace Neon NF) distinct from `body` (Rubik), so
+    // measuring from `body` would size columns against the wrong glyph widths —
+    // that mismatch made columns visibly jitter as different rows scrolled into
+    // view and got (mis)measured. Measure from a live `.grid-table` instead, with
+    // a hardcoded fallback for the rare case none is mounted yet.
+    let table_font = document
+        .query_selector(".grid-table")
+        .ok()
+        .flatten()
+        .and_then(|el| window.get_computed_style(&el).ok().flatten())
+        .and_then(|s| s.get_property_value("font").ok())
+        .filter(|f| !f.is_empty());
+    let font = table_font.unwrap_or_else(|| {
+        "13px \"Monaspace Neon NF\", ui-monospace, \"Cascadia Code\", monospace".to_string()
+    });
+    ctx.set_font(&format!("500 {font}"));
     Some(ctx)
 }
 

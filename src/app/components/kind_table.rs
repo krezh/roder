@@ -237,6 +237,19 @@ pub(crate) fn KindTable(
 
     let rows = t.rows;
     let selected = t.selected;
+    // Live status breakdown for the stat strip — RowStatus is a fieldless enum,
+    // so `as usize` is its declaration-order discriminant (Ok=0, Pending=1,
+    // Warn=2, Error=3, Done=4, Unknown=5); Done/Unknown fold into the total
+    // only, they don't get their own strip segment.
+    let status_counts = Memo::new(move |_| {
+        rows.with(|m| {
+            let mut c = [0usize; 6];
+            for r in m.values() {
+                c[r.status as usize] += 1;
+            }
+            (m.len(), c)
+        })
+    });
     // `RowStatus::Warn` is reserved for the suspended case in the Flux projector
     // (see `ready_message_cells`), so it doubles as the signal for which of
     // Suspend/Resume to show. `None` (mixed selection) falls back to both.
@@ -473,6 +486,13 @@ pub(crate) fn KindTable(
                     <button class="view-close" on:click=move |_| cb.run(())>"×"</button>
                 })}
             </div>
+            <div class="stat-strip">
+                <div class="strip-seg"><div class="strip-lbl">"Total"</div><div class="strip-val">{move || status_counts.get().0}</div></div>
+                <div class="strip-seg"><div class="strip-lbl">"OK"</div><div class="strip-val ok">{move || status_counts.get().1[0]}</div></div>
+                <div class="strip-seg"><div class="strip-lbl">"Pending"</div><div class="strip-val pending">{move || status_counts.get().1[1]}</div></div>
+                <div class="strip-seg"><div class="strip-lbl">"Warn"</div><div class="strip-val warn">{move || status_counts.get().1[2]}</div></div>
+                <div class="strip-seg"><div class="strip-lbl">"Error"</div><div class="strip-val err">{move || status_counts.get().1[3]}</div></div>
+            </div>
             <div class="bulkbar-wrap" class:open=move || !selected.get().is_empty()>
                 <div class="bulkbar">
                     <span class="bulk-count">{move || format!("{} selected", selected.get().len())}</span>
@@ -632,12 +652,12 @@ pub(crate) fn KindTable(
                                                     _ => "unknown",
                                                 }) /> }.into_any()
                                         } else if pct_thresh_cols.with_untracked(|s| s.contains(&i)) {
-                                            view! { <FlashTd value=val no_flash=true trend=trend_sig
+                                            view! { <FlashTd value=val no_flash=true trend=trend_sig pct_bar=true
                                                 color=Signal::derive(move || pct_thresh_color(&val())) /> }.into_any()
                                         } else if metric_cols.with_untracked(|v| v.contains(&i)) {
                                             view! { <FlashTd value=val no_flash=true trend=trend_sig /> }.into_any()
                                         } else if colored_cols.with_untracked(|v| v.contains(&i)) {
-                                            view! { <FlashTd value=val flash=flash
+                                            view! { <FlashTd value=val flash=flash pill=true
                                                 color=Signal::derive(move || dot_class(row.get().map(|r| r.status).unwrap_or(RowStatus::Unknown))) /> }.into_any()
                                         } else {
                                             view! { <FlashTd value=val flash=flash trend=trend_sig /> }.into_any()

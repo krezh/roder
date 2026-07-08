@@ -63,7 +63,7 @@
   overflow: auto;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 0;
   padding: 0.75rem;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 12px;
@@ -90,7 +90,7 @@
   width: 100%;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 0;
   padding: 0.75rem;
   color: var(--fg);
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
@@ -102,7 +102,7 @@
   background: #000;
   color: #ffffff;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 0;
   margin: 0 0.9rem 0.5rem;
   padding: 0.6rem 0.75rem;
   font-family: "Monaspace Neon NF", ui-monospace, "SF Mono", Menlo, monospace;
@@ -122,7 +122,7 @@
   .log-pod {
     display: inline-block;
     white-space: nowrap;
-    border-radius: 4px;
+    border-radius: 0;
     padding: 0 0.4rem;
     margin-right: 0.45rem;
     color: #e6edf3;
@@ -165,7 +165,7 @@
   background: var(--panel-2);
   border: 1px solid var(--border);
   color: var(--fg);
-  border-radius: 5px;
+  border-radius: 0;
   padding: 0.15rem 0.5rem;
   font-size: 0.72rem;
   width: 120px;
@@ -178,7 +178,7 @@
   background: transparent;
   border: 1px solid transparent;
   color: var(--muted);
-  border-radius: 9999px;
+  border-radius: 0;
   padding: 0.1rem 0.5rem;
   font-size: 0.72rem;
   font-weight: 700;
@@ -207,7 +207,7 @@
   display: inline-block;
   font-size: 0.72em;
   font-weight: 700;
-  border-radius: 9999px;
+  border-radius: 0;
   padding: 0.05em 0.4em;
   margin-right: 0.45em;
   letter-spacing: 0.04em;
@@ -224,7 +224,7 @@
   background: var(--panel-2);
   border: 1px solid var(--border);
   color: var(--muted);
-  border-radius: 5px;
+  border-radius: 0;
   padding: 0.1rem 0.55rem;
   font-size: 0.72rem;
   cursor: pointer;
@@ -432,7 +432,7 @@ table.rules {
     margin: 0;
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 0;
     padding: 0.5rem 0.6rem;
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
     font-size: 12px;
@@ -465,7 +465,7 @@ table.rules {
   align-items: center;
   gap: 0.6rem;
   padding: 0.3rem 0.5rem;
-  border-radius: 5px;
+  border-radius: 0;
   cursor: pointer;
   font-size: 0.85rem;
   &:hover {

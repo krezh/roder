@@ -4,7 +4,7 @@
   background: var(--panel-2);
   border: 1px solid var(--border);
   color: var(--fg);
-  border-radius: 6px;
+  border-radius: 0;
   padding: 0.3rem 0.5rem;
   outline: none;
 }
@@ -38,7 +38,7 @@
     align-items: center;
     background: var(--panel-2);
     border: 1px solid var(--border);
-    border-radius: 20px;
+    border-radius: 0;
     padding: 0.15rem 0.6rem;
     gap: 0.3rem;
     overflow: hidden;
@@ -111,7 +111,7 @@
   font-size: 0.875rem;
   text-align: center;
   p { margin: 0; line-height: 1.6; }
-  kbd { background: var(--surface); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; font-size: 0.8em; }
+  kbd { background: var(--surface); border: 1px solid var(--border); border-radius: 0; padding: 0 4px; font-size: 0.8em; }
 }
 .pane {
   min-width: 0;
@@ -119,7 +119,7 @@
   display: flex;
   flex-direction: column;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 0;
   overflow: hidden;
   background: var(--bg);
   > .resource-view {
@@ -132,7 +132,7 @@
 .pane-badge {
   font-size: 0.7rem;
   padding: 1px 6px;
-  border-radius: 10px;
+  border-radius: 0;
   white-space: nowrap;
   max-width: 120px;
   overflow: hidden;
@@ -145,7 +145,7 @@
   background: var(--panel-2);
   color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 0;
   padding: 0.25rem 0.5rem;
   cursor: pointer;
   &:focus { outline: none; border-color: var(--accent); }

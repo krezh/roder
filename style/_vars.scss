@@ -1,5 +1,7 @@
-/* Self-hosted (CSP font-src 'self', no external CDN). Inter is the UI font, the
-   Nerd Font is for logs. `just fonts` regenerates the smaller woff2 versions. */
+/* Self-hosted (CSP font-src 'self', no external CDN). Rubik is the UI font;
+   Monaspace Neon NF is scoped to the log viewer and to numeric/tabular
+   content (resource table, stat-strip values) where fixed-width digits help
+   alignment — see `.grid-table`/`.strip-val`/`.stat-num`. */
 @font-face {
   font-family: "Rubik";
   src:
@@ -20,20 +22,28 @@
   font-weight: 600;
   font-display: swap;
 }
+@font-face {
+  font-family: "Monaspace Neon NF";
+  src: url("/fonts/monaspace-neon-nf-bold.woff2") format("woff2");
+  font-weight: 700;
+  font-display: swap;
+}
 
 :root {
-  --bg: #0e1116;
-  --panel: #161b22;
-  --panel-2: #1b212b;
-  --border: #232b36;
-  --fg: #e6edf3;
-  --muted: #8b949e;
-  --accent: #4c8bf5;
-  --ok: #3fb950;
-  --warn: #d29922;
-  --error: #f85149;
-  --pending: #58a6ff;
-  --unknown: #6e7681;
+  --bg: #0c0c0d;
+  --panel: #111111;
+  --panel-2: #151515;
+  --side-bg: #0e0e0e;
+  --border: #242424;
+  --fg: #f0efec;
+  --muted: #7a7a7a;
+  --accent: #e8863f;
+  --ok: #6fae5a;
+  --warn: #d9a441;
+  --error: #d9544f;
+  --pending: #d9a441;
+  --unknown: #7a7a7a;
+  --pill-fg: #0c0c0d;
   color-scheme: dark light;
 }
 
@@ -60,4 +70,8 @@ body {
   font-family: "Rubik", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   font-size: 13px;
   line-height: 1.45;
+}
+
+.font-mono {
+  font-family: "Monaspace Neon NF", ui-monospace, "Cascadia Code", monospace;
 }

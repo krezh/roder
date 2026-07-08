@@ -68,6 +68,15 @@ pub(crate) fn FlashTd<F>(
     #[prop(optional)] no_flash: bool,
     #[prop(optional, into)] flash: Option<Signal<bool>>,
     #[prop(optional)] trend: Option<Signal<Trend>>,
+    /// Render `color` as a solid-fill status pill around the value instead of
+    /// coloring the cell text directly (used for Phase/Status/Ready columns).
+    #[prop(optional)]
+    pill: bool,
+    /// Render a small proportional bar under the value, filled by `color`
+    /// (falling back to `ok` when `color` is empty/unset) — used for the
+    /// %CPU/%MEM saturation columns.
+    #[prop(optional)]
+    pct_bar: bool,
 ) -> impl IntoView
 where
     F: Fn() -> String + Copy + Send + Sync + 'static,
@@ -117,12 +126,39 @@ where
             style=move || color.map(|c| {
                 let v = c.get();
                 if v.is_empty() { return String::new(); }
-                format!("color:var(--{v});--flash-bg:color-mix(in srgb, var(--{v}) 45%, transparent)")
+                let flash_bg = format!("--flash-bg:color-mix(in srgb, var(--{v}) 45%, transparent)");
+                if pill {
+                    flash_bg
+                } else {
+                    format!("color:var(--{v});{flash_bg}")
+                }
             }).unwrap_or_default()>
             // Newlines mark a list value; collapse to a compact inline form for the
             // cell (the tooltip renders the real list from data-tip).
             <div class="cw"><div class="cwi">
-                {move || value().replace('\n', ", ")}
+                {move || {
+                    let v = value().replace('\n', ", ");
+                    if pill {
+                        let style = color.map(|c| c.get()).filter(|s| !s.is_empty())
+                            .map(|s| format!("background:var(--{s});color:var(--pill-fg)"))
+                            .unwrap_or_default();
+                        view! { <span class="pill" style=style>{v}</span> }.into_any()
+                    } else if pct_bar {
+                        let bar_color = color.map(|c| c.get()).filter(|s| !s.is_empty()).unwrap_or("ok");
+                        let pct = v.parse::<f64>().ok().map(|p| p.clamp(0.0, 100.0));
+                        view! {
+                            <div class="pctcell">
+                                <span>{v.clone()}</span>
+                                {pct.map(|p| view! {
+                                    <div class="pct-bar"><div class="pct-fill"
+                                        style=format!("width:{p}%;background:var(--{bar_color})")></div></div>
+                                })}
+                            </div>
+                        }.into_any()
+                    } else {
+                        v.into_any()
+                    }
+                }}
                 {move || trend_arrow().map(|a| view! { <span class=trend_class>{a}</span> })}
             </div></div>
         </div>

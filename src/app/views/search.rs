@@ -661,7 +661,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                                                                         mr.row.cells.get(i).cloned()
                                                                     })
                                                                     .unwrap_or_default()
-                                                            } no_flash=col_is_metric
+                                                            } no_flash=col_is_metric pill=col_colored
                                                                 color=Signal::derive(move || {
                                                                     if col_bool_colored {
                                                                         let cn = col_name_sv.get_value();
@@ -701,7 +701,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                                                                         mr.row.cells.get(i).cloned()
                                                                     })
                                                                     .unwrap_or_default()
-                                                            } no_flash=true trend=trend_sig
+                                                            } no_flash=true trend=trend_sig pct_bar=true
                                                                 color=Signal::derive(move || {
                                                                     // `merged.get()` yields an owned
                                                                     // `Option<MergedRow>`, so we clone the

@@ -29,6 +29,7 @@ use detail::DetailDrawer;
 use detail::Tab;
 use logs::LogSidebar;
 use mobile::MobileShell;
+use overlays::access_review::AccessReview;
 use overlays::confirm::{Confirm, ConfirmDialog};
 use overlays::context_menu::ContextMenu;
 use overlays::exec::ExecWindow;
@@ -39,10 +40,10 @@ use overlays::toast::{Toast, ToastView};
 use overlays::tree::ResourceTreeWindow;
 use overlays::AlertsPanel;
 use state::{
-    AlertsData, AlertsOpen, Catalog, ConnectionState, CtxMenu, ExecOpen, ExecTarget, FilterFocus,
-    LogPods, LogTarget, NavOpen, NsPaletteOpen, OnlyProblems, PaletteOpen, PodModalTarget,
-    ResourceFilter, ShortcutsOpen, TableRows, TableSelected, Tick, TreeOpen, WorkspaceConf,
-    WorkspaceConfig,
+    AccessReviewOpen, AlertsData, AlertsOpen, Catalog, ConnectionState, CtxMenu, ExecOpen,
+    ExecTarget, FilterFocus, LogPods, LogTarget, NavOpen, NsPaletteOpen, OnlyProblems, PaletteOpen,
+    PodModalTarget, ResourceFilter, ShortcutsOpen, TableRows, TableSelected, Tick, TreeOpen,
+    WorkspaceConf, WorkspaceConfig,
 };
 use views::resource::ResourceView;
 use views::search::SearchResultsView;
@@ -129,6 +130,8 @@ pub fn App() -> impl IntoView {
     provide_context(ShortcutsOpen(shortcuts_open));
     let alerts_open = RwSignal::new(false);
     provide_context(AlertsOpen(alerts_open));
+    let access_review_open = RwSignal::new(false);
+    provide_context(AccessReviewOpen(access_review_open));
     let alerts_data: RwSignal<Option<Vec<roder_core::FiringAlert>>> = RwSignal::new(None);
     provide_context(AlertsData(alerts_data));
     // Seed the alerts button from the last-known list so it doesn't flash empty
@@ -349,6 +352,7 @@ pub fn App() -> impl IntoView {
                 ns_palette_open.set(false);
                 shortcuts_open.set(false);
                 alerts_open.set(false);
+                access_review_open.set(false);
                 ctx_menu.set(None);
                 detail.set(None);
             }
@@ -410,6 +414,7 @@ pub fn App() -> impl IntoView {
                         <ResourceTreeWindow />
                         <ShortcutsHelp />
                         <AlertsPanel />
+                        <AccessReview />
                         <ToastView />
                     </div>
                     <TooltipLayer />

@@ -1,3 +1,4 @@
+pub(crate) mod access_review;
 mod alerts;
 pub(crate) mod confirm;
 pub(crate) mod context_menu;

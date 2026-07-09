@@ -5,6 +5,7 @@ use k8s_openapi::api::authorization::v1::{
     ResourceAttributes, SelfSubjectAccessReview, SelfSubjectAccessReviewSpec,
 };
 use kube::api::{Api, PostParams};
+use roder_core::{AccessRow, ACCESS_REVIEW_VERBS};
 
 use super::Backend;
 
@@ -53,5 +54,26 @@ impl Backend {
         cache.retain(|_, (at, _)| at.elapsed() < TTL * 10);
         cache.insert(ck, (std::time::Instant::now(), allowed));
         allowed
+    }
+
+    /// "What can I do?" across every known resource kind, given OIDC
+    /// passthrough — the per-kind `can()` calls run concurrently and share
+    /// its cache, so re-opening the review shortly after is cheap.
+    pub async fn access_review(&self, ns: Option<&str>) -> Vec<AccessRow> {
+        let futs = self.kinds().into_iter().map(|k| async move {
+            let mut verbs = Vec::with_capacity(ACCESS_REVIEW_VERBS.len());
+            for verb in ACCESS_REVIEW_VERBS {
+                verbs.push((verb.to_string(), self.can(verb, &k.key, ns).await));
+            }
+            AccessRow {
+                kind: k.kind,
+                group: k.group,
+                namespaced: k.namespaced,
+                verbs,
+            }
+        });
+        let mut rows = futures::future::join_all(futs).await;
+        rows.sort_by(|a, b| a.kind.cmp(&b.kind).then(a.group.cmp(&b.group)));
+        rows
     }
 }

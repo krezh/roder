@@ -10,8 +10,8 @@ use crate::app::hooks::use_sse_subscription;
 use crate::app::overlays::confirm::Confirm;
 use crate::app::overlays::toast::{show_toast, show_toast_detail, Toast, ToastKind};
 use crate::app::state::{
-    AlertsData, AlertsOpen, Catalog, ConnectionState, NavOpen, NsPaletteOpen, OnlyProblems,
-    PaletteOpen,
+    AccessReviewOpen, AlertsData, AlertsOpen, Catalog, ConnectionState, NavOpen, NsPaletteOpen,
+    OnlyProblems, PaletteOpen,
 };
 use crate::app::util::format::{cluster_usage_pct, pct};
 use crate::data;
@@ -45,6 +45,7 @@ pub(crate) fn Topbar() -> impl IntoView {
             <FailingBadge />
             <FluxFailingBadge />
             <AlertsButton />
+            <AccessReviewButton />
             <Identity />
         </header>
     }
@@ -483,6 +484,18 @@ fn Brand() -> impl IntoView {
                 {move || connected.get().unwrap_or_else(|| "Connected".to_string())}
             </span>
         </span>
+    }
+}
+
+/// Opens the RBAC access review overlay ("what can I do?", given OIDC passthrough).
+#[component]
+fn AccessReviewButton() -> impl IntoView {
+    let open = expect_context::<AccessReviewOpen>().0;
+    view! {
+        <button class="access-btn" on:click=move |_| open.set(true)>
+            "Access"
+            <span class="tooltip">"RBAC access review — what can I do?"</span>
+        </button>
     }
 }
 

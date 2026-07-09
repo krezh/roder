@@ -50,6 +50,8 @@
 
 .sync-btn { @extend %tooltip-chip-btn; }
 
+.access-btn { @extend %tooltip-chip-btn; }
+
 .errfilter {
   @extend %chip-btn;
   &.active {

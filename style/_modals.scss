@@ -28,7 +28,8 @@
 .modal.closing,
 .shortcuts-modal.closing,
 .exec-window.closing,
-.tree-window.closing {
+.tree-window.closing,
+.access-modal.closing {
   animation: overlay-out 0.16s ease-in forwards;
 }
 .palette-scrim.closing,
@@ -36,7 +37,8 @@
 .modal-scrim.closing,
 .shortcuts-scrim.closing,
 .exec-scrim.closing,
-.tree-scrim.closing {
+.tree-scrim.closing,
+.access-scrim.closing {
   animation: scrim-out 0.16s ease-in forwards;
 }
 .ctx-menu.closing {
@@ -610,6 +612,115 @@
     color: var(--fg-dim, var(--fg));
   }
 }
+
+/* ---- access review overlay ---- */
+.access-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 50;
+  animation: scrim-in 0.15s ease;
+}
+.access-modal {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  z-index: 51;
+  width: min(720px, 92vw);
+  // Fixed (not fit-content): the row count varies a lot between "Loading…"
+  // and the loaded table, and fit-content made the whole modal visibly jump
+  // in size the moment the fetch resolved, after it had already animated in.
+  height: 80vh;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  box-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.9);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: overlay-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.access-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 1rem 1.2rem;
+  border-bottom: 1px solid var(--border);
+}
+.access-title {
+  font-weight: 700;
+  font-size: 1rem;
+}
+.access-sub {
+  color: var(--muted);
+  font-size: 0.8rem;
+  flex: 1;
+}
+.access-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 0.2rem 0.5rem;
+  border-radius: 0;
+  &:hover {
+    color: var(--error);
+    background: var(--panel-2);
+  }
+}
+.access-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0 1.2rem 1rem;
+}
+.access-loading, .access-error {
+  padding: 1rem 0;
+}
+// `position: sticky` on a <th> inside a `<table>` is unreliable across
+// browsers (the header can fail to pin, letting scrolled rows render on top
+// of it) — instead the header is its own non-scrolling table, column widths
+// kept in lockstep with the body table via a shared `<colgroup>`.
+.access-table-head {
+  flex: none;
+  padding-top: 0.5rem;
+}
+.access-table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.access-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  th, td {
+    padding: 0.3rem 0.6rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    background: var(--panel);
+    color: var(--muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+  }
+  .access-kind {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .access-cell {
+    text-align: center;
+  }
+}
+.access-yes { color: var(--ok); }
+.access-no { color: var(--muted); }
 
 /* ---- toast notifications ---- */
 @keyframes toast-in {

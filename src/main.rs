@@ -55,6 +55,7 @@ async fn main() {
         .route("/api/watch", get(api::watch))
         .route("/api/watch-multi", get(api::watch_multi))
         .route("/api/permissions", get(api::permissions))
+        .route("/api/access-review", get(api::access_review))
         .route("/api/logs", get(api::logs))
         .route("/api/metrics", get(api::metrics_history))
         .route("/api/alerts", get(api::alerts))

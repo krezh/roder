@@ -25,7 +25,6 @@
 ## Resources
 
 - Port forwarding
-- RBAC / access review (show what the current user can/can't do, given OIDC passthrough)
 - Server-side dry-run diff before YAML apply
 - Cluster-wide warning events timeline (sorted, deduped by count)
 
@@ -33,6 +32,10 @@
 
 - Prometheus range queries — CPU/mem history graphs on pod/node detail
 - cert-manager: surface Certificate expiry/renewal state + force renew action
+
+## Style
+
+- Overlays should use blurred background, things like the table titlebar, maybe the description view
 
 ## Desktop (Low prio)
 

@@ -91,6 +91,10 @@ pub(crate) struct ShortcutsOpen(pub(crate) RwSignal<bool>);
 #[derive(Clone, Copy)]
 pub(crate) struct AlertsOpen(pub(crate) RwSignal<bool>);
 
+/// Whether the RBAC access-review overlay is open.
+#[derive(Clone, Copy)]
+pub(crate) struct AccessReviewOpen(pub(crate) RwSignal<bool>);
+
 /// Cached list of firing alerts from AlertManager (None = not yet fetched).
 #[derive(Clone, Copy)]
 pub(crate) struct AlertsData(pub(crate) RwSignal<Option<Vec<FiringAlert>>>);

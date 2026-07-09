@@ -418,6 +418,22 @@ pub async fn permissions(State(state): State<AppState>, Query(q): Query<PermQuer
 }
 
 #[derive(Deserialize)]
+pub struct AccessReviewQuery {
+    namespace: Option<String>,
+}
+
+/// RBAC access review: which verbs the current identity may perform across
+/// every known resource kind, given OIDC passthrough.
+pub async fn access_review(
+    State(state): State<AppState>,
+    Query(q): Query<AccessReviewQuery>,
+) -> Response {
+    let b = backend_or_return!(state);
+    let ns = ns_filter(&q.namespace);
+    Json(b.access_review(ns).await).into_response()
+}
+
+#[derive(Deserialize)]
 pub struct LogQuery {
     namespace: String,
     /// Single-pod logs.

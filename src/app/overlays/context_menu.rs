@@ -45,6 +45,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             let has_source_ref = kk.has_source_ref();
             let is_eso = kk.is_eso();
             let is_cronjob = kk.is_cronjob();
+            let is_node = kk.is_node();
             let style = format!("left:{}px;top:{}px", m.x, m.y);
 
             // When the right-clicked row is part of a multi-selection, all
@@ -90,6 +91,17 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             });
             let show_suspend = suspend_state != Some(true);
             let show_resume = suspend_state != Some(false);
+            // Same `RowStatus::Warn` convention, scoped to Node rows instead of
+            // Flux rows — see `node_cells` for where it's set from `spec.unschedulable`.
+            let cordon_state: Option<bool> = rows_opt.and_then(|rows| {
+                rows.with_untracked(|rm| {
+                    let mut states = target_uids.iter().filter_map(|uid| rm.get(uid)).map(|r| r.status == RowStatus::Warn);
+                    let first = states.next()?;
+                    states.all(|s| s == first).then_some(first)
+                })
+            });
+            let show_cordon = cordon_state != Some(true);
+            let show_uncordon = cordon_state != Some(false);
 
             let open = { let t = m.target.clone(); move |_| { detail.set(Some(t.clone())); do_close(); } };
             let open_tree = { let t = m.target.clone(); move |_| { tree_open.set(Some(t.clone())); do_close(); } };
@@ -164,6 +176,8 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             let resume    = bulk_act!("flux-resume");
             let refresh   = bulk_act!("eso-refresh");
             let trigger   = bulk_act!("cronjob-trigger");
+            let cordon    = bulk_act!("cordon");
+            let uncordon  = bulk_act!("uncordon");
             let delete = {
                 let ts = targets.clone();
                 move |_| {
@@ -305,6 +319,8 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                         {show_resume.then(|| view! { <button class="ctx-item" on:click=resume>"Resume"</button> })}
                     })}
                     {is_eso.then(|| view! { <button class="ctx-item" on:click=refresh>"Refresh"</button> })}
+                    {(is_node && show_cordon).then(|| view! { <button class="ctx-item" on:click=cordon>"Cordon"</button> })}
+                    {(is_node && show_uncordon).then(|| view! { <button class="ctx-item" on:click=uncordon>"Uncordon"</button> })}
                     <button class="ctx-item danger" on:click=delete>"Delete"</button>
                 </div>
             }

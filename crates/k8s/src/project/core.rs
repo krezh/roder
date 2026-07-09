@@ -93,12 +93,26 @@ pub(crate) fn service_cells(data: &Value) -> (Vec<String>, RowStatus) {
 pub(crate) fn node_cells(data: &Value) -> (Vec<String>, RowStatus) {
     let ready = condition_status(data, "Ready");
     let version = str_at(data, &["status", "nodeInfo", "kubeletVersion"]).unwrap_or_default();
-    let label = if ready.as_deref() == Some("True") {
-        "Ready".to_string()
-    } else {
-        "NotReady".to_string()
+    let cordoned = data
+        .get("spec")
+        .and_then(|s| s.get("unschedulable"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let label = match (ready.as_deref() == Some("True"), cordoned) {
+        (true, true) => "Ready,SchedulingDisabled".to_string(),
+        (true, false) => "Ready".to_string(),
+        (false, true) => "NotReady,SchedulingDisabled".to_string(),
+        (false, false) => "NotReady".to_string(),
     };
-    (vec![label, version], cond_to_status(ready.as_deref()))
+    // Cordoned overrides the Ready-derived status so the context menu can key
+    // off `RowStatus::Warn` to decide which of Cordon/Uncordon to show — the
+    // same convention already used for Flux's suspended state.
+    let status = if cordoned {
+        RowStatus::Warn
+    } else {
+        cond_to_status(ready.as_deref())
+    };
+    (vec![label, version], status)
 }
 
 pub(crate) fn pv_cells(data: &Value) -> (Vec<String>, RowStatus) {

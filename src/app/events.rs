@@ -29,6 +29,8 @@ fn action_label(action: &str) -> &str {
         "flux-reset" => "Reset",
         "flux-suspend" => "Suspended",
         "flux-resume" => "Resumed",
+        "cordon" => "Cordoned",
+        "uncordon" => "Uncordoned",
         "eso-refresh" => "Refreshed",
         "cronjob-trigger" => "Triggered",
         other => other,

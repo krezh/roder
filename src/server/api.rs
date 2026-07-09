@@ -347,6 +347,8 @@ pub async fn action(
             "restart" => b.rollout_restart(key, ns, name).await,
             "flux-suspend" => b.flux_suspend(key, ns, name, true).await,
             "flux-resume" => b.flux_suspend(key, ns, name, false).await,
+            "cordon" => b.cordon(key, name, true).await,
+            "uncordon" => b.cordon(key, name, false).await,
             "flux-reconcile" => {
                 b.flux_reconcile(
                     key,

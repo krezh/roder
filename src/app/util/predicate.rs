@@ -16,6 +16,10 @@ impl<'a> KindKind<'a> {
         self.group.is_empty() && self.kind == "Pod"
     }
 
+    pub(crate) fn is_node(&self) -> bool {
+        self.group.is_empty() && self.kind == "Node"
+    }
+
     pub(crate) fn is_workload(&self) -> bool {
         self.group == "apps"
             && matches!(

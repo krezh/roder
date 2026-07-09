@@ -28,6 +28,18 @@ impl Backend {
             .await
     }
 
+    /// Cordon (`unschedulable: true`) or uncordon a Node. Node is cluster-scoped,
+    /// so there's no namespace to pass through.
+    pub async fn cordon(&self, key: &str, name: &str, unschedulable: bool) -> Result<(), K8sError> {
+        self.merge_patch(
+            key,
+            None,
+            name,
+            json!({ "spec": { "unschedulable": unschedulable } }),
+        )
+        .await
+    }
+
     pub async fn rollout_restart(
         &self,
         key: &str,

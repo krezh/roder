@@ -33,10 +33,6 @@
 - Prometheus range queries — CPU/mem history graphs on pod/node detail
 - cert-manager: surface Certificate expiry/renewal state + force renew action
 
-## Style
-
-- Overlays should use blurred background, things like the table titlebar, maybe the description view
-
 ## Desktop (Low prio)
 
 - Look into creating a Tauri desktop app

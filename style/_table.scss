@@ -15,22 +15,21 @@
   flex: 0 0 auto;
 }
 
-/* Live status-breakdown strip under the view head: one bordered bar split
-   into segments by vertical dividers, same construction as the dashboard's
-   `.cards` strip (see _dashboard.scss) — right/bottom edge + shadow on the
-   wrap, top/left border on each segment. */
+/* Live status-breakdown strip under the view head: each segment is its own
+   elevated tile (gap-separated, own border + shadow), matching the
+   dashboard's `.cards` (see _dashboard.scss). */
 .stat-strip {
   display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
   margin: 0 0.9rem 0.6rem;
-  border-right: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  box-shadow: 0 6px 14px -6px rgba(0, 0, 0, 0.5);
 }
 .strip-seg {
   flex: 1 1 0;
   padding: 0.45rem 0.8rem;
-  border-top: 1px solid var(--border);
-  border-left: 1px solid var(--border);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 14px -6px rgba(0, 0, 0, 0.5);
 }
 .strip-lbl {
   font-size: 0.62rem;
@@ -50,10 +49,16 @@
   &.warn { color: var(--warn); }
   &.err { color: var(--error); }
 }
+/* Boxed to match the stat-strip/dashboard cards above it: same margin,
+   border, and shadow, so the whole view reads as stacked elevated panels. */
 .table-wrap {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  margin: 0 0.9rem 0.9rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 14px -6px rgba(0, 0, 0, 0.5);
 }
 
 /* The resource list is a CSS grid (not an HTML <table>): a <table>'s collapsing
@@ -82,7 +87,8 @@
   position: sticky;
   top: 0;
   z-index: 1;
-  background: var(--panel);
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+  backdrop-filter: blur(10px);
   .cell {
     color: var(--muted);
     font-weight: 600;

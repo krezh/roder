@@ -7,22 +7,17 @@
   border: 1px solid var(--border);
   padding: 0.8rem 0.9rem;
 }
-/* Bordered divider-strip for the top KPI row: the wrap supplies the
-   right/bottom edge and drop shadow, each card supplies its own top/left
-   border — together every cell gets a full 1px border with no doubling, and
-   it still wraps cleanly at any width (each wrapped row becomes another
-   strip). Overrides the generic `.card` full-border above, since these tile
-   edge-to-edge instead of sitting in a gapped grid like `.nodes` does. */
+/* Top KPI row: each tile is its own elevated card (gap-separated, own
+   border + shadow), matching the gapped-grid look of `.nodes` below instead
+   of the old edge-to-edge divider-strip. */
 .cards {
   display: flex;
   flex-wrap: wrap;
-  border-right: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  box-shadow: 0 6px 14px -6px rgba(0, 0, 0, 0.5);
+  gap: 0.7rem;
 
   .card {
     flex: 1 1 170px;
-    border-width: 1px 0 0 1px;
+    box-shadow: 0 6px 14px -6px rgba(0, 0, 0, 0.5);
   }
 }
 .stat {

@@ -14,6 +14,9 @@
     padding: 0.5rem 0.7rem;
     background: var(--panel);
     border-bottom: 1px solid var(--border);
+    box-shadow: 0 4px 10px -4px rgba(0, 0, 0, 0.55);
+    position: relative;
+    z-index: 3;
     flex: 0 0 auto;
   }
 
@@ -148,6 +151,7 @@
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 0;
+    box-shadow: 0 6px 14px -6px rgba(0, 0, 0, 0.5);
     padding: 0.6rem 0.7rem;
     /* Long-press opens the action sheet — suppress the browser's own
        text-selection / native context-menu callout so it doesn't fight
@@ -245,6 +249,7 @@
     padding: 0.6rem 0.7rem;
     background: var(--panel);
     border-top: 1px solid var(--border);
+    box-shadow: 0 -8px 24px -8px rgba(0, 0, 0, 0.6);
 
     .bulk-count {
       font-size: 0.78rem;
@@ -307,6 +312,7 @@
     background: var(--panel);
     border-top: 1px solid var(--border);
     border-radius: 0;
+    box-shadow: 0 -8px 24px -8px rgba(0, 0, 0, 0.6);
     padding: 0.5rem 0 env(safe-area-inset-bottom);
     animation: sheet-slide-in 0.18s ease;
     &.closing {

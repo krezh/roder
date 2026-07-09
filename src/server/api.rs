@@ -343,6 +343,12 @@ pub async fn action(
         };
         match req.action.as_str() {
             "delete" => b.delete(key, ns, name).await,
+            "evict" => {
+                let Some(ns) = ns else {
+                    return (StatusCode::BAD_REQUEST, "missing namespace").into_response();
+                };
+                b.evict_pod(ns, name).await
+            }
             "scale" => b.scale(key, ns, name, req.replicas.unwrap_or(0)).await,
             "restart" => b.rollout_restart(key, ns, name).await,
             "flux-suspend" => b.flux_suspend(key, ns, name, true).await,

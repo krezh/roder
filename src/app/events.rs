@@ -21,6 +21,7 @@ pub(crate) type RowMap = RwSignal<HashMap<String, ResourceRow>>;
 fn action_label(action: &str) -> &str {
     match action {
         "delete" => "Deleted",
+        "evict" => "Evicted",
         "restart" => "Restarted",
         "scale" => "Scaled",
         "flux-reconcile" => "Reconciled",

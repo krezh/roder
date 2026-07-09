@@ -18,7 +18,6 @@
 ## Workloads
 
 - Rollout history + rollback to revision, pause/resume
-- Evict pod (PDB-respecting, distinct from delete)
 - File copy to/from containers (kubectl cp equivalent over exec streams)
 - Job re-run (recreate completed Job from spec)
 

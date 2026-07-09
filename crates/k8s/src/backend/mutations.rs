@@ -1,7 +1,8 @@
 //! Generic (non-Flux-specific) mutations: delete, scale, rollout restart,
 //! server-side apply, ESO force-sync, and manual CronJob triggering.
 
-use kube::api::{DeleteParams, DynamicObject, Patch, PatchParams, PostParams};
+use k8s_openapi::api::core::v1::Pod;
+use kube::api::{Api, DeleteParams, DynamicObject, EvictParams, Patch, PatchParams, PostParams};
 use roder_core::ResourceKind;
 use serde_json::json;
 
@@ -12,6 +13,16 @@ impl Backend {
     pub async fn delete(&self, key: &str, ns: Option<&str>, name: &str) -> Result<(), K8sError> {
         self.dyn_api(key, ns)?
             .delete(name, &DeleteParams::default())
+            .await
+            .map_err(api_err)?;
+        Ok(())
+    }
+
+    /// Evict a pod via the eviction subresource, so the server enforces any
+    /// PodDisruptionBudget instead of the pod just being deleted outright.
+    pub async fn evict_pod(&self, ns: &str, name: &str) -> Result<(), K8sError> {
+        let api: Api<Pod> = Api::namespaced(self.client(), ns);
+        api.evict(name, &EvictParams::default())
             .await
             .map_err(api_err)?;
         Ok(())

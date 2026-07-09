@@ -192,6 +192,22 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                     do_close();
                 }
             };
+            // PDB-respecting eviction, distinct from `delete`: the server
+            // enforces disruption budgets and may reject the request.
+            let evict = {
+                let ts = targets.clone();
+                move |_| {
+                    let ts = ts.clone();
+                    let n = ts.len();
+                    let label = if n == 1 { "Evict this pod?".to_string() }
+                                else { format!("Evict {n} pods?") };
+                    ask_confirm(confirm, label, move || {
+                        fire_action(toast, "evict", &ts);
+                        if let Some(sel) = table_selected.get_value() { sel.set(Default::default()); }
+                    });
+                    do_close();
+                }
+            };
 
             let scale_n = RwSignal::new(1i32);
             let shell = (!is_bulk && is_pod).then(|| {
@@ -321,6 +337,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                     {is_eso.then(|| view! { <button class="ctx-item" on:click=refresh>"Refresh"</button> })}
                     {(is_node && show_cordon).then(|| view! { <button class="ctx-item" on:click=cordon>"Cordon"</button> })}
                     {(is_node && show_uncordon).then(|| view! { <button class="ctx-item" on:click=uncordon>"Uncordon"</button> })}
+                    {is_pod.then(|| view! { <button class="ctx-item danger" on:click=evict>"Evict"</button> })}
                     <button class="ctx-item danger" on:click=delete>"Delete"</button>
                 </div>
             }

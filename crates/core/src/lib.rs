@@ -304,6 +304,15 @@ pub struct CleanupSummary {
     pub jobs_deleted: usize,
 }
 
+/// Result of a node drain operation. `skipped` counts DaemonSet-owned and
+/// mirror (static) pods, which can't be evicted through the API.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DrainSummary {
+    pub evicted: usize,
+    pub skipped: usize,
+    pub failed: Vec<String>,
+}
+
 /// Counts of resources by reconciled/suspended/failing for a CRD family.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HealthRollup {

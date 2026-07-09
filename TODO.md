@@ -10,10 +10,6 @@
 - Machine config diff (show what diverged, not just the hash)
 - Action: reboot / shutdown a node
 
-## Nodes
-
-- drain (prerequisite for reboot/shutdown actions)
-
 ## Workloads
 
 - Rollout history + rollback to revision, pause/resume

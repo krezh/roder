@@ -337,6 +337,16 @@ pub async fn action(
             Ok(n) => (StatusCode::OK, n.to_string()).into_response(),
             Err(e) => bad_gateway(e),
         };
+    } else if req.action == "drain" {
+        let (Some(key), Some(name)) = (req.key.as_deref(), req.name.as_deref()) else {
+            return (StatusCode::BAD_REQUEST, "missing key or name").into_response();
+        };
+        return match b.drain(key, name).await {
+            Ok(summary) => {
+                (StatusCode::OK, serde_json::to_string(&summary).unwrap()).into_response()
+            }
+            Err(e) => bad_gateway(e),
+        };
     } else {
         let (Some(key), Some(name)) = (req.key.as_deref(), req.name.as_deref()) else {
             return (StatusCode::BAD_REQUEST, "missing key or name").into_response();

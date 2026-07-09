@@ -178,6 +178,53 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             let trigger   = bulk_act!("cronjob-trigger");
             let cordon    = bulk_act!("cordon");
             let uncordon  = bulk_act!("uncordon");
+            // Drain returns a structured summary (evicted/skipped/failed), so it
+            // reports its own toast rather than going through `fire_action`.
+            let drain = {
+                let key = m.target.key.clone();
+                let name = m.target.name.clone();
+                move |_| {
+                    let key = key.clone();
+                    let name = name.clone();
+                    ask_confirm(
+                        confirm,
+                        format!("Drain node {name}? This cordons it and evicts its pods."),
+                        move || {
+                            let name = name.clone();
+                            let payload = serde_json::json!({
+                                "action": "drain", "key": key, "name": name,
+                            });
+                            leptos::task::spawn_local(async move {
+                                match crate::data::post_action(&payload).await {
+                                    Ok(body) => {
+                                        let summary: roder_core::DrainSummary =
+                                            serde_json::from_str(&body).unwrap_or_default();
+                                        if summary.failed.is_empty() {
+                                            show_toast(
+                                                toast,
+                                                format!(
+                                                    "Drained {name}: evicted {}, skipped {}",
+                                                    summary.evicted, summary.skipped
+                                                ),
+                                                ToastKind::Ok,
+                                            );
+                                        } else {
+                                            show_toast_detail(
+                                                toast,
+                                                format!("Drain of {name} left {} pod(s) failed", summary.failed.len()),
+                                                Some(summary.failed.join("\n")),
+                                                ToastKind::Err,
+                                            );
+                                        }
+                                    }
+                                    Err(e) => show_toast_detail(toast, format!("Drain of {name} failed"), Some(e), ToastKind::Err),
+                                }
+                            });
+                        },
+                    );
+                    do_close();
+                }
+            };
             let delete = {
                 let ts = targets.clone();
                 move |_| {
@@ -390,6 +437,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                     {is_eso.then(|| view! { <button class="ctx-item" on:click=refresh>"Refresh"</button> })}
                     {(is_node && show_cordon).then(|| view! { <button class="ctx-item" on:click=cordon>"Cordon"</button> })}
                     {(is_node && show_uncordon).then(|| view! { <button class="ctx-item" on:click=uncordon>"Uncordon"</button> })}
+                    {(!is_bulk && is_node).then(|| view! { <button class="ctx-item danger" on:click=drain>"Drain"</button> })}
                     {is_pod.then(|| view! { <button class="ctx-item danger" on:click=evict>"Evict"</button> })}
                     <button class="ctx-item danger" on:click=delete>"Delete"</button>
                 </div>

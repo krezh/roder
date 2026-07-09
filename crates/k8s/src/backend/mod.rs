@@ -4,8 +4,8 @@
 //! additional `impl Backend` blocks on the one struct defined here: [`overview`]
 //! (dashboard), [`mutations`] (delete/scale/restart/apply), [`flux`] (Flux-specific
 //! reconcile actions), [`logs`] (pod/workload log streaming), [`exec`] (interactive
-//! shell + debug containers), [`permissions`] (RBAC checks), and [`sanitize`]
-//! (dead pod/job sweep).
+//! shell + debug containers), [`permissions`] (RBAC checks), [`sanitize`]
+//! (dead pod/job sweep), and [`drain`] (cordon + evict a node's pods).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,6 +25,7 @@ use crate::discovery::{build_catalog, CatalogEntry};
 use crate::informers::{InformerRegistry, WatchHandle};
 use crate::project::ts_string;
 
+mod drain;
 mod exec;
 mod flux;
 mod helm_release;

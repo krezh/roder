@@ -1,12 +1,18 @@
 //! Interactive shell access: exec into a container (probing for the best
-//! available shell), and injecting an ephemeral `nicolaka/netshoot` debug
-//! container for pods that have nothing exec-able of their own.
+//! available shell), injecting an ephemeral `nicolaka/netshoot` debug
+//! container for pods that have nothing exec-able of their own, and standing
+//! up a privileged node-shell pod for nodes (which have no exec-able
+//! container at all — Talos ships no SSH and no host shell).
 
 use k8s_openapi::api::core::v1::Pod;
-use kube::api::{Api, AttachParams, Patch, PatchParams};
+use kube::api::{Api, AttachParams, DeleteParams, Patch, PatchParams, PostParams};
 
 use super::{api_err, Backend};
 use crate::client::K8sError;
+
+/// Namespace the node-shell debug pod is created in. `default` mirrors
+/// `kubectl debug node/<name>`'s own default namespace.
+const NODE_SHELL_NAMESPACE: &str = "default";
 
 impl Backend {
     /// Open an interactive exec session into a pod container. Returns an
@@ -119,6 +125,111 @@ impl Backend {
                 }
             }
         }
+    }
+
+    /// Create a privileged pod scheduled onto `node` for host-level access,
+    /// waiting for it to reach Running. Shares the host's PID/network/IPC/UTS
+    /// namespaces but keeps the `netshoot` image's own root filesystem — Talos
+    /// nodes have no shell or coreutils of their own to `nsenter --mount` into,
+    /// so entering the host mount namespace would leave nothing exec-able.
+    /// Returns `(namespace, pod_name)` for use with [`exec_node_shell`].
+    pub async fn create_node_shell(&self, node: &str) -> Result<(String, String), K8sError> {
+        let ns = NODE_SHELL_NAMESPACE;
+        let api: Api<Pod> = Api::namespaced(self.client(), ns);
+
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let name = format!("roder-node-shell-{:06x}", ts & 0x00ff_ffff);
+
+        let pod: Pod = serde_json::from_value(serde_json::json!({
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "name": name,
+                "namespace": ns,
+                "labels": { "app.kubernetes.io/managed-by": "roder" },
+            },
+            "spec": {
+                "nodeName": node,
+                "hostPID": true,
+                "hostNetwork": true,
+                "hostIPC": true,
+                "restartPolicy": "Never",
+                "automountServiceAccountToken": false,
+                // Schedule regardless of taints (including our own cordon).
+                "tolerations": [{ "operator": "Exists" }],
+                // Safety valve in case the client disconnects without the
+                // session-end cleanup running.
+                "activeDeadlineSeconds": 3600,
+                "containers": [{
+                    "name": "shell",
+                    "image": "nicolaka/netshoot",
+                    "command": ["sleep", "infinity"],
+                    "stdin": true,
+                    "tty": true,
+                    "securityContext": { "privileged": true },
+                }],
+            },
+        }))
+        .map_err(api_err)?;
+        api.create(&PostParams::default(), &pod)
+            .await
+            .map_err(api_err)?;
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        loop {
+            if std::time::Instant::now() > deadline {
+                return Err(api_err(format!(
+                    "node-shell pod {name} did not start within 60s"
+                )));
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            if let Ok(p) = api.get(&name).await {
+                let running = p
+                    .status
+                    .and_then(|s| s.container_statuses)
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|cs| {
+                        cs.name == "shell"
+                            && cs.state.as_ref().and_then(|s| s.running.as_ref()).is_some()
+                    });
+                if running {
+                    return Ok((ns.to_string(), name));
+                }
+            }
+        }
+    }
+
+    /// Exec into a [`create_node_shell`] pod, entering the host's PID,
+    /// network, IPC and UTS namespaces (but not mount — see there for why).
+    pub async fn exec_node_shell(
+        &self,
+        ns: &str,
+        pod: &str,
+    ) -> Result<kube::api::AttachedProcess, K8sError> {
+        let api: Api<Pod> = Api::namespaced(self.client(), ns);
+        let ap = AttachParams::default()
+            .stdin(true)
+            .stdout(true)
+            .stderr(false)
+            .tty(true)
+            .container("shell");
+        let cmd = [
+            "nsenter", "--target", "1", "--uts", "--ipc", "--net", "--pid", "--", "bash", "-l",
+        ];
+        api.exec(pod, cmd, &ap).await.map_err(api_err)
+    }
+
+    /// Tear down a node-shell pod once its session ends.
+    pub async fn delete_node_shell_pod(&self, ns: &str, pod: &str) -> Result<(), K8sError> {
+        let api: Api<Pod> = Api::namespaced(self.client(), ns);
+        api.delete(pod, &DeleteParams::default())
+            .await
+            .map_err(api_err)?;
+        Ok(())
     }
 }
 

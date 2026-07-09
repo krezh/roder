@@ -13,7 +13,6 @@
 ## Nodes
 
 - drain (prerequisite for reboot/shutdown actions)
-- Node shell via privileged debug pod (nsenter) — Talos has no SSH
 
 ## Workloads
 

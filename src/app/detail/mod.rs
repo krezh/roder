@@ -277,6 +277,7 @@ pub(crate) fn RowDetail(
                                 pod: exec_pod.clone(),
                                 container: None,
                                 pending: false,
+                                node_shell: false,
                             }));
                         }>"Shell"</button>
                     }

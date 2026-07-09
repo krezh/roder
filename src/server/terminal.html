@@ -31,7 +31,8 @@
     const ns  = encodeURIComponent(p.get('namespace') ?? '');
     const pod = encodeURIComponent(p.get('pod') ?? '');
     const ctr = encodeURIComponent(p.get('container') ?? '');
-    const ws  = new WebSocket(`${proto}://${location.host}/api/exec?namespace=${ns}&pod=${pod}&container=${ctr}`);
+    const nodeShell = p.get('node_shell') === 'true' ? 'true' : 'false';
+    const ws  = new WebSocket(`${proto}://${location.host}/api/exec?namespace=${ns}&pod=${pod}&container=${ctr}&node_shell=${nodeShell}`);
     ws.binaryType = 'arraybuffer';
 
     const sendResize = () => {

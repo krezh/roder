@@ -486,6 +486,8 @@ pub struct ExecQuery {
     namespace: String,
     pod: String,
     container: Option<String>,
+    #[serde(default)]
+    node_shell: bool,
 }
 
 /// Injects a `nicolaka/netshoot` ephemeral container into a pod and waits for
@@ -494,6 +496,26 @@ pub async fn debug_shell(State(state): State<AppState>, Query(q): Query<ExecQuer
     let b = backend_or_return!(state);
     match b.inject_debug_container(&q.namespace, &q.pod).await {
         Ok(container) => Json(serde_json::json!({ "container": container })).into_response(),
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct NodeShellQuery {
+    node: String,
+}
+
+/// Creates a privileged debug pod on `node` and waits for it to reach
+/// Running, then returns `{"namespace": .., "pod": ..}` for use with `/api/exec`.
+pub async fn node_shell_create(
+    State(state): State<AppState>,
+    Query(q): Query<NodeShellQuery>,
+) -> Response {
+    let b = backend_or_return!(state);
+    match b.create_node_shell(&q.node).await {
+        Ok((namespace, pod)) => {
+            Json(serde_json::json!({ "namespace": namespace, "pod": pod })).into_response()
+        }
         Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
@@ -516,18 +538,24 @@ async fn exec_session(socket: axum::extract::ws::WebSocket, b: Arc<Backend>, q: 
 
     let (mut ws_sink, mut ws_stream) = socket.split();
 
-    let mut attached = match b
-        .exec(
+    let exec_result = if q.node_shell {
+        b.exec_node_shell(&q.namespace, &q.pod).await
+    } else {
+        b.exec(
             &q.namespace,
             &q.pod,
             q.container.as_deref().filter(|s| !s.is_empty()),
         )
         .await
-    {
+    };
+    let mut attached = match exec_result {
         Ok(a) => a,
         Err(e) => {
             let msg = format!("\r\n\x1b[31m[exec: {}]\x1b[0m\r\n", e);
             let _ = ws_sink.send(Message::Binary(msg.into_bytes().into())).await;
+            if q.node_shell {
+                let _ = b.delete_node_shell_pod(&q.namespace, &q.pod).await;
+            }
             return;
         }
     };
@@ -597,6 +625,9 @@ async fn exec_session(socket: axum::extract::ws::WebSocket, b: Arc<Backend>, q: 
     }
 
     let _ = attached.join().await;
+    if q.node_shell {
+        let _ = b.delete_node_shell_pod(&q.namespace, &q.pod).await;
+    }
 }
 
 /// Serves the xterm.js terminal page loaded in the exec overlay iframe.

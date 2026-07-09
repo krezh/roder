@@ -182,6 +182,7 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
                         pod: pod.clone(),
                         container: None,
                         pending: false,
+                        node_shell: false,
                     }));
                     do_close();
                 }

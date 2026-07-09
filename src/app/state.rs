@@ -71,6 +71,9 @@ pub(crate) struct ExecTarget {
     pub(crate) container: Option<String>,
     /// True while an ephemeral debug container is being injected and waited on.
     pub(crate) pending: bool,
+    /// True for a node-shell session: `pod` is a throw-away privileged pod
+    /// entered via `nsenter`, torn down when the session ends.
+    pub(crate) node_shell: bool,
 }
 
 #[derive(Clone, Copy)]

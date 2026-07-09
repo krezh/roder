@@ -25,7 +25,10 @@ pub(crate) fn ExecWindow() -> impl IntoView {
                 <div class="exec-head">
                     <span class="exec-title">
                         {move || snapshot.with(|t| t.as_ref().map(|t| {
-                            format!("{} — {}", t.pod, if t.pending { "debug shell" } else { "shell" })
+                            let label = if t.node_shell { "node shell" }
+                                        else if t.pending { "debug shell" }
+                                        else { "shell" };
+                            format!("{} — {label}", t.pod)
                         }))}
                     </span>
                     <button class="exec-close" on:click=move |_| do_close()>"✕"</button>
@@ -34,13 +37,19 @@ pub(crate) fn ExecWindow() -> impl IntoView {
                     let ns  = data::percent_encode(&target.namespace);
                     let pod = data::percent_encode(&target.pod);
                     let ctr = target.container.as_deref().map(data::percent_encode).unwrap_or_default();
-                    let src = format!("/terminal?namespace={ns}&pod={pod}&container={ctr}");
+                    let node_shell = target.node_shell;
+                    let src = format!("/terminal?namespace={ns}&pod={pod}&container={ctr}&node_shell={node_shell}");
                     if target.pending {
+                        let pending_text = if target.node_shell {
+                            "Creating privileged debug pod"
+                        } else {
+                            "Injecting nicolaka/netshoot"
+                        };
                         view! {
                             <div class="exec-pending">
                                 <span class="exec-spinner"></span>
                                 <span class="exec-pending-text">
-                                    "Injecting nicolaka/netshoot"
+                                    {pending_text}
                                     <span class="exec-dot" style="animation-delay:0s">"."</span>
                                     <span class="exec-dot" style="animation-delay:0.3s">"."</span>
                                     <span class="exec-dot" style="animation-delay:0.6s">"."</span>

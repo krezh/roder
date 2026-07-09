@@ -219,6 +219,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                         pod: pod.clone(),
                         container: None,
                         pending: false,
+                        node_shell: false,
                     }));
                     do_close();
                 }
@@ -253,6 +254,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                                 pod: pod.clone(),
                                 container: None,
                                 pending: true,
+                                node_shell: false,
                             }));
                             leptos::task::spawn_local(async move {
                                 let url = format!(
@@ -274,6 +276,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                                                     pod: pod.clone(),
                                                     container: Some(ctr.to_string()),
                                                     pending: false,
+                                                    node_shell: false,
                                                 }));
                                             } else {
                                                 exec_open.set(None);
@@ -290,6 +293,56 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                             });
                         }
                     }).map(|h| view! { <button class="ctx-item" on:click=h>"Debug shell"</button> })}
+                    {(!is_bulk && is_node).then(|| {
+                        let node = m.target.name.clone();
+                        move |_: leptos::ev::MouseEvent| {
+                            let node = node.clone();
+                            do_close();
+                            exec_open.set(Some(ExecTarget {
+                                namespace: String::new(),
+                                pod: node.clone(),
+                                container: None,
+                                pending: true,
+                                node_shell: true,
+                            }));
+                            leptos::task::spawn_local(async move {
+                                let url = format!(
+                                    "/api/node-shell?node={}",
+                                    crate::data::percent_encode(&node),
+                                );
+                                // Guard: don't touch exec_open if the user dismissed the
+                                // overlay while the request was in flight.
+                                let still_pending = || {
+                                    exec_open.get_untracked().map(|t| t.pending).unwrap_or(false)
+                                };
+                                match crate::data::fetch_json::<serde_json::Value>(&url).await {
+                                    Ok(resp) => {
+                                        if still_pending() {
+                                            let ns = resp.get("namespace").and_then(|v| v.as_str());
+                                            let pod = resp.get("pod").and_then(|v| v.as_str());
+                                            if let (Some(ns), Some(pod)) = (ns, pod) {
+                                                exec_open.set(Some(ExecTarget {
+                                                    namespace: ns.to_string(),
+                                                    pod: pod.to_string(),
+                                                    container: Some("shell".to_string()),
+                                                    pending: false,
+                                                    node_shell: true,
+                                                }));
+                                            } else {
+                                                exec_open.set(None);
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        if still_pending() {
+                                            exec_open.set(None);
+                                        }
+                                        show_toast_detail(toast, "Node shell failed", Some(e), ToastKind::Err);
+                                    }
+                                }
+                            });
+                        }
+                    }).map(|h| view! { <button class="ctx-item" on:click=h>"Node shell"</button> })}
                     {ns_item.map(|ns| view! { <button class="ctx-item" on:click=goto_ns>"Go to namespace " <span class="ctx-sub">{ns}</span></button> })}
                     {node_item.map(|node| view! { <button class="ctx-item" on:click=goto_node>"Go to node " <span class="ctx-sub">{node}</span></button> })}
                     <button class="ctx-item" on:click=copy>"Copy name"</button>

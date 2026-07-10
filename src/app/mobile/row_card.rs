@@ -91,6 +91,12 @@ pub(crate) fn MobileRowCard(
                 if select_mode.get_untracked() {
                     let u = uid_click.clone();
                     selected.update(|s| { if !s.remove(&u) { s.insert(u); } });
+                    // Deselecting the last item would otherwise strand select
+                    // mode on with the bulk bar (and its only "Done" exit)
+                    // hidden, since it only shows while something's selected.
+                    if selected.get_untracked().is_empty() {
+                        select_mode.set(false);
+                    }
                 } else {
                     let t = t_click.clone();
                     detail.update(|d| if d.as_ref() == Some(&t) { *d = None } else { *d = Some(t.clone()) });
@@ -107,6 +113,12 @@ pub(crate) fn MobileRowCard(
                 let h = set_timeout_with_handle(move || {
                     fired.set_value(true);
                     handle.set_value(None);
+                    // A hold both opens the action sheet for this one item and
+                    // seeds select mode with it, so there's no separate mode
+                    // toggle: dismiss the sheet and you're already set up to
+                    // tap more cards into the selection.
+                    select_mode.set(true);
+                    selected.update(|s| { s.insert(uid.clone()); });
                     ctx_menu.set(Some(CtxMenu {
                         x: 0,
                         y: 0,

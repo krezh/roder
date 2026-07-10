@@ -353,6 +353,10 @@ table.cond {
     padding: 0.25rem 0.5rem;
     border-bottom: 1px solid var(--border);
     vertical-align: top;
+    // k8s condition reasons are long unbroken CamelCase identifiers
+    // (`KubeletHasSufficientMemory`) — without this, auto table layout
+    // grows the whole table past a narrow (mobile) viewport to fit them.
+    overflow-wrap: anywhere;
   }
   .cond-msg {
     color: var(--muted);

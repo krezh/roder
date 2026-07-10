@@ -201,7 +201,7 @@ fn MobilePane(kind: ResourceKind, rows: RowMap) -> impl IntoView {
         let uids = selected.get_untracked();
         let targets = rows.with_untracked(|v| table_logic::bulk_targets(&key, v, &uids));
         fire_action(toast, action, &targets);
-        selected.set(Default::default());
+        select_mode.set(false);
     };
     let on_logs = Callback::new(move |_| {
         let uids = selected.get_untracked();
@@ -212,7 +212,7 @@ fn MobilePane(kind: ResourceKind, rows: RowMap) -> impl IntoView {
                 open_logs(log_pods, LogTarget::from_row(&key, r, agg));
             }
         });
-        selected.set(Default::default());
+        select_mode.set(false);
     });
 
     view! {
@@ -220,10 +220,6 @@ fn MobilePane(kind: ResourceKind, rows: RowMap) -> impl IntoView {
             <input class="mobile-filter" placeholder="Filter…"
                 prop:value=move || text_filter.get()
                 on:input=move |e| text_filter.set(event_target_value(&e)) />
-            <button class="mobile-select-toggle" class:active=move || select_mode.get()
-                on:click=move |_| select_mode.update(|s| *s = !*s)>
-                {move || if select_mode.get() { "Cancel" } else { "Select" }}
-            </button>
         </div>
         <div class="mobile-cards">
             <For each=move || shown_uids.get() key=|uid| uid.clone() let:uid>
@@ -261,6 +257,7 @@ fn MobilePane(kind: ResourceKind, rows: RowMap) -> impl IntoView {
         </div>
         <MobileBulkBar
             selected=selected
+            select_mode=select_mode
             all_uids=move || shown_uids.get()
             do_bulk=do_bulk
             on_logs=on_logs

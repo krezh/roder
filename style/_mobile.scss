@@ -121,22 +121,6 @@
     min-height: 44px;
   }
 
-  .mobile-select-toggle {
-    background: var(--panel-2);
-    border: 1px solid var(--border);
-    border-radius: 0;
-    color: var(--fg);
-    padding: 0.5rem 0.7rem;
-    min-height: 44px;
-    white-space: nowrap;
-
-    &.active {
-      background: var(--accent);
-      color: #fff;
-      border-color: var(--accent);
-    }
-  }
-
   .mobile-cards {
     flex: 1;
     min-height: 0;

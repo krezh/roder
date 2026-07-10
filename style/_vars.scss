@@ -71,6 +71,16 @@ body {
   line-height: 1.45;
 }
 
+// 13px suits the desktop's dense grid, but reads as tiny on a phone held at
+// arm's length — bump the root so every rem-based size (text, padding, touch
+// targets) scales up together.
+@media (max-width: 760px) {
+  html,
+  body {
+    font-size: 16px;
+  }
+}
+
 .font-mono {
   font-family: "Monaspace Neon NF", ui-monospace, "Cascadia Code", monospace;
 }

@@ -10,11 +10,6 @@
   ];
 
   claude.code.enable = true;
-  # Lets Claude drive the running `devenv up` dev server (localhost:8080) in a
-  # real headless browser instead of guessing from source — click through UI
-  # changes, take screenshots, read console/network errors.
-  # Setting mcpServers.* replaces the module's whole default (which only
-  # includes mcp.devenv.sh), so it's re-declared here alongside playwright.
   claude.code.mcpServers = {
     "mcp.devenv.sh" = {
       type = "http";
@@ -46,25 +41,6 @@
   };
 
   scripts = {
-    # Run roder with real OIDC auth (not dev-bypass) for testing the OAuth flow.
-    # Needs RODER_OIDC_* + RODER_SESSION_KEY in the env — `enterShell` loads them
-    # from Infisical (see below); without them roder hard-fails at startup.
-    dev-auth.exec = ''
-      ig() { timeout 10 infisical secrets get "$1" --path="$2" --env=default --plain 2>/dev/null; }
-      if roder_cid=$(ig KUBERNETES_OAUTH_CLIENT_ID /Kubernetes/DexTek/Kubernetes) && [ -n "$roder_cid" ]; then
-        export RODER_OIDC_CLIENT_ID="$roder_cid"
-        export RODER_OIDC_CLIENT_SECRET="$(ig KUBERNETES_OAUTH_CLIENT_SECRET /Kubernetes/DexTek/Kubernetes)"
-        export RODER_SESSION_KEY="$(ig RODER_SESSION_KEY /Kubernetes/DexTek/Roder)"
-        export RODER_OIDC_ISSUER_URL="https://sso.plexuz.xyz/application/o/kubernetes/"
-        export RODER_BASE_URL="''${RODER_BASE_URL:-http://localhost:8080}"
-        echo "infisical: roder OIDC secrets loaded — 'dev-auth' ready"
-      else
-        echo "infisical: not loaded (dev-bypass mode). For OAuth: infisical login && direnv reload"
-      fi
-      echo "Starting roder in real-auth (OIDC) mode…"
-      env -u RODER_DEV_MODE cargo leptos watch
-    '';
-
     docker-run.exec = ''
       TAG="''${2:-roder:dev}"
       name="roder-docker-test"

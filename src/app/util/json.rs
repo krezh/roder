@@ -290,7 +290,8 @@ pub(crate) fn container_envs(o: &Value) -> Vec<ContainerEnv> {
                     let k = e.get("name").and_then(|n| n.as_str())?.to_string();
                     let v = if let Some(val) = e.get("value").and_then(|v| v.as_str()) {
                         val.to_string()
-                    } else if let Some(vf) = e.get("valueFrom") {
+                    } else {
+                        let vf = e.get("valueFrom")?;
                         if let Some(r) = vf.get("secretKeyRef") {
                             let sn = r.get("name").and_then(|n| n.as_str()).unwrap_or("?");
                             let sk = r.get("key").and_then(|n| n.as_str()).unwrap_or("?");
@@ -308,9 +309,8 @@ pub(crate) fn container_envs(o: &Value) -> Vec<ContainerEnv> {
                         } else {
                             "(ref)".to_string()
                         }
-                    } else {
-                        return None;
                     };
+
                     Some((k, v))
                 })
                 .collect::<Vec<_>>();

@@ -33,6 +33,10 @@
 - Prometheus range queries — CPU/mem history graphs on pod/node detail
 - cert-manager: surface Certificate expiry/renewal state + force renew action
 
+## Mobile
+
+- Improve mobile GUI (touch target sizing, reflow desktop-shared components for narrow screens)
+
 ## Desktop (Low prio)
 
 - Look into creating a Tauri desktop app

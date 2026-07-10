@@ -158,6 +158,8 @@
   animation: trend-fade 2s ease forwards;
 }
 .cell:has(.trend-arrow) .cwi {
+  display: flex;
+  align-items: center;
   overflow: visible;
   text-overflow: clip;
 }

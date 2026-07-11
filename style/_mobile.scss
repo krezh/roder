@@ -83,7 +83,7 @@
     left: 0;
     z-index: 10;
     transform: translateX(-100%);
-    transition: transform 0.18s ease;
+    transition: transform 0.16s ease;
   }
   &.nav-open .sidebar {
     transform: translateX(0);
@@ -367,6 +367,10 @@
 
     &.open {
       transform: translateX(0);
+    }
+    &.closing {
+      transform: translateX(100%);
+      pointer-events: none;
     }
   }
 

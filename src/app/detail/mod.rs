@@ -38,6 +38,7 @@ pub(crate) fn DetailDrawer() -> impl IntoView {
     let detail = expect_context::<RwSignal<Option<DetailTarget>>>();
     let width = RwSignal::new(560i32);
     let dragging = RwSignal::new(false);
+    let (snapshot, closing, do_close) = crate::app::overlays::use_option_overlay(detail);
 
     #[cfg(target_arch = "wasm32")]
     {
@@ -69,17 +70,18 @@ pub(crate) fn DetailDrawer() -> impl IntoView {
         // Always mounted; `.open` slides it in. `width` drives the style in place so
         // resizing never rebuilds the detail (and re-fetches).
         <div class="detailbar"
-            class:open=move || detail.get().is_some()
+            class:open=move || snapshot.get().is_some()
+            class:closing=move || closing.get()
             class:dragging=move || dragging.get()
             style=move || format!("width:{}px", width.get())>
             <div class="detailbar-resize"
                 on:mousedown=move |e: leptos::ev::MouseEvent| { e.prevent_default(); dragging.set(true); }></div>
             <div class="detailbar-head">
-                <span class="detailbar-title">{move || detail.get().map(|t| t.name).unwrap_or_default()}</span>
-                <button class="detailbar-close" on:click=move |_| detail.set(None)>"✕"</button>
+                <span class="detailbar-title">{move || snapshot.get().map(|t| t.name).unwrap_or_default()}</span>
+                <button class="detailbar-close" on:click=move |_| do_close()>"✕"</button>
             </div>
             <div class="detailbar-body">
-                {move || detail.get().map(|t| view! { <RowDetail target=t on_delete=move || detail.set(None) /> })}
+                {move || snapshot.get().map(|t| view! { <RowDetail target=t on_delete=move || do_close() /> })}
             </div>
         </div>
     }

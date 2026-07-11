@@ -14,9 +14,13 @@
   border-left: 1px solid var(--border);
   box-shadow: -8px 0 24px rgba(0, 0, 0, 0.35);
   transform: translateX(100%);
-  transition: transform 0.18s ease;
+  transition: transform 0.16s ease;
   &.open {
     transform: translateX(0);
+  }
+  &.closing {
+    transform: translateX(100%);
+    pointer-events: none;
   }
   &.dragging {
     transition: none;

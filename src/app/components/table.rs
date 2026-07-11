@@ -29,6 +29,7 @@ pub(crate) fn sortable_th(
     key: SortKey,
     sort: RwSignal<(SortKey, bool)>,
 ) -> impl IntoView {
+    let identity_edge = key == SortKey::Name;
     let arrow = move || {
         let (k, asc) = sort.get();
         if k == key {
@@ -42,7 +43,8 @@ pub(crate) fn sortable_th(
         }
     };
     view! {
-        <div class="cell sortable" class:active=move || sort.get().0 == key
+        <div class="cell sortable" class:identity-edge=identity_edge
+            class:active=move || sort.get().0 == key
             on:click=move |_| sort.update(|s| {
                 if s.0 == key { s.1 = !s.1; } else { s.0 = key; s.1 = true; }
             })>

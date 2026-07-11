@@ -11,7 +11,7 @@
   display: flex;
   gap: 0.4rem;
   align-items: center;
-  &:hover { color: var(--fg); }
+  &:hover { color: var(--accent); }
   kbd {
     background: var(--bg);
     border: 1px solid var(--border);
@@ -66,6 +66,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  &.scoped {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
+    background: color-mix(in srgb, var(--accent) 8%, var(--panel-2));
+  }
 }
 
 // Topbar mobile menu toggle.

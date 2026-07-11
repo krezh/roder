@@ -28,25 +28,32 @@ pub(crate) fn Topbar() -> impl IntoView {
         <header class="topbar">
             <button class="hamburger" on:click=move |_| nav_open.update(|o| *o = !*o)>"☰"</button>
             <Brand />
-            <button class="palette-btn" on:click=move |_| palette_open.set(true)>
-                "Search " <kbd><ShiftIcon />"K"</kbd>
-            </button>
-            <button class="errfilter" class:active=move || only_problems.get()
-                on:click=move |_| only_problems.update(|o| *o = !*o)>
-                "Errors " <kbd><ShiftIcon />"E"</kbd>
-            </button>
-            <button class="ns-palette-btn" on:click=move |_| ns_palette_open.set(true)>
-                {move || selected_ns.get().unwrap_or_else(|| "All namespaces".to_string())}
-                " " <kbd><ShiftIcon />"N"</kbd>
-            </button>
-            <SanitizeButton />
-            <SyncButton />
-            <TopUsage />
-            <FailingBadge />
-            <FluxFailingBadge />
-            <AlertsButton />
-            <AccessReviewButton />
-            <Identity />
+            <div class="topbar-group topbar-nav">
+                <button class="palette-btn" on:click=move |_| palette_open.set(true)>
+                    "Search " <kbd><ShiftIcon />"K"</kbd>
+                </button>
+                <button class="errfilter" class:active=move || only_problems.get()
+                    on:click=move |_| only_problems.update(|o| *o = !*o)>
+                    "Errors " <kbd><ShiftIcon />"E"</kbd>
+                </button>
+                <button class="ns-palette-btn" class:scoped=move || selected_ns.get().is_some()
+                    on:click=move |_| ns_palette_open.set(true)>
+                    {move || selected_ns.get().unwrap_or_else(|| "All namespaces".to_string())}
+                    " " <kbd><ShiftIcon />"N"</kbd>
+                </button>
+            </div>
+            <div class="topbar-group topbar-actions">
+                <SanitizeButton />
+                <SyncButton />
+            </div>
+            <div class="topbar-group topbar-health">
+                <TopUsage />
+                <FailingBadge />
+                <FluxFailingBadge />
+                <AlertsButton />
+                <AccessReviewButton />
+            </div>
+            <div class="topbar-account"><Identity /></div>
         </header>
     }
 }

@@ -112,6 +112,16 @@
   align-self: stretch;
   font-weight: 600;
 }
+/* Quiet vertical rules make dense telemetry easier to track. The stronger rule
+   after Name separates resource identity from its changing operational data. */
+.grid-row > .cell + .cell {
+  box-shadow: inset 1px 0 color-mix(in srgb, var(--border) 32%, transparent);
+}
+.cell-name,
+.cell.identity-edge {
+  border-right: 1px solid color-mix(in srgb, var(--muted) 42%, var(--border));
+  box-shadow: 5px 0 8px -8px rgba(0, 0, 0, 0.9);
+}
 .cw {
   display: grid;
   grid-template-rows: var(--row-h);

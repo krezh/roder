@@ -1,9 +1,10 @@
 /* ---- inline row detail ---- */
 .grid-row.row.active .cell {
-  background: var(--panel-2);
+  background: color-mix(in srgb, var(--accent) 7%, var(--panel-2));
 }
 .grid-row.row.active {
   border-bottom-color: transparent;
+  box-shadow: inset 2px 0 var(--accent);
 }
 .rd {
   display: flex;

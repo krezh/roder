@@ -99,6 +99,23 @@ pub async fn talos_node(
     }
 }
 
+/// Kernel ring buffer from a Talos node.
+pub async fn talos_dmesg(
+    State(state): State<AppState>,
+    Query(q): Query<TalosNodeQuery>,
+) -> Response {
+    if q.node.is_empty() {
+        return (StatusCode::BAD_REQUEST, "missing node").into_response();
+    }
+    let Some(talos) = state.talos.as_ref() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    match talos.dmesg(&q.node).await {
+        Ok(log) => Json(serde_json::json!({ "log": log })).into_response(),
+        Err(e) => bad_gateway(e),
+    }
+}
+
 /// Optional server integrations available to the current deployment.
 pub async fn features(State(state): State<AppState>) -> Response {
     let alertmanager = state.alerts.read().await.is_some();
@@ -304,6 +321,7 @@ pub struct ActionRequest {
     yaml: Option<String>,
     force: Option<bool>,
     reset: Option<bool>,
+    service: Option<String>,
 }
 
 /// Resolve the acting identity for the audit log.
@@ -336,11 +354,9 @@ pub async fn action(
     headers: HeaderMap,
     Json(req): Json<ActionRequest>,
 ) -> Response {
-    let b = backend_or_return!(state);
-    let ns = ns_filter(&req.namespace);
-
     // Audit every mutation with the acting identity.
     let who = actor(&state, &headers).await;
+    let ns = ns_filter(&req.namespace);
     tracing::info!(
         actor = %who,
         action = %req.action,
@@ -349,6 +365,45 @@ pub async fn action(
         name = req.name.as_deref().unwrap_or("-"),
         "mutation requested"
     );
+
+    if matches!(
+        req.action.as_str(),
+        "talos-service-start"
+            | "talos-service-stop"
+            | "talos-service-restart"
+            | "talos-reboot"
+            | "talos-shutdown"
+    ) {
+        let Some(talos) = state.talos.as_ref() else {
+            return StatusCode::NOT_FOUND.into_response();
+        };
+        let Some(node) = req.name.as_deref() else {
+            return (StatusCode::BAD_REQUEST, "missing node name").into_response();
+        };
+        let result = match req.action.as_str() {
+            "talos-service-start" | "talos-service-stop" | "talos-service-restart" => {
+                let Some(service) = req.service.as_deref() else {
+                    return (StatusCode::BAD_REQUEST, "missing service").into_response();
+                };
+                talos
+                    .service_action(
+                        node,
+                        service,
+                        req.action.trim_start_matches("talos-service-"),
+                    )
+                    .await
+            }
+            "talos-reboot" => talos.power_action(node, "reboot").await,
+            "talos-shutdown" => talos.power_action(node, "shutdown").await,
+            _ => unreachable!(),
+        };
+        return match result {
+            Ok(()) => (StatusCode::OK, "ok").into_response(),
+            Err(e) => bad_gateway(e),
+        };
+    }
+
+    let b = backend_or_return!(state);
 
     // `apply` and `sanitize` don't operate on a named resource.
     let res = if req.action == "apply" {

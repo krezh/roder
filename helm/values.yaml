@@ -23,6 +23,8 @@ talos:
   enabled: false
   roles:
     - os:reader
+    # Required for service controls and reboot/shutdown actions.
+    - os:operator
 
 # ClusterRole + binding for roder's ServiceAccount, granting the read-only
 # cluster metadata roder needs at startup: API discovery and read/watch on CRDs

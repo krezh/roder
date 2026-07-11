@@ -2,14 +2,15 @@
 
 ## Talos Linux Integration
 
-- [x] Initial in-cluster integration: node version, service health, mounts, and network counters
-- Node service status actions and richer health details
-- dmesg / kernel log viewer
-- Disk inventory and I/O statistics
+- [ x ] Initial in-cluster integration: node version, service health, mounts, and network counters
+- [x] Node service status actions and richer health details
+- [x] dmesg / kernel log viewer
+- Disk inventory
+- [x] Disk I/O statistics
 - Network interface addresses and link state
 - Per-node Talos version + machine config hash
 - Machine config diff (show what diverged, not just the hash)
-- Action: reboot / shutdown a node
+- [x] Action: reboot / shutdown a node
 
 ## Workloads
 

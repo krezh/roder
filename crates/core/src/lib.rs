@@ -280,6 +280,7 @@ pub struct TalosNode {
     pub services: Vec<TalosService>,
     pub mounts: Vec<TalosMount>,
     pub interfaces: Vec<TalosNetworkInterface>,
+    pub disks: Vec<TalosDiskStat>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -288,6 +289,16 @@ pub struct TalosService {
     pub state: String,
     pub healthy: bool,
     pub message: String,
+    pub health_unknown: bool,
+    pub last_change: Option<String>,
+    pub events: Vec<TalosServiceEvent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TalosServiceEvent {
+    pub state: String,
+    pub message: String,
+    pub timestamp: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -307,6 +318,17 @@ pub struct TalosNetworkInterface {
     pub tx_errors: u64,
     pub rx_dropped: u64,
     pub tx_dropped: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TalosDiskStat {
+    pub name: String,
+    pub read_bytes: u64,
+    pub write_bytes: u64,
+    pub reads: u64,
+    pub writes: u64,
+    pub io_in_progress: u64,
+    pub io_time_ms: u64,
 }
 
 /// A single pod metrics data point, shared between the server (serializes) and

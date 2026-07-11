@@ -4,9 +4,15 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use base64::Engine;
-use roder_core::{TalosMount, TalosNetworkInterface, TalosNode, TalosService};
+use roder_core::{
+    TalosDiskStat, TalosMount, TalosNetworkInterface, TalosNode, TalosService, TalosServiceEvent,
+};
 use serde::Deserialize;
 use talos_api_rs::api::machine::machine_service_client::MachineServiceClient;
+use talos_api_rs::api::machine::{
+    DmesgRequest, RebootRequest, ServiceRestartRequest, ServiceStartRequest, ServiceStopRequest,
+    ShutdownRequest,
+};
 use tonic::metadata::MetadataValue;
 use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity};
 use tonic::Request;
@@ -69,7 +75,7 @@ impl Backend {
     /// Fetch independent status groups concurrently through the in-cluster API proxy.
     pub async fn node(&self, node: &str) -> Result<TalosNode, TalosError> {
         let channel = self.current_channel().await?;
-        let (version, services, mounts, network) = tokio::try_join!(
+        let (version, services, mounts, network, disks) = tokio::try_join!(
             Self::call(&channel, node, |mut c, r| async move { c.version(r).await }),
             Self::call(
                 &channel,
@@ -80,6 +86,11 @@ impl Backend {
             Self::call(&channel, node, |mut c, r| async move {
                 c.network_device_stats(r).await
             }),
+            Self::call(
+                &channel,
+                node,
+                |mut c, r| async move { c.disk_stats(r).await }
+            ),
         )?;
 
         let version = version
@@ -92,11 +103,30 @@ impl Backend {
             .messages
             .into_iter()
             .flat_map(|m| m.services)
-            .map(|s| TalosService {
-                id: s.id,
-                state: s.state,
-                healthy: s.health.as_ref().is_some_and(|h| h.healthy),
-                message: s.health.map(|h| h.last_message).unwrap_or_default(),
+            .map(|s| {
+                let health = s.health.as_ref();
+                TalosService {
+                    id: s.id,
+                    state: s.state,
+                    healthy: health.is_some_and(|h| h.healthy),
+                    message: health.map(|h| h.last_message.clone()).unwrap_or_default(),
+                    health_unknown: health.is_none_or(|h| h.unknown),
+                    last_change: health.and_then(|h| h.last_change.as_ref()).map(timestamp),
+                    events: s
+                        .events
+                        .map(|events| {
+                            events
+                                .events
+                                .into_iter()
+                                .map(|event| TalosServiceEvent {
+                                    state: event.state,
+                                    message: event.msg,
+                                    timestamp: event.ts.as_ref().map(timestamp),
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                }
             })
             .collect();
         let mounts = mounts
@@ -124,6 +154,20 @@ impl Backend {
                 tx_dropped: d.tx_dropped,
             })
             .collect();
+        let disks = disks
+            .messages
+            .into_iter()
+            .flat_map(|m| m.devices)
+            .map(|d| TalosDiskStat {
+                name: d.name,
+                read_bytes: d.read_sectors.saturating_mul(512),
+                write_bytes: d.write_sectors.saturating_mul(512),
+                reads: d.read_completed,
+                writes: d.write_completed,
+                io_in_progress: d.io_in_progress,
+                io_time_ms: d.io_time_ms,
+            })
+            .collect();
 
         Ok(TalosNode {
             node: node.to_string(),
@@ -131,7 +175,87 @@ impl Backend {
             services,
             mounts,
             interfaces,
+            disks,
         })
+    }
+
+    pub async fn dmesg(&self, node: &str) -> Result<String, TalosError> {
+        let channel = self.current_channel().await?;
+        let request = targeted(
+            node,
+            DmesgRequest {
+                follow: false,
+                tail: false,
+            },
+        )?;
+        let mut stream = MachineServiceClient::new(channel)
+            .dmesg(request)
+            .await?
+            .into_inner();
+        let mut output = Vec::new();
+        while let Some(chunk) = stream.message().await? {
+            output.extend_from_slice(&chunk.bytes);
+        }
+        Ok(String::from_utf8_lossy(&output).into_owned())
+    }
+
+    pub async fn service_action(
+        &self,
+        node: &str,
+        service: &str,
+        action: &str,
+    ) -> Result<(), TalosError> {
+        let channel = self.current_channel().await?;
+        let mut client = MachineServiceClient::new(channel);
+        match action {
+            "start" => {
+                client
+                    .service_start(targeted(node, ServiceStartRequest { id: service.into() })?)
+                    .await?;
+            }
+            "stop" => {
+                client
+                    .service_stop(targeted(node, ServiceStopRequest { id: service.into() })?)
+                    .await?;
+            }
+            "restart" => {
+                client
+                    .service_restart(targeted(
+                        node,
+                        ServiceRestartRequest { id: service.into() },
+                    )?)
+                    .await?;
+            }
+            _ => {
+                return Err(TalosError::Config(format!(
+                    "unknown service action {action:?}"
+                )))
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn power_action(&self, node: &str, action: &str) -> Result<(), TalosError> {
+        let channel = self.current_channel().await?;
+        let mut client = MachineServiceClient::new(channel);
+        match action {
+            "reboot" => {
+                client
+                    .reboot(targeted(node, RebootRequest { mode: 0 })?)
+                    .await?;
+            }
+            "shutdown" => {
+                client
+                    .shutdown(targeted(node, ShutdownRequest { force: false })?)
+                    .await?;
+            }
+            _ => {
+                return Err(TalosError::Config(format!(
+                    "unknown power action {action:?}"
+                )))
+            }
+        }
+        Ok(())
     }
 
     async fn current_channel(&self) -> Result<Channel, TalosError> {
@@ -166,6 +290,19 @@ impl Backend {
             .await?
             .into_inner())
     }
+}
+
+fn targeted<T>(node: &str, body: T) -> Result<Request<T>, TalosError> {
+    let value: MetadataValue<_> = node
+        .parse()
+        .map_err(|_| TalosError::Config(format!("invalid node target {node:?}")))?;
+    let mut request = Request::new(body);
+    request.metadata_mut().insert("x-talos-node", value);
+    Ok(request)
+}
+
+fn timestamp(ts: &prost_types::Timestamp) -> String {
+    format!("{}.{:09}Z", ts.seconds, ts.nanos)
 }
 
 async fn connect(raw: &str) -> Result<Channel, TalosError> {
@@ -207,4 +344,31 @@ fn decode_config_value(name: &str, value: &str) -> Result<Vec<u8>, TalosError> {
     base64::engine::general_purpose::STANDARD
         .decode(value.trim())
         .map_err(|e| TalosError::Config(format!("invalid base64 {name}: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn targeted_request_sets_node_metadata() {
+        let request = targeted("worker-1", ()).unwrap();
+        assert_eq!(request.metadata().get("x-talos-node").unwrap(), "worker-1");
+    }
+
+    #[test]
+    fn targeted_request_rejects_invalid_metadata() {
+        assert!(targeted("bad\nnode", ()).is_err());
+    }
+
+    #[test]
+    fn formats_protobuf_timestamp() {
+        assert_eq!(
+            timestamp(&prost_types::Timestamp {
+                seconds: 1_700_000_000,
+                nanos: 42,
+            }),
+            "1700000000.000000042Z"
+        );
+    }
 }

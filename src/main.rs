@@ -50,6 +50,7 @@ async fn main() {
         .route("/api/overview", get(api::overview))
         .route("/api/features", get(api::features))
         .route("/api/talos/node", get(api::talos_node))
+        .route("/api/talos/dmesg", get(api::talos_dmesg))
         .route("/api/resources", get(api::resources))
         .route("/api/namespaces", get(api::namespaces))
         .route("/api/detail", get(api::detail))

@@ -100,7 +100,6 @@
 
     "test:docker" = {
       exec = "docker buildx build -t roder:test .";
-      before = [ "devenv:enterTest" ];
     };
   };
   enterShell = ''

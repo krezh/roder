@@ -134,15 +134,7 @@ pub fn App() -> impl IntoView {
     provide_context(AccessReviewOpen(access_review_open));
     let alerts_data: RwSignal<Option<Vec<roder_core::FiringAlert>>> = RwSignal::new(None);
     provide_context(AlertsData(alerts_data));
-    // Seed the alerts button from the last-known list so it doesn't flash empty
-    // on refresh while the first `/api/alerts` round-trip is in flight.
-    Effect::new(move |_| {
-        if let Some(cached) = data::storage_get("roder.alerts")
-            .and_then(|s| serde_json::from_str::<Vec<roder_core::FiringAlert>>(&s).ok())
-        {
-            alerts_data.set(Some(cached));
-        }
-    });
+    let _alertmanager_enabled = RwSignal::new(false);
     let resource_filter = RwSignal::new(String::new());
     provide_context(ResourceFilter(resource_filter));
     provide_context(FilterFocus(RwSignal::new(0u32)));
@@ -283,9 +275,28 @@ pub fn App() -> impl IntoView {
         );
     });
 
-    // Fetch alerts once at mount so the panel has data immediately on open.
+    // Discover optional integrations before touching their endpoints. Disabled
+    // integrations stay invisible and produce no background request noise.
     #[cfg(target_arch = "wasm32")]
     leptos::task::spawn_local(async move {
+        let enabled = data::fetch_json::<serde_json::Value>("/api/features")
+            .await
+            .ok()
+            .and_then(|v| v.get("alertmanager").and_then(|v| v.as_bool()))
+            .unwrap_or(false);
+        _alertmanager_enabled.set(enabled);
+        if !enabled {
+            alerts_data.set(None);
+            data::storage_remove("roder.alerts");
+            return;
+        }
+
+        // Seed from the last-known list while the first request is in flight.
+        if let Some(cached) = data::storage_get("roder.alerts")
+            .and_then(|s| serde_json::from_str::<Vec<roder_core::FiringAlert>>(&s).ok())
+        {
+            alerts_data.set(Some(cached));
+        }
         if let Ok(list) = data::fetch_json::<Vec<roder_core::FiringAlert>>("/api/alerts").await {
             if let Ok(json) = serde_json::to_string(&list) {
                 data::storage_set("roder.alerts", &json);
@@ -300,6 +311,9 @@ pub fn App() -> impl IntoView {
             move || {
                 #[cfg(target_arch = "wasm32")]
                 leptos::task::spawn_local(async move {
+                    if !_alertmanager_enabled.get_untracked() {
+                        return;
+                    }
                     if let Ok(list) =
                         data::fetch_json::<Vec<roder_core::FiringAlert>>("/api/alerts").await
                     {

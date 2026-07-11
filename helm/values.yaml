@@ -15,6 +15,15 @@ serviceAccount:
   annotations: {}
   name: ""
 
+# Native Talos in-cluster API access. The cluster machine configuration must
+# enable `machine.features.kubernetesTalosAPIAccess` for this namespace and
+# permit `os:reader`. Talos reconciles the custom ServiceAccount below into a
+# short-lived client configuration; no external/admin talosconfig is used.
+talos:
+  enabled: false
+  roles:
+    - os:reader
+
 # ClusterRole + binding for roder's ServiceAccount, granting the read-only
 # cluster metadata roder needs at startup: API discovery and read/watch on CRDs
 # (to harvest additionalPrinterColumns once, up front, instead of on first

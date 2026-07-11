@@ -57,10 +57,20 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if .Values.talos.enabled }}
+            - name: talos-config
+              mountPath: /var/run/secrets/talos.dev
+              readOnly: true
+            {{- end }}
       volumes:
         # readOnlyRootFilesystem is on; give the process a writable /tmp.
         - name: tmp
           emptyDir: {}
+        {{- if .Values.talos.enabled }}
+        - name: talos-config
+          secret:
+            secretName: {{ include "roder.fullname" . }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

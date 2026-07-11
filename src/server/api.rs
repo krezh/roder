@@ -50,7 +50,6 @@ fn ns_filter(ns: &Option<String>) -> Option<&str> {
 pub async fn alerts(State(state): State<AppState>) -> Response {
     let cache = state.alerts.read().await.as_ref().map(Arc::clone);
     let Some(cache) = cache else {
-        tracing::warn!("alerts: no alertmanager configured (discovery found nothing at startup)");
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
     let b = backend_or_return!(state);
@@ -76,6 +75,38 @@ pub async fn overview(State(state): State<AppState>) -> Response {
         Ok(o) => Json(o).into_response(),
         Err(e) => bad_gateway(e),
     }
+}
+
+#[derive(Deserialize)]
+pub struct TalosNodeQuery {
+    node: String,
+}
+
+/// Read-only machine status through Talos's native in-cluster API service.
+pub async fn talos_node(
+    State(state): State<AppState>,
+    Query(q): Query<TalosNodeQuery>,
+) -> Response {
+    if q.node.is_empty() {
+        return (StatusCode::BAD_REQUEST, "missing node").into_response();
+    }
+    let Some(talos) = state.talos.as_ref() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    match talos.node(&q.node).await {
+        Ok(status) => Json(status).into_response(),
+        Err(e) => bad_gateway(e),
+    }
+}
+
+/// Optional server integrations available to the current deployment.
+pub async fn features(State(state): State<AppState>) -> Response {
+    let alertmanager = state.alerts.read().await.is_some();
+    Json(serde_json::json!({
+        "talos": state.talos.is_some(),
+        "alertmanager": alertmanager,
+    }))
+    .into_response()
 }
 
 pub async fn namespaces(State(state): State<AppState>) -> Response {

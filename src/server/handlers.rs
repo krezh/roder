@@ -452,6 +452,7 @@ mod tests {
             refresh_lock: Arc::new(Mutex::new(())),
             backend_build_lock: Arc::new(Mutex::new(())),
             alerts: Arc::new(RwLock::new(None)),
+            talos: None,
         }
     }
 

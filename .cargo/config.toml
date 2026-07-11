@@ -1,2 +1,8 @@
 [registries.crates-io]
 protocol = "git"
+
+[env]
+# talos-api-rs ships generated tonic bindings, but otherwise regenerates them
+# during every consumer build and requires protoc. Its documented docs build
+# switch selects those checked-in bindings directly.
+DOCS_RS = "1"

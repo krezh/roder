@@ -28,6 +28,7 @@ pub(crate) enum Tab {
     Yaml,
     Logs,
     Metrics,
+    Talos,
 }
 
 /// Right-docked, drag-resizable detail drawer. Shows `RowDetail` for the currently
@@ -120,6 +121,18 @@ pub(crate) fn RowDetail(
     let has_source_ref = kk.has_source_ref();
     let is_eso = kk.is_eso();
     let is_pod = kk.is_pod();
+    let is_node = kk.is_node();
+    let features = LocalResource::new(move || async move {
+        if !is_node {
+            return false;
+        }
+        data::fetch_json::<serde_json::Value>("/api/features")
+            .await
+            .ok()
+            .and_then(|v| v.get("talos").and_then(|v| v.as_bool()))
+            .unwrap_or(false)
+    });
+    let talos_available = move || features.get().is_some_and(|enabled| enabled);
     // Pod-owning resources get a live "Pods" tab listing their pods by selector.
     let has_pods = is_workload || kk.is_job();
     let is_cronjob = kk.is_cronjob();
@@ -300,6 +313,9 @@ pub(crate) fn RowDetail(
                     <button class="rd-tab" class:active=move || tab.get() == Tab::Metrics on:click=move |_| tab.set(Tab::Metrics)>"Metrics"</button>
                     <button class="rd-tab" class:active=move || tab.get() == Tab::Logs on:click=move |_| tab.set(Tab::Logs)>"Logs"</button>
                 })}
+                {move || talos_available().then(|| view! {
+                    <button class="rd-tab" class:active=move || tab.get() == Tab::Talos on:click=move |_| tab.set(Tab::Talos)>"Talos"</button>
+                })}
             </div>
 
             <Suspense fallback=|| view! { <div class="pad muted">"Loading…"</div> }>
@@ -317,6 +333,7 @@ pub(crate) fn RowDetail(
                         Tab::Info => info_view(d.clone(), kind_sv.get_value()).into_any(),
                         Tab::Logs => view! { <LogsView url=format!("/api/logs?namespace={}&pod={}", data::percent_encode(&ns), data::percent_encode(&pod)) /> }.into_any(),
                         Tab::Metrics => view! { <MetricsChart namespace=ns.clone() name=pod.clone() /> }.into_any(),
+                        Tab::Talos => view! { <TalosNodeView node=pod.clone() /> }.into_any(),
                         Tab::Yaml => view! {
                             <div class="yaml-pane">
                                 <div class="yaml-head">
@@ -357,4 +374,68 @@ pub(crate) fn RowDetail(
             </Suspense>
         </div>
     }
+}
+
+#[component]
+fn TalosNodeView(node: String) -> impl IntoView {
+    let status = LocalResource::new(move || {
+        let node = node.clone();
+        async move {
+            data::fetch_json::<roder_core::TalosNode>(&format!(
+                "/api/talos/node?node={}",
+                data::percent_encode(&node)
+            ))
+            .await
+        }
+    });
+
+    view! {
+        <Suspense fallback=|| view! { <div class="pad muted">"Loading Talos status…"</div> }>
+            {move || status.get().map(|result| match result {
+                Err(e) => view! { <div class="pad muted">{format!("Talos integration unavailable: {e}")}</div> }.into_any(),
+                Ok(s) => {
+                    let services = s.services;
+                    let mounts = s.mounts;
+                    let interfaces = s.interfaces;
+                    view! {
+                        <div class="info">
+                            <div class="kv-grid">
+                                <div class="kv"><span class="k">"Version"</span><span class="v">{s.version}</span></div>
+                            </div>
+                            <h4>"Services"</h4>
+                            <table class="cond"><thead><tr><th>"Service"</th><th>"State"</th><th>"Health"</th></tr></thead>
+                                <tbody>{services.into_iter().map(|svc| view! {
+                                    <tr><td>{svc.id}</td><td>{svc.state}</td><td>{if svc.healthy { "Healthy" } else { "Unhealthy" }}</td></tr>
+                                }).collect_view()}</tbody>
+                            </table>
+                            <h4>"Mounts"</h4>
+                            <table class="cond"><thead><tr><th>"Path"</th><th>"Filesystem"</th><th>"Used"</th></tr></thead>
+                                <tbody>{mounts.into_iter().map(|m| {
+                                    let pct = if m.size == 0 { 0.0 } else { 100.0 * (m.size - m.available) as f64 / m.size as f64 };
+                                    view! { <tr><td>{m.mounted_on}</td><td>{m.filesystem}</td><td>{format!("{pct:.1}%")}</td></tr> }
+                                }).collect_view()}</tbody>
+                            </table>
+                            <h4>"Network"</h4>
+                            <table class="cond"><thead><tr><th>"Interface"</th><th>"RX"</th><th>"TX"</th><th>"Errors / Drops"</th></tr></thead>
+                                <tbody>{interfaces.into_iter().map(|i| view! {
+                                    <tr><td>{i.name}</td><td>{format_bytes(i.rx_bytes)}</td><td>{format_bytes(i.tx_bytes)}</td><td>{format!("{} / {}", i.rx_errors + i.tx_errors, i.rx_dropped + i.tx_dropped)}</td></tr>
+                                }).collect_view()}</tbody>
+                            </table>
+                        </div>
+                    }.into_any()
+                }
+            })}
+        </Suspense>
+    }
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: &[&str] = &["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit + 1 < UNITS.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+    format!("{value:.1} {}", UNITS[unit])
 }

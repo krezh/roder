@@ -272,6 +272,43 @@ pub struct NodeSummary {
     pub os_image: Option<String>,
 }
 
+/// Read-only status returned directly by a Talos node through the machine API.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TalosNode {
+    pub node: String,
+    pub version: String,
+    pub services: Vec<TalosService>,
+    pub mounts: Vec<TalosMount>,
+    pub interfaces: Vec<TalosNetworkInterface>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TalosService {
+    pub id: String,
+    pub state: String,
+    pub healthy: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TalosMount {
+    pub filesystem: String,
+    pub mounted_on: String,
+    pub size: u64,
+    pub available: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TalosNetworkInterface {
+    pub name: String,
+    pub rx_bytes: u64,
+    pub tx_bytes: u64,
+    pub rx_errors: u64,
+    pub tx_errors: u64,
+    pub rx_dropped: u64,
+    pub tx_dropped: u64,
+}
+
 /// A single pod metrics data point, shared between the server (serializes) and
 /// the frontend (deserializes) via the `/api/metrics` endpoint.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

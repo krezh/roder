@@ -41,6 +41,8 @@ pub struct AppState {
     pub backend_build_lock: Arc<Mutex<()>>,
     /// Alertmanager HTTP cache. `None` if no Alertmanager was discovered.
     pub alerts: Arc<RwLock<Option<Arc<roder_k8s::AlertsCache>>>>,
+    /// Native Talos in-cluster API client. None when no generated config is mounted.
+    pub talos: Option<Arc<roder_talos::Backend>>,
 }
 
 // Lets Leptos's axum handlers pull `LeptosOptions` out of our custom state.
@@ -76,6 +78,18 @@ pub async fn build_state(leptos_options: LeptosOptions) -> Result<AppState, Stri
     // Best-effort: if the cluster isn't reachable yet, the first request builds it.
     let backend = Arc::new(RwLock::new(None));
     let alerts = Arc::new(RwLock::new(None));
+    let talos = match roder_talos::Backend::connect_in_cluster().await {
+        Ok(client) => {
+            if client.is_some() {
+                tracing::info!("connected to Talos through the in-cluster API service");
+            }
+            client.map(Arc::new)
+        }
+        Err(e) => {
+            tracing::warn!("Talos in-cluster configuration is present but unusable: {e}");
+            None
+        }
+    };
     match Backend::connect_with_default().await {
         Ok(b) => {
             tracing::info!(
@@ -101,5 +115,6 @@ pub async fn build_state(leptos_options: LeptosOptions) -> Result<AppState, Stri
         refresh_lock: Arc::new(Mutex::new(())),
         backend_build_lock: Arc::new(Mutex::new(())),
         alerts,
+        talos,
     })
 }

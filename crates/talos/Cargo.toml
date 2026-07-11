@@ -1,0 +1,16 @@
+[package]
+name = "roder-talos"
+version = "0.1.22"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+roder-core = { workspace = true }
+talos-api-rs = "0.2"
+tonic = { version = "0.14", features = ["transport", "tls-ring"] }
+base64 = "0.22"
+serde = { workspace = true }
+serde_yaml = "0.9"
+thiserror = { workspace = true }
+tokio = { workspace = true }

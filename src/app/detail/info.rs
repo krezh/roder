@@ -62,7 +62,7 @@ pub(crate) fn info_view(d: ObjectDetail, kind: String) -> impl IntoView {
 
             {(!images.is_empty()).then(|| view! {
                 <h4>"Containers"</h4>
-                <div class="kv-cols">
+                <div class="kv-cols container-images">
                     {images.into_iter().map(|(name, image)| view! {
                         <div class="kvc"><span class="kvc-k">{name}</span><span class="kvc-v">{image}</span></div>
                     }).collect_view()}

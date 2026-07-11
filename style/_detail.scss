@@ -260,6 +260,7 @@
   gap: 0.25rem;
   padding: 0.4rem 0.9rem 0;
   border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel-2) 65%, transparent);
 }
 .rd-tab {
   background: none;
@@ -273,18 +274,28 @@
     color: var(--fg);
   }
   &.active {
-    color: var(--fg);
+    color: color-mix(in srgb, var(--accent) 35%, var(--fg));
     border-bottom-color: var(--accent);
+    background: linear-gradient(to top, color-mix(in srgb, var(--accent) 10%, transparent), transparent 75%);
   }
 }
 .info {
   padding: 0.6rem 0.9rem 1rem;
   h4 {
     margin: 0.9rem 0 0.4rem;
-    color: var(--muted);
+    color: color-mix(in srgb, var(--accent) 65%, var(--fg));
     font-size: 0.72rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    &::after {
+      content: '';
+      height: 1px;
+      flex: 1;
+      background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 35%, var(--border)), transparent);
+    }
   }
 }
 /* One key/value pair per row (single column) — a long value can't overlap a
@@ -302,6 +313,11 @@
   align-items: baseline;
   padding: 0.25rem 0;
   border-bottom: 1px solid var(--border);
+  transition: background 0.12s ease, border-color 0.12s ease;
+  &:hover {
+    background: color-mix(in srgb, var(--accent) 5%, transparent);
+    border-bottom-color: color-mix(in srgb, var(--accent) 25%, var(--border));
+  }
   .k {
     color: var(--muted);
     flex: 0 0 auto;
@@ -320,6 +336,9 @@
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 0.3rem 1.2rem;
 }
+.container-images {
+  grid-template-columns: minmax(0, 1fr);
+}
 .kvc {
   display: flex;
   flex-direction: column;
@@ -327,9 +346,14 @@
   min-width: 0;
   padding: 0.25rem 0;
   border-bottom: 1px solid var(--border);
+  transition: background 0.12s ease, border-color 0.12s ease;
+  &:hover {
+    background: color-mix(in srgb, var(--accent) 5%, transparent);
+    border-bottom-color: color-mix(in srgb, var(--accent) 25%, var(--border));
+  }
 }
 .kvc-k {
-  color: var(--muted);
+  color: color-mix(in srgb, var(--accent) 35%, var(--muted));
   font-size: 0.72rem;
 }
 .kvc-v {

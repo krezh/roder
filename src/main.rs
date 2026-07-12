@@ -51,6 +51,7 @@ async fn main() {
         .route("/api/features", get(api::features))
         .route("/api/talos/node", get(api::talos_node))
         .route("/api/talos/dmesg", get(api::talos_dmesg))
+        .route("/api/talos/config-diff", get(api::talos_config_diff))
         .route("/api/resources", get(api::resources))
         .route("/api/namespaces", get(api::namespaces))
         .route("/api/detail", get(api::detail))

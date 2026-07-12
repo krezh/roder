@@ -27,6 +27,8 @@ pub struct ServerConfig {
     /// Mutations require both this group allow-list and `talos_actions_enabled`.
     pub talos_operator_groups: Vec<String>,
     pub talos_actions_enabled: bool,
+    pub talos_config_groups: Vec<String>,
+    pub talos_config_enabled: bool,
     /// Downward-API node name; coordinated power actions reject their own host.
     pub pod_node_name: Option<String>,
 }
@@ -58,6 +60,8 @@ impl ServerConfig {
         let talos_reader_groups = env_groups("RODER_TALOS_READER_GROUPS");
         let talos_operator_groups = env_groups("RODER_TALOS_OPERATOR_GROUPS");
         let talos_actions_enabled = env_bool("RODER_TALOS_ACTIONS_ENABLED");
+        let talos_config_groups = env_groups("RODER_TALOS_CONFIG_GROUPS");
+        let talos_config_enabled = env_bool("RODER_TALOS_CONFIG_ENABLED");
         let pod_node_name = std::env::var("RODER_POD_NODE_NAME").ok();
 
         if dev_mode {
@@ -70,6 +74,8 @@ impl ServerConfig {
                 talos_reader_groups,
                 talos_operator_groups,
                 talos_actions_enabled,
+                talos_config_groups,
+                talos_config_enabled,
                 pod_node_name,
             });
         }
@@ -97,6 +103,8 @@ impl ServerConfig {
             talos_reader_groups,
             talos_operator_groups,
             talos_actions_enabled,
+            talos_config_groups,
+            talos_config_enabled,
             pod_node_name,
         })
     }
@@ -119,6 +127,11 @@ impl ServerConfig {
     pub fn can_operate_talos(&self, groups: &[String]) -> bool {
         self.talos_actions_enabled
             && (self.dev_mode || has_any_group(groups, &self.talos_operator_groups))
+    }
+
+    pub fn can_read_talos_config(&self, groups: &[String]) -> bool {
+        self.talos_config_enabled
+            && (self.dev_mode || has_any_group(groups, &self.talos_config_groups))
     }
 
     /// Convert to the `roder_auth` config (panics if called in dev mode).
@@ -247,6 +260,8 @@ mod tests {
             "RODER_TALOS_READER_GROUPS",
             "RODER_TALOS_OPERATOR_GROUPS",
             "RODER_TALOS_ACTIONS_ENABLED",
+            "RODER_TALOS_CONFIG_GROUPS",
+            "RODER_TALOS_CONFIG_ENABLED",
             "RODER_POD_NODE_NAME",
         ]);
         g.unset("RODER_DEV_MODE");
@@ -262,6 +277,8 @@ mod tests {
         g.unset("RODER_TALOS_READER_GROUPS");
         g.unset("RODER_TALOS_OPERATOR_GROUPS");
         g.unset("RODER_TALOS_ACTIONS_ENABLED");
+        g.unset("RODER_TALOS_CONFIG_GROUPS");
+        g.unset("RODER_TALOS_CONFIG_ENABLED");
         g.unset("RODER_POD_NODE_NAME");
         g
     }
@@ -491,6 +508,21 @@ mod tests {
         g.set("RODER_TALOS_READER_GROUPS", r#"["team,ops"]"#);
         let cfg = ServerConfig::from_env().unwrap();
         assert_eq!(cfg.talos_reader_groups, vec!["team,ops"]);
+    }
+
+    #[test]
+    #[serial]
+    fn talos_config_requires_explicit_switch_and_group() {
+        let g = prod_env();
+        g.set("RODER_TALOS_CONFIG_GROUPS", r#"["platform-admins"]"#);
+        let groups = vec!["platform-admins".into()];
+        assert!(!ServerConfig::from_env()
+            .unwrap()
+            .can_read_talos_config(&groups));
+        g.set("RODER_TALOS_CONFIG_ENABLED", "true");
+        let cfg = ServerConfig::from_env().unwrap();
+        assert!(cfg.can_read_talos_config(&groups));
+        assert!(!cfg.can_read_talos_config(&["developers".into()]));
     }
 
     #[test]

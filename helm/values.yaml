@@ -29,6 +29,11 @@ talos:
     # operatorGroups. Enabling this also grants the Talos os:operator role.
     enabled: false
     operatorGroups: []
+  config:
+    # Machine configuration fingerprints and redacted diffs require os:admin.
+    # Keep this disabled unless the additional visibility is explicitly needed.
+    enabled: false
+    readerGroups: []
   roles:
     - os:reader
 

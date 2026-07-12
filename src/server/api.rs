@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::convert::Infallible;
 use std::sync::Arc;
 
@@ -7,7 +8,10 @@ use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use futures::stream::select_all;
-use roder_core::{MultiWatchEvent, ObjectDetail, TalosCapabilities, WatchEvent};
+use roder_core::{
+    MultiWatchEvent, ObjectDetail, TalosCapabilities, TalosConfigDiff, TalosConfigDifference,
+    TalosConfigPeerDiff, WatchEvent,
+};
 use roder_k8s::Backend;
 use serde::Deserialize;
 use tokio_stream::wrappers::BroadcastStream;
@@ -111,9 +115,11 @@ fn talos_capabilities(state: &AppState, headers: &HeaderMap) -> TalosCapabilitie
         return TalosCapabilities::default();
     };
     let actions = state.config.can_operate_talos(&groups);
+    let config = state.config.can_read_talos_config(&groups);
     TalosCapabilities {
-        read: actions || state.config.can_read_talos(&groups),
+        read: actions || config || state.config.can_read_talos(&groups),
         actions,
+        config,
     }
 }
 
@@ -154,7 +160,8 @@ pub async fn talos_node(
     let Some(talos) = state.talos.as_ref() else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    if !talos_capabilities(&state, &headers).read {
+    let capabilities = talos_capabilities(&state, &headers);
+    if !capabilities.read {
         return StatusCode::FORBIDDEN.into_response();
     }
     let backend = backend_or_return!(state);
@@ -165,13 +172,121 @@ pub async fn talos_node(
     match talos.node(&q.node).await {
         Ok(mut status) => {
             status.control_plane = is_control_plane(&detail);
+            if capabilities.config {
+                match talos.config_snapshot(&q.node).await {
+                    Ok(snapshot) => status.config_fingerprint = Some(snapshot.fingerprint),
+                    Err(error) => {
+                        status
+                            .errors
+                            .insert("machine config".into(), error.to_string());
+                    }
+                }
+            }
             Json(status).into_response()
         }
         Err(e) => talos_error(e),
     }
 }
 
-/// Kernel ring buffer from a Talos node.
+/// Redacted machine-configuration differences against the other Talos nodes.
+pub async fn talos_config_diff(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<TalosNodeQuery>,
+) -> Response {
+    if q.node.is_empty() {
+        return (StatusCode::BAD_REQUEST, "missing node").into_response();
+    }
+    if !talos_capabilities(&state, &headers).config {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let Some(talos) = state.talos.as_ref() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let backend = backend_or_return!(state);
+    if let Err(response) = visible_node(&backend, &q.node).await {
+        return response;
+    }
+    let selected = match talos.config_snapshot(&q.node).await {
+        Ok(snapshot) => snapshot,
+        Err(error) => return talos_error(error),
+    };
+    let overview = match backend.overview().await {
+        Ok(overview) => overview,
+        Err(error) => return bad_gateway(error),
+    };
+    let mut peers = Vec::new();
+    for peer in overview.nodes.into_iter().filter(|node| {
+        node.name != q.node
+            && node
+                .os_image
+                .as_deref()
+                .is_some_and(|image| image.starts_with("Talos"))
+    }) {
+        if visible_node(&backend, &peer.name).await.is_err() {
+            continue;
+        }
+        match talos.config_snapshot(&peer.name).await {
+            Ok(snapshot) => peers.push(TalosConfigPeerDiff {
+                node: peer.name,
+                fingerprint: Some(snapshot.fingerprint.clone()),
+                matches: Some(snapshot.fingerprint == selected.fingerprint),
+                differences: config_differences(&selected.fields, &snapshot.fields),
+                error: None,
+            }),
+            Err(error) => peers.push(TalosConfigPeerDiff {
+                node: peer.name,
+                fingerprint: None,
+                matches: None,
+                differences: Vec::new(),
+                error: Some(error.to_string()),
+            }),
+        }
+    }
+    Json(TalosConfigDiff {
+        node: q.node,
+        fingerprint: selected.fingerprint,
+        peers,
+    })
+    .into_response()
+}
+
+fn config_differences(
+    selected: &std::collections::BTreeMap<String, roder_talos::ConfigField>,
+    peer: &std::collections::BTreeMap<String, roder_talos::ConfigField>,
+) -> Vec<TalosConfigDifference> {
+    selected
+        .keys()
+        .chain(peer.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .filter_map(|path| {
+            let left = selected.get(&path);
+            let right = peer.get(&path);
+            if left == right {
+                return None;
+            }
+            let sensitive = matches!(left, Some(roder_talos::ConfigField::Sensitive(_)))
+                || matches!(right, Some(roder_talos::ConfigField::Sensitive(_)));
+            Some(TalosConfigDifference {
+                path,
+                node_value: config_display_value(left),
+                peer_value: config_display_value(right),
+                sensitive,
+            })
+        })
+        .collect()
+}
+
+fn config_display_value(value: Option<&roder_talos::ConfigField>) -> Option<String> {
+    value.map(|value| match value {
+        roder_talos::ConfigField::Plain(value) => value.clone(),
+        roder_talos::ConfigField::Sensitive(_) => "<redacted>".into(),
+    })
+}
+
+/// Live kernel ring buffer from a Talos node as SSE.
 pub async fn talos_dmesg(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -190,10 +305,23 @@ pub async fn talos_dmesg(
     if let Err(response) = visible_node(&backend, &q.node).await {
         return response;
     }
-    match talos.dmesg(&q.node).await {
-        Ok(log) => Json(log).into_response(),
-        Err(e) => talos_error(e),
-    }
+    let stream: std::pin::Pin<
+        Box<dyn futures::Stream<Item = Result<String, roder_talos::TalosError>> + Send>,
+    > = match talos.dmesg(&q.node).await {
+        Ok(stream) => stream,
+        Err(error) => Box::pin(futures::stream::once(async move { Err(error) })),
+    };
+    let lines = stream.map(|result| {
+        let line =
+            result.unwrap_or_else(|error| format!("[roder] Talos log stream failed: {error}"));
+        Ok::<_, Infallible>(SseEvent::default().data(line))
+    });
+    let eof = tokio_stream::once(Ok::<_, Infallible>(
+        SseEvent::default().event("eof").data("1"),
+    ));
+    Sse::new(lines.chain(eof))
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }
 
 /// Optional server integrations available to the current deployment.

@@ -9,9 +9,15 @@ repository.workspace = true
 roder-core = { workspace = true }
 talos-api-rs = "0.2"
 tonic = { version = "0.14", features = ["transport", "tls-ring"] }
+tonic-prost = "0.14"
+prost = "0.14"
 base64 = "0.22"
 serde = { workspace = true }
+serde_json = { workspace = true }
 serde_yaml = "0.9"
 thiserror = { workspace = true }
 tokio = { workspace = true }
 prost-types = "0.14"
+sha2 = "0.10"
+async-stream = "0.3"
+futures = "0.3"

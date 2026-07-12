@@ -48,6 +48,10 @@ spec:
               value: {{ .Values.talos.actions.enabled | quote }}
             - name: RODER_TALOS_OPERATOR_GROUPS
               value: {{ toJson .Values.talos.actions.operatorGroups | quote }}
+            - name: RODER_TALOS_CONFIG_ENABLED
+              value: {{ .Values.talos.config.enabled | quote }}
+            - name: RODER_TALOS_CONFIG_GROUPS
+              value: {{ toJson .Values.talos.config.readerGroups | quote }}
             {{- end }}
             {{- with .Values.env }}
             {{- toYaml . | nindent 12 }}

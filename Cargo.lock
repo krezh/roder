@@ -3741,15 +3741,21 @@ dependencies = [
 name = "roder-talos"
 version = "0.1.22"
 dependencies = [
+ "async-stream",
  "base64 0.22.1",
+ "futures",
+ "prost",
  "prost-types",
  "roder-core",
  "serde",
+ "serde_json",
  "serde_yaml",
+ "sha2",
  "talos-api-rs",
  "thiserror 2.0.18",
  "tokio",
  "tonic",
+ "tonic-prost",
 ]
 
 [[package]]

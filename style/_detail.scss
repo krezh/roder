@@ -402,7 +402,55 @@ table.cond {
   border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
   background: color-mix(in srgb, var(--warn) 6%, transparent);
 }
+.talos-view {
+  table.cond { font-size: 0.84rem; }
+}
+.detail-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel-2) 58%, transparent);
+}
+.detail-stat {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0.65rem 0.75rem;
+  border-right: 1px solid var(--border);
+
+  &:last-child { border-right: 0; }
+}
+.detail-stat-label {
+  color: color-mix(in srgb, var(--accent) 58%, var(--muted));
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.detail-stat-value {
+  margin-top: 0.18rem;
+  font-size: 0.98rem;
+  font-variant-numeric: tabular-nums;
+}
+.detail-stat-note {
+  margin-top: 0.12rem;
+  color: var(--muted);
+  font-size: 0.74rem;
+
+  &.warning { color: var(--warn); }
+}
+.talos-fingerprint {
+  display: flex;
+  gap: 0.55rem;
+  align-items: baseline;
+  margin-top: 0.4rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+
+  code { color: var(--fg); }
+}
 .talos-power-actions {
+  margin-top: 0.55rem;
   align-items: center;
 }
 .talos-drain {
@@ -414,6 +462,159 @@ table.cond {
   cursor: pointer;
 
   input { accent-color: var(--accent); }
+}
+.talos-sections {
+  margin-top: 0.7rem;
+  display: grid;
+  gap: 0.4rem;
+}
+.talos-section {
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel-2) 34%, transparent);
+
+  > summary {
+    display: grid;
+    grid-template-columns: 0.7rem minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.6rem 0.7rem;
+    cursor: pointer;
+    user-select: none;
+    font-size: 0.85rem;
+    font-weight: 600;
+    list-style: none;
+
+    &::-webkit-details-marker { display: none; }
+    &::before {
+      content: '+';
+      color: var(--muted);
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-weight: 400;
+    }
+    &:hover { color: color-mix(in srgb, var(--accent) 35%, var(--fg)); }
+  }
+  &[open] > summary::before { content: '-'; }
+  &[open] > summary {
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--accent) 4%, transparent);
+  }
+}
+.talos-section-meta {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 400;
+  white-space: nowrap;
+
+  &.warning { color: var(--warn); }
+}
+.talos-section-body {
+  padding: 0.45rem 0.65rem 0.7rem;
+  overflow-x: auto;
+
+  h5 {
+    margin: 0.75rem 0 0.3rem;
+    color: var(--muted);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+}
+.talos-data-table {
+  table-layout: fixed;
+
+  &:not(.talos-service-table) th { width: calc(100% / 6); }
+}
+.talos-service-table {
+  th:first-child, td:first-child { width: calc(100% / 6); }
+  th:nth-child(2), td:nth-child(2) { width: calc(100% / 6); }
+  .talos-service-actions { width: calc(100% / 6); white-space: nowrap; }
+}
+.talos-health {
+  font-size: 0.76rem;
+  font-weight: 650;
+
+  &.healthy { color: var(--ok); }
+  &.unknown { color: var(--muted); }
+  &.unhealthy { color: var(--error); }
+}
+.talos-volume-table {
+  th:nth-child(2), td:nth-child(2) { white-space: nowrap; }
+}
+.talos-disk-table {
+  th:first-child, td:first-child { white-space: nowrap; }
+}
+.talos-disk-io {
+  display: grid;
+  grid-template-columns: repeat(2, 5.4rem);
+  gap: 0.35rem;
+  width: max-content;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+
+  span {
+    display: grid;
+    grid-template-columns: 0.75rem auto;
+    align-items: baseline;
+  }
+  i {
+    color: var(--muted);
+    font-size: 0.66rem;
+    font-style: normal;
+    font-weight: 700;
+  }
+}
+.talos-usage {
+  display: grid;
+  grid-template-columns: minmax(70px, 1fr) 3.5rem;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 145px;
+
+  > span {
+    height: 4px;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--muted) 20%, transparent);
+  }
+  i {
+    display: block;
+    height: 100%;
+    max-width: 100%;
+    background: var(--accent);
+  }
+  b {
+    font-size: 0.74rem;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+}
+@media (max-width: 760px) {
+  .detail-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .detail-stat {
+    border-bottom: 1px solid var(--border);
+    &:nth-child(2) { border-right: 0; }
+    &:nth-child(n + 3) { border-bottom: 0; }
+  }
+  .talos-section-meta { white-space: normal; text-align: right; }
+}
+.talos-config-diff {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+
+  details {
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+  }
+  summary {
+    padding: 0.45rem 0.6rem;
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+  }
+  details[open] summary {
+    color: var(--fg);
+    border-bottom: 1px solid var(--border);
+  }
 }
 table.rules {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;

@@ -440,6 +440,8 @@ mod tests {
             talos_reader_groups: vec![],
             talos_operator_groups: vec![],
             talos_actions_enabled: false,
+            talos_config_groups: vec![],
+            talos_config_enabled: false,
             pod_node_name: None,
         })
     }
@@ -460,6 +462,8 @@ mod tests {
             talos_reader_groups: vec![],
             talos_operator_groups: vec![],
             talos_actions_enabled: false,
+            talos_config_groups: vec![],
+            talos_config_enabled: false,
             pod_node_name: None,
         })
     }

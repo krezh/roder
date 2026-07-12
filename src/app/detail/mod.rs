@@ -137,6 +137,7 @@ pub(crate) fn RowDetail(
     });
     let talos_available = move || features.get().is_some_and(|caps| caps.read);
     let talos_actions = move || features.get().is_some_and(|caps| caps.actions);
+    let talos_config = move || features.get().is_some_and(|caps| caps.config);
     // Pod-owning resources get a live "Pods" tab listing their pods by selector.
     let has_pods = is_workload || kk.is_job();
     let is_cronjob = kk.is_cronjob();
@@ -315,6 +316,8 @@ pub(crate) fn RowDetail(
                 <button class="rd-tab" class:active=move || tab.get() == Tab::Yaml on:click=move |_| tab.set(Tab::Yaml)>"YAML"</button>
                 {is_pod.then(|| view! {
                     <button class="rd-tab" class:active=move || tab.get() == Tab::Metrics on:click=move |_| tab.set(Tab::Metrics)>"Metrics"</button>
+                })}
+                {move || (is_pod || talos_available()).then(|| view! {
                     <button class="rd-tab" class:active=move || tab.get() == Tab::Logs on:click=move |_| tab.set(Tab::Logs)>"Logs"</button>
                 })}
                 {move || talos_available().then(|| view! {
@@ -335,9 +338,13 @@ pub(crate) fn RowDetail(
                     let d = d.clone();
                     let tab_content = move || match tab.get() {
                         Tab::Info => info_view(d.clone(), kind_sv.get_value()).into_any(),
-                        Tab::Logs => view! { <LogsView url=format!("/api/logs?namespace={}&pod={}", data::percent_encode(&ns), data::percent_encode(&pod)) /> }.into_any(),
+                        Tab::Logs => if is_pod {
+                            view! { <LogsView url=format!("/api/logs?namespace={}&pod={}", data::percent_encode(&ns), data::percent_encode(&pod)) /> }.into_any()
+                        } else {
+                            view! { <LogsView url=format!("/api/talos/dmesg?node={}", data::percent_encode(&pod)) /> }.into_any()
+                        },
                         Tab::Metrics => view! { <MetricsChart namespace=ns.clone() name=pod.clone() /> }.into_any(),
-                        Tab::Talos => view! { <TalosNodeView node=pod.clone() actions=talos_actions() /> }.into_any(),
+                        Tab::Talos => view! { <TalosNodeView node=pod.clone() actions=talos_actions() config=talos_config() /> }.into_any(),
                         Tab::Yaml => view! {
                             <div class="yaml-pane">
                                 <div class="yaml-head">
@@ -381,12 +388,12 @@ pub(crate) fn RowDetail(
 }
 
 #[component]
-fn TalosNodeView(node: String, actions: bool) -> impl IntoView {
+fn TalosNodeView(node: String, actions: bool, config: bool) -> impl IntoView {
     let confirm = expect_context::<RwSignal<Option<Confirm>>>();
     let action_status = RwSignal::new(None::<Result<String, String>>);
     let pending_action = RwSignal::new(None::<String>);
     let drain_first = RwSignal::new(true);
-    let load_dmesg = RwSignal::new(false);
+    let load_config_diff = RwSignal::new(false);
     let status_node = node.clone();
     let status = LocalResource::new(move || {
         let node = status_node.clone();
@@ -398,17 +405,17 @@ fn TalosNodeView(node: String, actions: bool) -> impl IntoView {
             .await
         }
     });
-    let dmesg = LocalResource::new({
+    let config_diff = LocalResource::new({
         let node = node.clone();
         move || {
             let node = node.clone();
-            let should_load = load_dmesg.get();
+            let should_load = load_config_diff.get();
             async move {
                 if !should_load {
                     return Ok(None);
                 }
-                data::fetch_json::<roder_core::TalosDmesg>(&format!(
-                    "/api/talos/dmesg?node={}",
+                data::fetch_json::<roder_core::TalosConfigDiff>(&format!(
+                    "/api/talos/config-diff?node={}",
                     data::percent_encode(&node)
                 ))
                 .await
@@ -426,19 +433,47 @@ fn TalosNodeView(node: String, actions: bool) -> impl IntoView {
                 Err(e) => view! { <div class="pad muted">{format!("Talos integration unavailable: {e}")}</div> }.into_any(),
                 Ok(s) => {
                     let services = s.services;
-                    let mounts = s.mounts;
                     let interfaces = s.interfaces;
+                    let disk_inventory = s.disk_inventory;
+                    let volumes = s.volumes;
                     let disks = s.disks;
+                    let config_fingerprint = s.config_fingerprint;
                     let errors = s.errors;
                     let control_plane = s.control_plane;
+                    let service_count = services.len();
+                    let service_unknown = services.iter().filter(|service| service.health_unknown).count();
+                    let service_running = services.iter().filter(|service| service.state.to_ascii_lowercase().contains("running")).count();
+                    let service_issues = services.iter().filter(|service| {
+                        !service.state.to_ascii_lowercase().contains("running")
+                            || (!service.health_unknown && !service.healthy)
+                    }).count();
+                    let service_summary = if service_issues > 0 {
+                        format!("{service_count} total · {service_issues} need attention")
+                    } else if service_unknown > 0 {
+                        format!("{service_running} running · {service_unknown} unmonitored")
+                    } else {
+                        format!("{service_running} running · all healthy")
+                    };
+                    let service_note_class = if service_issues > 0 { "detail-stat-note warning" } else { "detail-stat-note" };
+                    let services_open = service_issues > 0;
+                    let storage_summary = format!("{} drives · {} partitions", disk_inventory.len(), volumes.len());
+                    let network_up = interfaces.iter().filter(|interface| interface.link_up == Some(true)).count();
+                    let network_down = interfaces.iter().filter(|interface| interface.link_up == Some(false)).count();
+                    let network_summary = format!("{network_up} up · {network_down} inactive");
+                    let version = if s.version.is_empty() { "Unavailable".into() } else { s.version };
+                    let fingerprint = config_fingerprint.as_ref().map(|value| short_fingerprint(value));
                     let reboot_node = node.clone();
                     let shutdown_node = node.clone();
                     let services_node = node.clone();
                     view! {
-                        <div class="info">
-                            <div class="kv-grid">
-                                <div class="kv"><span class="k">"Version"</span><span class="v">{if s.version.is_empty() { "Unavailable".into() } else { s.version }}</span></div>
+                        <div class="info talos-view">
+                            <div class="detail-stats">
+                                <div class="detail-stat"><span class="detail-stat-label">"Talos"</span><b class="detail-stat-value">{version}</b><span class="detail-stat-note">{if control_plane { "control plane" } else { "worker" }}</span></div>
+                                <div class="detail-stat"><span class="detail-stat-label">"Services"</span><b class="detail-stat-value">{format!("{service_running}/{service_count} running")}</b><span class=service_note_class>{if service_issues > 0 { format!("{service_issues} need attention") } else if service_unknown > 0 { format!("{service_unknown} without health checks") } else { "all health checks passing".into() }}</span></div>
+                                <div class="detail-stat"><span class="detail-stat-label">"Storage"</span><b class="detail-stat-value">{format!("{} drives", disk_inventory.len())}</b><span class="detail-stat-note">{format!("{} partitions", volumes.len())}</span></div>
+                                <div class="detail-stat"><span class="detail-stat-label">"Network"</span><b class="detail-stat-value">{format!("{network_up}/{} links up", interfaces.len())}</b><span class="detail-stat-note">{format!("{network_down} inactive")}</span></div>
                             </div>
+                            {fingerprint.map(|value| view! { <div class="talos-fingerprint"><span>"Config"</span><code>{value}</code></div> })}
                             {(!errors.is_empty()).then(|| view! {
                                 <div class="talos-errors">
                                     {errors.into_iter().map(|(section, error)| view! {
@@ -469,8 +504,10 @@ fn TalosNodeView(node: String, actions: bool) -> impl IntoView {
                                     Err(error) => view! { <span class="act-err">{error}</span> }.into_any(),
                                 })}
                             </div> })}
-                            <h4>"Services"</h4>
-                            <table class="cond"><thead><tr><th>"Service"</th><th>"State"</th><th>"Health details"</th><th>"Actions"</th></tr></thead>
+                            <div class="talos-sections">
+                            <details class="talos-section" open=services_open>
+                            <summary><span>"Services"</span><span class=if service_issues == 0 { "talos-section-meta" } else { "talos-section-meta warning" }>{service_summary}</span></summary>
+                            <div class="talos-section-body"><table class="cond talos-data-table talos-service-table"><thead><tr><th>"Service"</th><th>"State"</th><th>"Health"</th>{actions.then(|| view! { <th class="talos-service-actions">"Actions"</th> })}</tr></thead>
                                 <tbody>{services.into_iter().map(|svc| {
                                     let service = svc.id.clone();
                                     let service_for_stop = service.clone();
@@ -480,14 +517,10 @@ fn TalosNodeView(node: String, actions: bool) -> impl IntoView {
                                     let node_for_restart = services_node.clone();
                                     let running = svc.state.to_ascii_lowercase().contains("running");
                                     let health = if svc.health_unknown { "Unknown" } else if svc.healthy { "Healthy" } else { "Unhealthy" };
-                                    let details = [
-                                        (!svc.message.is_empty()).then_some(svc.message),
-                                        svc.last_change.map(|v| format!("changed {v}")),
-                                        svc.events.last().map(|e| format!("{}: {}", e.state, e.message)),
-                                    ].into_iter().flatten().collect::<Vec<_>>().join(" · ");
+                                    let details = (!svc.message.is_empty() && svc.message != "Health check successful").then_some(svc.message);
                                     view! {
-                                        <tr><td>{svc.id}</td><td>{svc.state}</td><td><b>{health}</b>{(!details.is_empty()).then(|| view! { <div class="muted">{details}</div> })}</td>
-                                        <td><div class="actions">
+                                        <tr><td><b>{svc.id}</b></td><td>{svc.state}</td><td><span class=if svc.health_unknown { "talos-health unknown" } else if svc.healthy { "talos-health healthy" } else { "talos-health unhealthy" }>{health}</span>{details.map(|detail| view! { <div class="muted">{detail}</div> })}</td>
+                                        {actions.then(|| view! { <td class="talos-service-actions"><div class="actions">
                                             {(actions && !running).then(|| view! {
                                                 <button class="act" disabled=move || pending_action.get().is_some()
                                                     on:click=move |_| talos_service_action(node_for_start.clone(), service.clone(), "start", action_status, pending_action, refresh)>"Start"</button>
@@ -504,43 +537,114 @@ fn TalosNodeView(node: String, actions: bool) -> impl IntoView {
                                                     ask_confirm(confirm, format!("Restart Talos service {service} on {node}?"), move || talos_service_action(node.clone(), service.clone(), "restart", action_status, pending_action, refresh));
                                                 }>"Restart"</button>
                                             })}
-                                        </div></td></tr>
+                                        </div></td> })}</tr>
                                     }
                                 }).collect_view()}</tbody>
-                            </table>
-                            <h4>"Mounts"</h4>
-                            <table class="cond"><thead><tr><th>"Path"</th><th>"Filesystem"</th><th>"Used"</th></tr></thead>
-                                <tbody>{mounts.into_iter().map(|m| {
-                                    let pct = if m.size == 0 { 0.0 } else { 100.0 * (m.size - m.available) as f64 / m.size as f64 };
-                                    view! { <tr><td>{m.mounted_on}</td><td>{m.filesystem}</td><td>{format!("{pct:.1}%")}</td></tr> }
-                                }).collect_view()}</tbody>
-                            </table>
-                            <h4>"Disk I/O"</h4>
-                            <table class="cond"><thead><tr><th>"Device"</th><th>"Read"</th><th>"Written"</th><th>"Operations"</th><th>"Active I/O"</th></tr></thead>
-                                <tbody>{disks.into_iter().map(|d| view! {
-                                    <tr><td>{d.name}</td><td>{format_bytes(d.read_bytes)}</td><td>{format_bytes(d.write_bytes)}</td><td>{format!("{} / {}", d.reads, d.writes)}</td><td>{format!("{} ({} ms)", d.io_in_progress, d.io_time_ms)}</td></tr>
-                                }).collect_view()}</tbody>
-                            </table>
-                            <h4>"Network"</h4>
-                            <table class="cond"><thead><tr><th>"Interface"</th><th>"RX"</th><th>"TX"</th><th>"Errors / Drops"</th></tr></thead>
-                                <tbody>{interfaces.into_iter().map(|i| view! {
-                                    <tr><td>{i.name}</td><td>{format_bytes(i.rx_bytes)}</td><td>{format_bytes(i.tx_bytes)}</td><td>{format!("{} / {}", i.rx_errors + i.tx_errors, i.rx_dropped + i.tx_dropped)}</td></tr>
-                                }).collect_view()}</tbody>
-                            </table>
-                            <h4>"Kernel log"</h4>
-                            {move || (!load_dmesg.get()).then(|| view! {
-                                <button class="act" on:click=move |_| load_dmesg.set(true)>"Load kernel log"</button>
+                            </table></div>
+                            </details>
+                            <details class="talos-section">
+                            <summary><span>"Storage"</span><span class="talos-section-meta">{storage_summary}</span></summary>
+                            <div class="talos-section-body">
+                            {(!disk_inventory.is_empty()).then(|| view! {
+                                <h5>"Physical disks"</h5>
+                                <table class="cond talos-data-table talos-disk-table"><thead><tr><th>"Device"</th><th>"Model"</th><th>"Capacity"</th><th>"Type"</th><th>"Lifetime I/O"</th><th>"Serial / WWID"</th></tr></thead>
+                                    <tbody>{disk_inventory.into_iter().map(|disk| {
+                                        let io = disks.iter().find(|stat| stat.name == disk.name || disk.path.ends_with(&format!("/{}", stat.name)));
+                                        let kind = match (disk.rotational, disk.readonly) {
+                                            (true, true) => "HDD · read-only",
+                                            (true, false) => "HDD",
+                                            (false, true) => "SSD · read-only",
+                                            (false, false) => "SSD",
+                                        };
+                                        view! {
+                                            <tr><td class="font-mono"><b>{disk.path}</b></td><td>{disk.model.unwrap_or_else(|| "—".into())}</td><td>{format_bytes(disk.size)}</td>
+                                                <td>{kind}{disk.transport.map(|transport| view! { <div class="muted">{transport}</div> })}</td>
+                                                <td>{io.map(|stat| view! { <div class="talos-disk-io"><span><i>"R"</i>{format_bytes(stat.read_bytes)}</span><span><i>"W"</i>{format_bytes(stat.write_bytes)}</span></div> }.into_any()).unwrap_or_else(|| view! { <span class="muted">"Unavailable"</span> }.into_any())}</td>
+                                                <td class="font-mono">{disk.serial.or(disk.wwid).unwrap_or_else(|| "—".into())}</td></tr>
+                                        }
+                                    }).collect_view()}</tbody>
+                                </table>
                             })}
-                            <Suspense fallback=|| view! { <div class="muted">"Loading kernel log…"</div> }>
-                                {move || dmesg.get().map(|result| match result {
-                                    Ok(Some(log)) => view! {
-                                        {log.truncated.then(|| view! { <div class="warn-line">"Output truncated at 1 MiB"</div> })}
-                                        <pre class="yaml-view">{log.log}</pre>
-                                    }.into_any(),
-                                    Ok(None) => ().into_any(),
-                                    Err(error) => view! { <div class="muted">{error}</div> }.into_any(),
+                            {(!volumes.is_empty()).then(|| view! {
+                                <h5>"Partitions"</h5>
+                                <table class="cond talos-data-table talos-volume-table"><thead><tr><th>"Volume"</th><th>"Device"</th><th>"Filesystem"</th><th>"Capacity"</th><th>"Usage"</th><th>"State"</th></tr></thead>
+                                    <tbody>{volumes.into_iter().map(|volume| {
+                                        let total = volume.used_bytes.zip(volume.available_bytes).map(|(used, available)| used + available);
+                                        let percent = volume.used_bytes.zip(total).and_then(|(used, total)| (total > 0).then_some(100.0 * used as f64 / total as f64));
+                                        let phase = if volume.phase.is_empty() { "unknown".into() } else { volume.phase };
+                                        view! { <tr>
+                                            <td><b>{volume.name}</b>{volume.encryption.map(|provider| view! { <div class="muted">{format!("encrypted · {provider}")}</div> })}</td>
+                                            <td class="font-mono">{volume.path}</td>
+                                            <td>{volume.filesystem.unwrap_or_else(|| "—".into())}</td>
+                                            <td>{format_bytes(volume.size)}</td>
+                                            <td>{match percent {
+                                                Some(percent) => view! { <div class="talos-usage"><span><i style=format!("width:{percent:.1}%")></i></span><b>{format!("{percent:.1}%")}</b></div> }.into_any(),
+                                                None => view! { <span class="muted">"Not mounted"</span> }.into_any(),
+                                            }}</td>
+                                            <td>{phase}</td>
+                                        </tr> }
+                                    }).collect_view()}</tbody>
+                                </table>
+                            })}
+                            </div>
+                            </details>
+                            <details class="talos-section">
+                            <summary><span>"Network"</span><span class="talos-section-meta">{network_summary}</span></summary>
+                            <div class="talos-section-body">
+                            <table class="cond talos-data-table"><thead><tr><th>"Interface"</th><th>"Link"</th><th>"Addresses"</th><th>"Hardware"</th><th>"RX / TX"</th><th>"Errors / Drops"</th></tr></thead>
+                                <tbody>{interfaces.into_iter().map(|i| view! {
+                                    <tr><td><b>{i.name}</b>{i.kind.map(|kind| view! { <div class="muted">{kind}</div> })}</td>
+                                        <td class=if i.link_up == Some(false) { "error" } else { "" }>
+                                            {i.operational_state.unwrap_or_else(|| "unknown".into())}
+                                            {i.speed_mbps.map(|speed| view! { <div class="muted">{format!("{speed} Mbps {}", i.duplex.unwrap_or_default())}</div> })}
+                                        </td>
+                                        <td class="font-mono">{if i.addresses.is_empty() { "—".into() } else { i.addresses.join(" · ") }}</td>
+                                        <td>{i.hardware_address.unwrap_or_else(|| "—".into())}{i.mtu.map(|mtu| view! { <div class="muted">{format!("MTU {mtu}")}</div> })}</td>
+                                        <td>{format!("{} / {}", format_bytes(i.rx_bytes), format_bytes(i.tx_bytes))}</td>
+                                        <td>{format!("{} / {}", i.rx_errors + i.tx_errors, i.rx_dropped + i.tx_dropped)}</td></tr>
+                                }).collect_view()}</tbody>
+                            </table></div>
+                            </details>
+                            {config.then(|| view! {
+                                <details class="talos-section">
+                                <summary><span>"Configuration"</span><span class="talos-section-meta">{config_fingerprint.as_ref().map(|value| short_fingerprint(value)).unwrap_or_else(|| "unavailable".into())}</span></summary>
+                                <div class="talos-section-body">
+                                {move || (!load_config_diff.get()).then(|| view! {
+                                    <button class="act" on:click=move |_| load_config_diff.set(true)>"Compare node configurations"</button>
                                 })}
-                            </Suspense>
+                                <Suspense fallback=|| view! { <div class="muted">"Comparing redacted configurations…"</div> }>
+                                    {move || config_diff.get().map(|result| match result {
+                                        Ok(Some(diff)) => view! {
+                                            <div class="talos-config-diff">
+                                                {diff.peers.into_iter().map(|peer| {
+                                                    let summary = match peer.matches {
+                                                        Some(true) => "matches".to_string(),
+                                                        Some(false) => format!("{} differences", peer.differences.len()),
+                                                        None => "unavailable".to_string(),
+                                                    };
+                                                    view! { <details>
+                                                        <summary><b>{peer.node}</b>" — "{summary}</summary>
+                                                        {peer.error.map(|error| view! { <div class="act-err">{error}</div> })}
+                                                        {(!peer.differences.is_empty()).then(|| view! {
+                                                            <table class="cond"><thead><tr><th>"Path"</th><th>"This node"</th><th>"Peer"</th></tr></thead>
+                                                                <tbody>{peer.differences.into_iter().map(|difference| view! {
+                                                                    <tr><td class="font-mono">{difference.path}</td>
+                                                                        <td>{difference.node_value.unwrap_or_else(|| "<missing>".into())}</td>
+                                                                        <td>{difference.peer_value.unwrap_or_else(|| "<missing>".into())}</td></tr>
+                                                                }).collect_view()}</tbody>
+                                                            </table>
+                                                        })}
+                                                    </details> }
+                                                }).collect_view()}
+                                            </div>
+                                        }.into_any(),
+                                        Ok(None) => ().into_any(),
+                                        Err(error) => view! { <div class="act-err">{error}</div> }.into_any(),
+                                    })}
+                                </Suspense>
+                                </div></details>
+                            })}
+                            </div>
                         </div>
                     }.into_any()
                 }
@@ -613,4 +717,8 @@ fn format_bytes(bytes: u64) -> String {
         unit += 1;
     }
     format!("{value:.1} {}", UNITS[unit])
+}
+
+fn short_fingerprint(fingerprint: &str) -> String {
+    fingerprint.chars().take(12).collect()
 }

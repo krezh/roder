@@ -24,6 +24,17 @@
             }
           },
           "additionalProperties": false
+        },
+        "config": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "readerGroups": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

@@ -239,8 +239,7 @@ pub(crate) fn KindTable(
     let selected = t.selected;
     // Live status breakdown for the stat strip — RowStatus is a fieldless enum,
     // so `as usize` is its declaration-order discriminant (Ok=0, Pending=1,
-    // Warn=2, Error=3, Done=4, Unknown=5); Done/Unknown fold into the total
-    // only, they don't get their own strip segment.
+    // Warn=2, Error=3, Done=4, Unknown=5); Unknown folds into the total only.
     let status_counts = Memo::new(move |_| {
         rows.with(|m| {
             let mut c = [0usize; 6];
@@ -487,11 +486,55 @@ pub(crate) fn KindTable(
                 })}
             </div>
             <div class="stat-strip">
-                <div class="strip-seg"><div class="strip-lbl">"Total"</div><div class="strip-val">{move || status_counts.get().0}</div></div>
-                <div class="strip-seg"><div class="strip-lbl">"OK"</div><div class="strip-val ok">{move || status_counts.get().1[0]}</div></div>
-                <div class="strip-seg"><div class="strip-lbl">"Pending"</div><div class="strip-val pending">{move || status_counts.get().1[1]}</div></div>
-                <div class="strip-seg"><div class="strip-lbl">"Warn"</div><div class="strip-val warn">{move || status_counts.get().1[2]}</div></div>
-                <div class="strip-seg"><div class="strip-lbl">"Error"</div><div class="strip-val err">{move || status_counts.get().1[3]}</div></div>
+                <div class="strip-seg strip-total">
+                    <span class="strip-lbl">"Total"</span>
+                    <span class="strip-val">{move || status_counts.get().0}</span>
+                </div>
+                <div class="strip-seg" class:empty=move || status_counts.get().1[0] == 0>
+                    <span class="strip-marker ok" aria-hidden="true"></span>
+                    <span class="strip-lbl">"OK"</span>
+                    <span class="strip-val ok">{move || status_counts.get().1[0]}</span>
+                    <span class="strip-share ok" aria-hidden="true" style=move || {
+                        let (total, counts) = status_counts.get();
+                        format!("width:{:.1}%", counts[0] as f64 / total.max(1) as f64 * 100.0)
+                    }></span>
+                </div>
+                <div class="strip-seg" class:empty=move || status_counts.get().1[1] == 0>
+                    <span class="strip-marker pending" aria-hidden="true"></span>
+                    <span class="strip-lbl">"Pending"</span>
+                    <span class="strip-val pending">{move || status_counts.get().1[1]}</span>
+                    <span class="strip-share pending" aria-hidden="true" style=move || {
+                        let (total, counts) = status_counts.get();
+                        format!("width:{:.1}%", counts[1] as f64 / total.max(1) as f64 * 100.0)
+                    }></span>
+                </div>
+                <div class="strip-seg" class:empty=move || status_counts.get().1[2] == 0>
+                    <span class="strip-marker warn" aria-hidden="true"></span>
+                    <span class="strip-lbl">"Warn"</span>
+                    <span class="strip-val warn">{move || status_counts.get().1[2]}</span>
+                    <span class="strip-share warn" aria-hidden="true" style=move || {
+                        let (total, counts) = status_counts.get();
+                        format!("width:{:.1}%", counts[2] as f64 / total.max(1) as f64 * 100.0)
+                    }></span>
+                </div>
+                <div class="strip-seg" class:empty=move || status_counts.get().1[3] == 0>
+                    <span class="strip-marker err" aria-hidden="true"></span>
+                    <span class="strip-lbl">"Error"</span>
+                    <span class="strip-val err">{move || status_counts.get().1[3]}</span>
+                    <span class="strip-share err" aria-hidden="true" style=move || {
+                        let (total, counts) = status_counts.get();
+                        format!("width:{:.1}%", counts[3] as f64 / total.max(1) as f64 * 100.0)
+                    }></span>
+                </div>
+                <div class="strip-seg" class:empty=move || status_counts.get().1[4] == 0>
+                    <span class="strip-marker done" aria-hidden="true"></span>
+                    <span class="strip-lbl">"Completed"</span>
+                    <span class="strip-val done">{move || status_counts.get().1[4]}</span>
+                    <span class="strip-share done" aria-hidden="true" style=move || {
+                        let (total, counts) = status_counts.get();
+                        format!("width:{:.1}%", counts[4] as f64 / total.max(1) as f64 * 100.0)
+                    }></span>
+                </div>
             </div>
             <div class="bulkbar-wrap" class:open=move || !selected.get().is_empty()>
                 <div class="bulkbar">

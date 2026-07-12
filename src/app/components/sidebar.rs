@@ -56,8 +56,11 @@ fn kind_li(
     };
 
     view! {
-        <li class="kind" class:active=active on:click=on_click on:contextmenu=on_ctx>
-            {kind_name}
+        <li>
+            <button type="button" class="kind" class:active=active
+                on:click=on_click on:contextmenu=on_ctx>
+                {kind_name}
+            </button>
         </li>
     }
 }
@@ -133,7 +136,10 @@ pub(crate) fn Sidebar() -> impl IntoView {
                 let cat = catalog.get();
                 let pins: Vec<ResourceKind> = {
                     let p = pinned.get();
-                    cat.iter().filter(|k| p.contains(&k.key)).cloned().collect()
+                    cat.iter()
+                        .filter(|k| p.contains(&k.key))
+                        .cloned()
+                        .collect()
                 };
                 (!pins.is_empty()).then(|| {
                     let n = pins.len();
@@ -142,11 +148,12 @@ pub(crate) fn Sidebar() -> impl IntoView {
                         .map(|k| kind_li(k, selected_kind, nav_open, kind_ctx))
                         .collect_view();
                     view! {
-                        <div class="cat cat-favorites open">
-                            <div class="cat-label">
-                                <span class="cat-caret"></span>
-                                "Favorites"
-                            </div>
+                            <div class="cat cat-favorites open">
+                                <div class="cat-label">
+                                    <span class="cat-caret"></span>
+                                    "Favorites"
+                                    <span class="cat-count">{n}</span>
+                                </div>
                             <div class="cat-items" style=format!("--list-h: calc(var(--item-h) * {n})")>
                                 <ul>{items}</ul>
                             </div>
@@ -159,30 +166,41 @@ pub(crate) fn Sidebar() -> impl IntoView {
                 if gs.is_empty() {
                     return view! { <div class="muted pad">"Loading…"</div> }.into_any();
                 }
-                let mut out: Vec<AnyView> = Vec::with_capacity(gs.len() + 1);
-                let mut sep_done = false;
+                let mut out: Vec<AnyView> = Vec::with_capacity(gs.len() + 2);
+                let mut core_done = false;
+                let mut extensions_done = false;
                 for (cat, kinds) in gs {
-                    if cat.is_dynamic() && !sep_done {
-                        sep_done = true;
-                        out.push(view! { <hr class="sidebar-sep" /> }.into_any());
+                    let label = cat.label();
+                    if cat.is_dynamic() && !extensions_done {
+                        extensions_done = true;
+                        out.push(view! { <div class="sidebar-section">"Extensions"</div> }.into_any());
+                    } else if !cat.is_dynamic() && !core_done {
+                        core_done = true;
+                        out.push(view! { <div class="sidebar-section">"Core"</div> }.into_any());
                     }
                     let n = kinds.len();
-                    let label = cat.label();
                     let cat_open = cat.clone();
+                    let cat_expanded = cat.clone();
+                    let cat_active = cat.clone();
                     let cat_click = cat.clone();
                     let items = kinds
                         .into_iter()
                         .map(|k| kind_li(k, selected_kind, nav_open, kind_ctx))
                         .collect_view();
-                    let is_open = move || open_cats.get().contains(&cat_open);
                     out.push(view! {
-                        <div class="cat" class:open=is_open>
-                            <div class="cat-label" on:click=move |_| open_cats.update(|s| {
+                        <div class="cat"
+                            class:open=move || open_cats.get().contains(&cat_open)
+                            class:active-category=move || selected_kind.get()
+                                .is_some_and(|k| k.category == cat_active)>
+                            <button type="button" class="cat-label"
+                                aria-expanded=move || open_cats.get().contains(&cat_expanded)
+                                on:click=move |_| open_cats.update(|s| {
                                 if !s.remove(&cat_click) { s.insert(cat_click.clone()); }
                             })>
                                 <span class="cat-caret"></span>
                                 {label}
-                            </div>
+                                <span class="cat-count">{n}</span>
+                            </button>
                             <div class="cat-items" style=format!("--list-h: calc(var(--item-h) * {n})")>
                                 <ul>{items}</ul>
                             </div>

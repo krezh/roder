@@ -91,44 +91,104 @@
 }
 
 .sidebar {
-  --item-h: 1.85rem;
-  width: 230px;
+  --item-h: 2rem;
+  width: 250px;
   flex: 0 0 auto;
   background: var(--panel);
   border-right: 1px solid var(--border);
   overflow-y: auto;
-  padding: 0.5rem 0;
+  padding: 0 0 0.5rem;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+
+  .sidebar-section {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.85rem 0.75rem 0.4rem;
+    color: var(--muted);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+
+    &::after {
+      content: "";
+      height: 1px;
+      flex: 1;
+      background: var(--border);
+    }
+  }
+  .cat {
+    margin: 0 0.45rem 0.2rem;
+  }
 
   .cat-label {
+    appearance: none;
     display: flex;
     align-items: center;
     gap: 0.4rem;
-    font-size: 0.76rem;
+    width: 100%;
+    min-height: 2.05rem;
+    border: 1px solid transparent;
+    border-left-width: 2px;
+    background: color-mix(in srgb, var(--panel-2) 42%, transparent);
+    font-size: 0.78rem;
     font-weight: 700;
+    text-align: left;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--muted);
-    padding: 0.5rem 0.9rem 0.45rem;
+    padding: 0.4rem 0.75rem;
     cursor: pointer;
     user-select: none;
     &:hover {
       color: var(--fg);
+      border-color: var(--border);
+      background: var(--panel-2);
     }
   }
-  .cat.open .cat-label {
+  .cat.open > .cat-label {
+    color: var(--fg);
+    border-color: var(--border);
+    background: var(--panel-2);
+    box-shadow: 0 5px 12px -9px rgba(0, 0, 0, 0.8);
+  }
+  .cat.active-category .cat-label,
+  .cat-favorites .cat-label {
     color: var(--accent);
+    border-left-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, var(--panel-2));
+  }
+  .cat-count {
+    margin-left: auto;
+    min-width: 1.7rem;
+    padding: 0.05rem 0.3rem;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.25;
+    text-align: center;
   }
   .cat-caret {
     width: 0;
     height: 0;
     flex: 0 0 auto;
-    border-left: 4px solid var(--accent);
+    border-left: 4px solid var(--muted);
     border-top: 3px solid transparent;
     border-bottom: 3px solid transparent;
     transition: transform 0.18s ease;
   }
   .cat.open .cat-caret {
     transform: rotate(90deg);
+  }
+  .cat.active-category .cat-caret,
+  .cat-favorites .cat-caret {
+    border-left-color: var(--accent);
   }
   /* Definite-height collapse (height: 0 <-> N * item-h), never fr — same reason
      as the table rows. --list-h is set inline from the item count. */
@@ -137,6 +197,17 @@
     overflow: hidden;
     transition: height 0.2s ease;
     position: relative;
+    background: color-mix(in srgb, var(--bg) 46%, transparent);
+    &::before {
+      content: "";
+      position: absolute;
+      top: 0.2rem;
+      bottom: 0.2rem;
+      left: 1.1rem;
+      width: 2px;
+      background: color-mix(in srgb, var(--accent) 24%, var(--border));
+      pointer-events: none;
+    }
   }
   .cat.open .cat-items {
     height: var(--list-h);
@@ -147,25 +218,42 @@
     padding: 0;
   }
   .kind {
+    appearance: none;
     display: flex;
     align-items: center;
+    position: relative;
+    width: 100%;
     height: var(--item-h);
-    padding: 0 0.9rem 0 1.4rem;
+    padding: 0 0.9rem 0 1.8rem;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--fg);
+    text-align: left;
     cursor: pointer;
-    border-left: 2px solid transparent;
     &:hover {
-      background: color-mix(in srgb, var(--accent) 12%, transparent);
+      background: color-mix(in srgb, var(--accent) 10%, var(--panel-2));
       color: var(--accent);
+    }
+    &:focus-visible {
+      outline: 1px solid var(--accent);
+      outline-offset: -1px;
     }
     &.active {
-      background: color-mix(in srgb, var(--accent) 10%, var(--panel-2));
-      border-left-color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 14%, var(--panel-2));
       color: var(--accent);
       font-weight: 700;
+
+      &::before {
+        content: "";
+        position: absolute;
+        top: 0.3rem;
+        bottom: 0.3rem;
+        left: 1.05rem;
+        width: 3px;
+        background: var(--accent);
+      }
     }
-  }
-  .cat-favorites {
-    .cat-label { color: var(--accent); }
   }
   .sidebar-sep {
     border: none;
@@ -244,8 +332,12 @@
     bottom: 0;
     left: 0;
     z-index: 10;
+    --item-h: 2.75rem;
+    width: min(86vw, 320px);
     transform: translateX(-100%);
     transition: transform 0.18s ease;
+
+    .cat-label { min-height: 44px; }
   }
   .app.nav-open .sidebar {
     transform: translateX(0);

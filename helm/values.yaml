@@ -21,10 +21,16 @@ serviceAccount:
 # short-lived client configuration; no external/admin talosconfig is used.
 talos:
   enabled: false
+  # Empty permits any authenticated Roder user to read Talos status. Set this
+  # to one or more OIDC groups to restrict machine status and kernel logs.
+  readerGroups: []
+  actions:
+    # Mutations are disabled unless this is true and the user belongs to one of
+    # operatorGroups. Enabling this also grants the Talos os:operator role.
+    enabled: false
+    operatorGroups: []
   roles:
     - os:reader
-    # Required for service controls and reboot/shutdown actions.
-    - os:operator
 
 # ClusterRole + binding for roder's ServiceAccount, granting the read-only
 # cluster metadata roder needs at startup: API discovery and read/watch on CRDs

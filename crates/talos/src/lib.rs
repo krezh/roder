@@ -1,13 +1,16 @@
 //! Direct Talos machine API access using Talos's native in-cluster credentials.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
+use std::time::Duration;
 
 use base64::Engine;
 use roder_core::{
-    TalosDiskStat, TalosMount, TalosNetworkInterface, TalosNode, TalosService, TalosServiceEvent,
+    TalosDiskStat, TalosDmesg, TalosMount, TalosNetworkInterface, TalosNode, TalosService,
+    TalosServiceEvent,
 };
 use serde::Deserialize;
+use talos_api_rs::api::common::Metadata;
 use talos_api_rs::api::machine::machine_service_client::MachineServiceClient;
 use talos_api_rs::api::machine::{
     DmesgRequest, RebootRequest, ServiceRestartRequest, ServiceStartRequest, ServiceStopRequest,
@@ -18,6 +21,10 @@ use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity
 use tonic::Request;
 
 pub const IN_CLUSTER_CONFIG: &str = "/var/run/secrets/talos.dev/config";
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const RPC_TIMEOUT: Duration = Duration::from_secs(10);
+const DMESG_TIMEOUT: Duration = Duration::from_secs(15);
+const DMESG_MAX_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum TalosError {
@@ -29,6 +36,21 @@ pub enum TalosError {
     Transport(#[from] tonic::transport::Error),
     #[error("Talos API request failed: {0}")]
     Status(#[from] tonic::Status),
+    #[error("Talos API request timed out: {0}")]
+    Timeout(String),
+    #[error("Talos API upstream request failed: {0}")]
+    Upstream(String),
+}
+
+impl TalosError {
+    pub fn is_unavailable(&self) -> bool {
+        matches!(self, Self::Status(status) if status.code() == tonic::Code::Unavailable)
+    }
+
+    pub fn is_timeout(&self) -> bool {
+        matches!(self, Self::Timeout(_))
+            || matches!(self, Self::Status(status) if status.code() == tonic::Code::DeadlineExceeded)
+    }
 }
 
 #[derive(Deserialize)]
@@ -75,7 +97,7 @@ impl Backend {
     /// Fetch independent status groups concurrently through the in-cluster API proxy.
     pub async fn node(&self, node: &str) -> Result<TalosNode, TalosError> {
         let channel = self.current_channel().await?;
-        let (version, services, mounts, network, disks) = tokio::try_join!(
+        let (version, services, mounts, network, disks) = tokio::join!(
             Self::call(&channel, node, |mut c, r| async move { c.version(r).await }),
             Self::call(
                 &channel,
@@ -91,112 +113,235 @@ impl Backend {
                 node,
                 |mut c, r| async move { c.disk_stats(r).await }
             ),
-        )?;
+        );
 
-        let version = version
-            .messages
-            .first()
-            .and_then(|m| m.version.as_ref())
-            .map(|v| v.tag.clone())
-            .unwrap_or_default();
-        let services = services
-            .messages
-            .into_iter()
-            .flat_map(|m| m.services)
-            .map(|s| {
-                let health = s.health.as_ref();
-                TalosService {
-                    id: s.id,
-                    state: s.state,
-                    healthy: health.is_some_and(|h| h.healthy),
-                    message: health.map(|h| h.last_message.clone()).unwrap_or_default(),
-                    health_unknown: health.is_none_or(|h| h.unknown),
-                    last_change: health.and_then(|h| h.last_change.as_ref()).map(timestamp),
-                    events: s
-                        .events
-                        .map(|events| {
-                            events
-                                .events
-                                .into_iter()
-                                .map(|event| TalosServiceEvent {
-                                    state: event.state,
-                                    message: event.msg,
-                                    timestamp: event.ts.as_ref().map(timestamp),
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default(),
+        let mut errors = BTreeMap::new();
+        let version = match version {
+            Ok(response) => {
+                if let Some(error) = metadata_failure(
+                    response
+                        .messages
+                        .iter()
+                        .map(|message| message.metadata.as_ref()),
+                ) {
+                    errors.insert("version".into(), error);
+                    String::new()
+                } else {
+                    response
+                        .messages
+                        .first()
+                        .and_then(|m| m.version.as_ref())
+                        .map(|v| v.tag.clone())
+                        .unwrap_or_default()
                 }
-            })
-            .collect();
-        let mounts = mounts
-            .messages
-            .into_iter()
-            .flat_map(|m| m.stats)
-            .map(|m| TalosMount {
-                filesystem: m.filesystem,
-                mounted_on: m.mounted_on,
-                size: m.size,
-                available: m.available,
-            })
-            .collect();
-        let interfaces = network
-            .messages
-            .into_iter()
-            .flat_map(|m| m.devices)
-            .map(|d| TalosNetworkInterface {
-                name: d.name,
-                rx_bytes: d.rx_bytes,
-                tx_bytes: d.tx_bytes,
-                rx_errors: d.rx_errors,
-                tx_errors: d.tx_errors,
-                rx_dropped: d.rx_dropped,
-                tx_dropped: d.tx_dropped,
-            })
-            .collect();
-        let disks = disks
-            .messages
-            .into_iter()
-            .flat_map(|m| m.devices)
-            .map(|d| TalosDiskStat {
-                name: d.name,
-                read_bytes: d.read_sectors.saturating_mul(512),
-                write_bytes: d.write_sectors.saturating_mul(512),
-                reads: d.read_completed,
-                writes: d.write_completed,
-                io_in_progress: d.io_in_progress,
-                io_time_ms: d.io_time_ms,
-            })
-            .collect();
+            }
+            Err(error) => {
+                errors.insert("version".into(), error.to_string());
+                String::new()
+            }
+        };
+        let services = match services {
+            Ok(response) => {
+                if let Some(error) = metadata_failure(
+                    response
+                        .messages
+                        .iter()
+                        .map(|message| message.metadata.as_ref()),
+                ) {
+                    errors.insert("services".into(), error);
+                    Vec::new()
+                } else {
+                    response
+                        .messages
+                        .into_iter()
+                        .flat_map(|m| m.services)
+                        .map(|s| {
+                            let health = s.health.as_ref();
+                            TalosService {
+                                id: s.id,
+                                state: s.state,
+                                healthy: health.is_some_and(|h| h.healthy),
+                                message: health.map(|h| h.last_message.clone()).unwrap_or_default(),
+                                health_unknown: health.is_none_or(|h| h.unknown),
+                                last_change: health
+                                    .and_then(|h| h.last_change.as_ref())
+                                    .map(timestamp),
+                                events: s
+                                    .events
+                                    .map(|events| {
+                                        events
+                                            .events
+                                            .into_iter()
+                                            .map(|event| TalosServiceEvent {
+                                                state: event.state,
+                                                message: event.msg,
+                                                timestamp: event.ts.as_ref().map(timestamp),
+                                            })
+                                            .collect()
+                                    })
+                                    .unwrap_or_default(),
+                            }
+                        })
+                        .collect()
+                }
+            }
+            Err(error) => {
+                errors.insert("services".into(), error.to_string());
+                Vec::new()
+            }
+        };
+        let mounts = match mounts {
+            Ok(response) => {
+                if let Some(error) = metadata_failure(
+                    response
+                        .messages
+                        .iter()
+                        .map(|message| message.metadata.as_ref()),
+                ) {
+                    errors.insert("mounts".into(), error);
+                    Vec::new()
+                } else {
+                    response
+                        .messages
+                        .into_iter()
+                        .flat_map(|m| m.stats)
+                        .map(|m| TalosMount {
+                            filesystem: m.filesystem,
+                            mounted_on: m.mounted_on,
+                            size: m.size,
+                            available: m.available,
+                        })
+                        .collect()
+                }
+            }
+            Err(error) => {
+                errors.insert("mounts".into(), error.to_string());
+                Vec::new()
+            }
+        };
+        let interfaces = match network {
+            Ok(response) => {
+                if let Some(error) = metadata_failure(
+                    response
+                        .messages
+                        .iter()
+                        .map(|message| message.metadata.as_ref()),
+                ) {
+                    errors.insert("network".into(), error);
+                    Vec::new()
+                } else {
+                    response
+                        .messages
+                        .into_iter()
+                        .flat_map(|m| m.devices)
+                        .map(|d| TalosNetworkInterface {
+                            name: d.name,
+                            rx_bytes: d.rx_bytes,
+                            tx_bytes: d.tx_bytes,
+                            rx_errors: d.rx_errors,
+                            tx_errors: d.tx_errors,
+                            rx_dropped: d.rx_dropped,
+                            tx_dropped: d.tx_dropped,
+                        })
+                        .collect()
+                }
+            }
+            Err(error) => {
+                errors.insert("network".into(), error.to_string());
+                Vec::new()
+            }
+        };
+        let disks = match disks {
+            Ok(response) => {
+                if let Some(error) = metadata_failure(
+                    response
+                        .messages
+                        .iter()
+                        .map(|message| message.metadata.as_ref()),
+                ) {
+                    errors.insert("disks".into(), error);
+                    Vec::new()
+                } else {
+                    response
+                        .messages
+                        .into_iter()
+                        .flat_map(|m| m.devices)
+                        .map(|d| TalosDiskStat {
+                            name: d.name,
+                            read_bytes: d.read_sectors.saturating_mul(512),
+                            write_bytes: d.write_sectors.saturating_mul(512),
+                            reads: d.read_completed,
+                            writes: d.write_completed,
+                            io_in_progress: d.io_in_progress,
+                            io_time_ms: d.io_time_ms,
+                        })
+                        .collect()
+                }
+            }
+            Err(error) => {
+                errors.insert("disks".into(), error.to_string());
+                Vec::new()
+            }
+        };
+
+        if errors.len() == 5 {
+            return Err(TalosError::Upstream(
+                "all Talos status sections failed".into(),
+            ));
+        }
 
         Ok(TalosNode {
             node: node.to_string(),
             version,
+            control_plane: false,
             services,
             mounts,
             interfaces,
             disks,
+            errors,
         })
     }
 
-    pub async fn dmesg(&self, node: &str) -> Result<String, TalosError> {
+    pub async fn dmesg(&self, node: &str) -> Result<TalosDmesg, TalosError> {
         let channel = self.current_channel().await?;
-        let request = targeted(
+        let request = targeted_with_timeout(
             node,
             DmesgRequest {
                 follow: false,
                 tail: false,
             },
+            DMESG_TIMEOUT,
         )?;
-        let mut stream = MachineServiceClient::new(channel)
-            .dmesg(request)
-            .await?
-            .into_inner();
-        let mut output = Vec::new();
-        while let Some(chunk) = stream.message().await? {
-            output.extend_from_slice(&chunk.bytes);
-        }
-        Ok(String::from_utf8_lossy(&output).into_owned())
+        tokio::time::timeout(DMESG_TIMEOUT, async move {
+            let mut stream = MachineServiceClient::new(channel)
+                .dmesg(request)
+                .await?
+                .into_inner();
+            let mut output = Vec::new();
+            let mut truncated = false;
+            while let Some(chunk) = stream.message().await? {
+                if let Some(error) = metadata_failure(std::iter::once(chunk.metadata.as_ref())) {
+                    return Err(TalosError::Upstream(error));
+                }
+                let remaining = DMESG_MAX_BYTES.saturating_sub(output.len());
+                if chunk.bytes.len() > remaining {
+                    output.extend_from_slice(&chunk.bytes[..remaining]);
+                    truncated = true;
+                    break;
+                }
+                output.extend_from_slice(&chunk.bytes);
+                if output.len() == DMESG_MAX_BYTES {
+                    truncated = true;
+                    break;
+                }
+            }
+            Ok(TalosDmesg {
+                log: String::from_utf8_lossy(&output).into_owned(),
+                truncated,
+            })
+        })
+        .await
+        .map_err(|_| TalosError::Timeout("dmesg".into()))?
     }
 
     pub async fn service_action(
@@ -209,22 +354,43 @@ impl Backend {
         let mut client = MachineServiceClient::new(channel);
         match action {
             "start" => {
-                client
+                let response = client
                     .service_start(targeted(node, ServiceStartRequest { id: service.into() })?)
-                    .await?;
+                    .await?
+                    .into_inner();
+                ensure_metadata(
+                    response
+                        .messages
+                        .iter()
+                        .map(|message| message.metadata.as_ref()),
+                )?;
             }
             "stop" => {
-                client
+                let response = client
                     .service_stop(targeted(node, ServiceStopRequest { id: service.into() })?)
-                    .await?;
+                    .await?
+                    .into_inner();
+                ensure_metadata(
+                    response
+                        .messages
+                        .iter()
+                        .map(|message| message.metadata.as_ref()),
+                )?;
             }
             "restart" => {
-                client
+                let response = client
                     .service_restart(targeted(
                         node,
                         ServiceRestartRequest { id: service.into() },
                     )?)
-                    .await?;
+                    .await?
+                    .into_inner();
+                ensure_metadata(
+                    response
+                        .messages
+                        .iter()
+                        .map(|message| message.metadata.as_ref()),
+                )?;
             }
             _ => {
                 return Err(TalosError::Config(format!(
@@ -240,14 +406,28 @@ impl Backend {
         let mut client = MachineServiceClient::new(channel);
         match action {
             "reboot" => {
-                client
+                let response = client
                     .reboot(targeted(node, RebootRequest { mode: 0 })?)
-                    .await?;
+                    .await?
+                    .into_inner();
+                ensure_metadata(
+                    response
+                        .messages
+                        .iter()
+                        .map(|message| message.metadata.as_ref()),
+                )?;
             }
             "shutdown" => {
-                client
+                let response = client
                     .shutdown(targeted(node, ShutdownRequest { force: false })?)
-                    .await?;
+                    .await?
+                    .into_inner();
+                ensure_metadata(
+                    response
+                        .messages
+                        .iter()
+                        .map(|message| message.metadata.as_ref()),
+                )?;
             }
             _ => {
                 return Err(TalosError::Config(format!(
@@ -285,6 +465,7 @@ impl Backend {
             .parse()
             .map_err(|_| TalosError::Config(format!("invalid node target {node:?}")))?;
         let mut request = Request::new(());
+        request.set_timeout(RPC_TIMEOUT);
         request.metadata_mut().insert("x-talos-node", value);
         Ok(call(MachineServiceClient::new(channel.clone()), request)
             .await?
@@ -293,16 +474,47 @@ impl Backend {
 }
 
 fn targeted<T>(node: &str, body: T) -> Result<Request<T>, TalosError> {
+    targeted_with_timeout(node, body, RPC_TIMEOUT)
+}
+
+fn targeted_with_timeout<T>(
+    node: &str,
+    body: T,
+    timeout: Duration,
+) -> Result<Request<T>, TalosError> {
     let value: MetadataValue<_> = node
         .parse()
         .map_err(|_| TalosError::Config(format!("invalid node target {node:?}")))?;
     let mut request = Request::new(body);
+    request.set_timeout(timeout);
     request.metadata_mut().insert("x-talos-node", value);
     Ok(request)
 }
 
 fn timestamp(ts: &prost_types::Timestamp) -> String {
     format!("{}.{:09}Z", ts.seconds, ts.nanos)
+}
+
+fn metadata_failure<'a>(items: impl IntoIterator<Item = Option<&'a Metadata>>) -> Option<String> {
+    items.into_iter().flatten().find_map(|metadata| {
+        if !metadata.error.is_empty() {
+            Some(metadata.error.clone())
+        } else {
+            metadata
+                .status
+                .as_ref()
+                .and_then(|status| (!status.message.is_empty()).then(|| status.message.clone()))
+        }
+    })
+}
+
+fn ensure_metadata<'a>(
+    items: impl IntoIterator<Item = Option<&'a Metadata>>,
+) -> Result<(), TalosError> {
+    match metadata_failure(items) {
+        Some(error) => Err(TalosError::Upstream(error)),
+        None => Ok(()),
+    }
 }
 
 async fn connect(raw: &str) -> Result<Channel, TalosError> {
@@ -331,6 +543,8 @@ async fn connect(raw: &str) -> Result<Channel, TalosError> {
         .identity(Identity::from_pem(crt, key));
     Endpoint::from_shared(endpoint)
         .map_err(|e| TalosError::Config(e.to_string()))?
+        .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(RPC_TIMEOUT)
         .tls_config(tls)?
         .connect()
         .await
@@ -369,6 +583,19 @@ mod tests {
                 nanos: 42,
             }),
             "1700000000.000000042Z"
+        );
+    }
+
+    #[test]
+    fn reports_proxy_metadata_errors() {
+        let metadata = Metadata {
+            hostname: "worker-1".into(),
+            error: "permission denied".into(),
+            status: None,
+        };
+        assert_eq!(
+            metadata_failure([Some(&metadata)]).as_deref(),
+            Some("permission denied")
         );
     }
 }

@@ -43,6 +43,8 @@ pub struct AppState {
     pub alerts: Arc<RwLock<Option<Arc<roder_k8s::AlertsCache>>>>,
     /// Native Talos in-cluster API client. None when no generated config is mounted.
     pub talos: Option<Arc<roder_talos::Backend>>,
+    /// Serialize Talos mutations so duplicate service/power operations cannot race.
+    pub talos_action_lock: Arc<Mutex<()>>,
 }
 
 // Lets Leptos's axum handlers pull `LeptosOptions` out of our custom state.
@@ -116,5 +118,6 @@ pub async fn build_state(leptos_options: LeptosOptions) -> Result<AppState, Stri
         backend_build_lock: Arc::new(Mutex::new(())),
         alerts,
         talos,
+        talos_action_lock: Arc::new(Mutex::new(())),
     })
 }

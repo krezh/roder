@@ -40,7 +40,12 @@ pub(crate) fn ConfirmDialog() -> impl IntoView {
                     <div class="modal-msg">{c.message.clone()}</div>
                     <div class="modal-actions">
                         <button class="act" on:click=move |_| do_close()>"Cancel"</button>
-                        <button class="act danger" on:click=move |_| { on_ok(); do_close(); }>
+                        <button class="act danger" disabled=move || closing.get() on:click=move |_| {
+                            if !closing.get_untracked() {
+                                do_close();
+                                on_ok();
+                            }
+                        }>
                             {c.ok_label.clone().unwrap_or_else(|| "Delete".into())}
                         </button>
                     </div>

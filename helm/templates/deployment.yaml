@@ -37,6 +37,18 @@ spec:
           env:
             - name: LEPTOS_SITE_ADDR
               value: "0.0.0.0:8080"
+            - name: RODER_POD_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            {{- if .Values.talos.enabled }}
+            - name: RODER_TALOS_READER_GROUPS
+              value: {{ toJson .Values.talos.readerGroups | quote }}
+            - name: RODER_TALOS_ACTIONS_ENABLED
+              value: {{ .Values.talos.actions.enabled | quote }}
+            - name: RODER_TALOS_OPERATOR_GROUPS
+              value: {{ toJson .Values.talos.actions.operatorGroups | quote }}
+            {{- end }}
             {{- with .Values.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

@@ -126,15 +126,17 @@ pub(crate) fn RowDetail(
     let is_node = kk.is_node();
     let features = LocalResource::new(move || async move {
         if !is_node {
-            return false;
+            return roder_core::TalosCapabilities::default();
         }
         data::fetch_json::<serde_json::Value>("/api/features")
             .await
             .ok()
-            .and_then(|v| v.get("talos").and_then(|v| v.as_bool()))
-            .unwrap_or(false)
+            .and_then(|v| v.get("talos").cloned())
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or_default()
     });
-    let talos_available = move || features.get().is_some_and(|enabled| enabled);
+    let talos_available = move || features.get().is_some_and(|caps| caps.read);
+    let talos_actions = move || features.get().is_some_and(|caps| caps.actions);
     // Pod-owning resources get a live "Pods" tab listing their pods by selector.
     let has_pods = is_workload || kk.is_job();
     let is_cronjob = kk.is_cronjob();
@@ -335,7 +337,7 @@ pub(crate) fn RowDetail(
                         Tab::Info => info_view(d.clone(), kind_sv.get_value()).into_any(),
                         Tab::Logs => view! { <LogsView url=format!("/api/logs?namespace={}&pod={}", data::percent_encode(&ns), data::percent_encode(&pod)) /> }.into_any(),
                         Tab::Metrics => view! { <MetricsChart namespace=ns.clone() name=pod.clone() /> }.into_any(),
-                        Tab::Talos => view! { <TalosNodeView node=pod.clone() /> }.into_any(),
+                        Tab::Talos => view! { <TalosNodeView node=pod.clone() actions=talos_actions() /> }.into_any(),
                         Tab::Yaml => view! {
                             <div class="yaml-pane">
                                 <div class="yaml-head">
@@ -379,9 +381,12 @@ pub(crate) fn RowDetail(
 }
 
 #[component]
-fn TalosNodeView(node: String) -> impl IntoView {
+fn TalosNodeView(node: String, actions: bool) -> impl IntoView {
     let confirm = expect_context::<RwSignal<Option<Confirm>>>();
     let action_status = RwSignal::new(None::<Result<String, String>>);
+    let pending_action = RwSignal::new(None::<String>);
+    let drain_first = RwSignal::new(true);
+    let load_dmesg = RwSignal::new(false);
     let status_node = node.clone();
     let status = LocalResource::new(move || {
         let node = status_node.clone();
@@ -397,21 +402,21 @@ fn TalosNodeView(node: String) -> impl IntoView {
         let node = node.clone();
         move || {
             let node = node.clone();
+            let should_load = load_dmesg.get();
             async move {
-                data::fetch_json::<serde_json::Value>(&format!(
+                if !should_load {
+                    return Ok(None);
+                }
+                data::fetch_json::<roder_core::TalosDmesg>(&format!(
                     "/api/talos/dmesg?node={}",
                     data::percent_encode(&node)
                 ))
                 .await
-                .map(|v| {
-                    v.get("log")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default()
-                        .to_string()
-                })
+                .map(Some)
             }
         }
     });
+    let refresh = Callback::new(move |_| status.refetch());
 
     view! {
         <Suspense fallback=|| view! { <div class="pad muted">"Loading Talos status…"</div> }>
@@ -423,28 +428,47 @@ fn TalosNodeView(node: String) -> impl IntoView {
                     let services = s.services;
                     let mounts = s.mounts;
                     let interfaces = s.interfaces;
+                    let disks = s.disks;
+                    let errors = s.errors;
+                    let control_plane = s.control_plane;
                     let reboot_node = node.clone();
                     let shutdown_node = node.clone();
                     let services_node = node.clone();
                     view! {
                         <div class="info">
                             <div class="kv-grid">
-                                <div class="kv"><span class="k">"Version"</span><span class="v">{s.version}</span></div>
+                                <div class="kv"><span class="k">"Version"</span><span class="v">{if s.version.is_empty() { "Unavailable".into() } else { s.version }}</span></div>
                             </div>
-                            <div class="actions">
-                                <button class="act danger" on:click=move |_| {
+                            {(!errors.is_empty()).then(|| view! {
+                                <div class="talos-errors">
+                                    {errors.into_iter().map(|(section, error)| view! {
+                                        <div class="warn-line"><b>{section}</b>": "{error}</div>
+                                    }).collect_view()}
+                                </div>
+                            })}
+                            {actions.then(|| view! { <div class="actions talos-power-actions">
+                                <label class="talos-drain"><input type="checkbox" prop:checked=move || drain_first.get()
+                                    on:change=move |e| drain_first.set(event_target_checked(&e)) />"Drain first"</label>
+                                <button class="act danger" disabled=move || pending_action.get().is_some() on:click=move |_| {
                                     let target = reboot_node.clone();
-                                    ask_confirm(confirm, "Reboot this Talos node?", move || talos_power_action(target.clone(), "reboot", action_status));
+                                    let drain = drain_first.get_untracked();
+                                    let warning = if control_plane { " This is a control-plane node; verify etcd quorum before continuing." } else { "" };
+                                    ask_confirm(confirm, format!("Reboot {target}?{warning}"), move || talos_power_action(target.clone(), "reboot", drain, action_status, pending_action));
                                 }>"Reboot"</button>
-                                <button class="act danger" on:click=move |_| {
+                                <button class="act danger" disabled=move || pending_action.get().is_some() on:click=move |_| {
                                     let target = shutdown_node.clone();
-                                    ask_confirm(confirm, "Shut down this Talos node?", move || talos_power_action(target.clone(), "shutdown", action_status));
+                                    let drain = drain_first.get_untracked();
+                                    let warning = if control_plane { " This is a control-plane node; verify etcd quorum before continuing." } else { "" };
+                                    ask_confirm(confirm, format!("Shut down {target}?{warning}"), move || talos_power_action(target.clone(), "shutdown", drain, action_status, pending_action));
                                 }>"Shutdown"</button>
+                                {move || pending_action.get().map(|action| view! {
+                                    <span class="muted">{if action == "reboot" { "Waiting for node recovery…".to_string() } else { format!("Running {action}…") }}</span>
+                                })}
                                 {move || action_status.get().map(|result| match result {
                                     Ok(message) => view! { <span class="act-ok">{message}</span> }.into_any(),
                                     Err(error) => view! { <span class="act-err">{error}</span> }.into_any(),
                                 })}
-                            </div>
+                            </div> })}
                             <h4>"Services"</h4>
                             <table class="cond"><thead><tr><th>"Service"</th><th>"State"</th><th>"Health details"</th><th>"Actions"</th></tr></thead>
                                 <tbody>{services.into_iter().map(|svc| {
@@ -454,6 +478,7 @@ fn TalosNodeView(node: String) -> impl IntoView {
                                     let node_for_start = services_node.clone();
                                     let node_for_stop = services_node.clone();
                                     let node_for_restart = services_node.clone();
+                                    let running = svc.state.to_ascii_lowercase().contains("running");
                                     let health = if svc.health_unknown { "Unknown" } else if svc.healthy { "Healthy" } else { "Unhealthy" };
                                     let details = [
                                         (!svc.message.is_empty()).then_some(svc.message),
@@ -463,9 +488,22 @@ fn TalosNodeView(node: String) -> impl IntoView {
                                     view! {
                                         <tr><td>{svc.id}</td><td>{svc.state}</td><td><b>{health}</b>{(!details.is_empty()).then(|| view! { <div class="muted">{details}</div> })}</td>
                                         <td><div class="actions">
-                                            <button class="act" on:click=move |_| talos_service_action(node_for_start.clone(), service.clone(), "start", action_status)>"Start"</button>
-                                            <button class="act" on:click=move |_| talos_service_action(node_for_stop.clone(), service_for_stop.clone(), "stop", action_status)>"Stop"</button>
-                                            <button class="act" on:click=move |_| talos_service_action(node_for_restart.clone(), service_for_restart.clone(), "restart", action_status)>"Restart"</button>
+                                            {(actions && !running).then(|| view! {
+                                                <button class="act" disabled=move || pending_action.get().is_some()
+                                                    on:click=move |_| talos_service_action(node_for_start.clone(), service.clone(), "start", action_status, pending_action, refresh)>"Start"</button>
+                                            })}
+                                            {(actions && running).then(|| view! {
+                                                <button class="act" disabled=move || pending_action.get().is_some() on:click=move |_| {
+                                                    let node = node_for_stop.clone();
+                                                    let service = service_for_stop.clone();
+                                                    ask_confirm(confirm, format!("Stop Talos service {service} on {node}?"), move || talos_service_action(node.clone(), service.clone(), "stop", action_status, pending_action, refresh));
+                                                }>"Stop"</button>
+                                                <button class="act" disabled=move || pending_action.get().is_some() on:click=move |_| {
+                                                    let node = node_for_restart.clone();
+                                                    let service = service_for_restart.clone();
+                                                    ask_confirm(confirm, format!("Restart Talos service {service} on {node}?"), move || talos_service_action(node.clone(), service.clone(), "restart", action_status, pending_action, refresh));
+                                                }>"Restart"</button>
+                                            })}
                                         </div></td></tr>
                                     }
                                 }).collect_view()}</tbody>
@@ -479,7 +517,7 @@ fn TalosNodeView(node: String) -> impl IntoView {
                             </table>
                             <h4>"Disk I/O"</h4>
                             <table class="cond"><thead><tr><th>"Device"</th><th>"Read"</th><th>"Written"</th><th>"Operations"</th><th>"Active I/O"</th></tr></thead>
-                                <tbody>{s.disks.into_iter().map(|d| view! {
+                                <tbody>{disks.into_iter().map(|d| view! {
                                     <tr><td>{d.name}</td><td>{format_bytes(d.read_bytes)}</td><td>{format_bytes(d.write_bytes)}</td><td>{format!("{} / {}", d.reads, d.writes)}</td><td>{format!("{} ({} ms)", d.io_in_progress, d.io_time_ms)}</td></tr>
                                 }).collect_view()}</tbody>
                             </table>
@@ -490,9 +528,16 @@ fn TalosNodeView(node: String) -> impl IntoView {
                                 }).collect_view()}</tbody>
                             </table>
                             <h4>"Kernel log"</h4>
+                            {move || (!load_dmesg.get()).then(|| view! {
+                                <button class="act" on:click=move |_| load_dmesg.set(true)>"Load kernel log"</button>
+                            })}
                             <Suspense fallback=|| view! { <div class="muted">"Loading kernel log…"</div> }>
                                 {move || dmesg.get().map(|result| match result {
-                                    Ok(log) => view! { <pre class="yaml-view">{log}</pre> }.into_any(),
+                                    Ok(Some(log)) => view! {
+                                        {log.truncated.then(|| view! { <div class="warn-line">"Output truncated at 1 MiB"</div> })}
+                                        <pre class="yaml-view">{log.log}</pre>
+                                    }.into_any(),
+                                    Ok(None) => ().into_any(),
                                     Err(error) => view! { <div class="muted">{error}</div> }.into_any(),
                                 })}
                             </Suspense>
@@ -510,9 +555,12 @@ fn talos_service_action(
     service: String,
     action: &'static str,
     status: RwSignal<Option<Result<String, String>>>,
+    pending: RwSignal<Option<String>>,
+    refresh: Callback<()>,
 ) {
     leptos::task::spawn_local(async move {
         status.set(None);
+        pending.set(Some(format!("{action}:{service}")));
         let result = data::post_action(&serde_json::json!({
             "action": format!("talos-service-{action}"),
             "name": node,
@@ -520,24 +568,39 @@ fn talos_service_action(
         }))
         .await
         .map(|_| format!("service {action} requested"));
+        if result.is_ok() {
+            refresh.run(());
+        }
         status.set(Some(result));
+        pending.set(None);
     });
 }
 
 fn talos_power_action(
     node: String,
     action: &'static str,
+    drain: bool,
     status: RwSignal<Option<Result<String, String>>>,
+    pending: RwSignal<Option<String>>,
 ) {
     leptos::task::spawn_local(async move {
         status.set(None);
+        pending.set(Some(action.into()));
         let result = data::post_action(&serde_json::json!({
             "action": format!("talos-{action}"),
             "name": node,
+            "drain": drain,
         }))
         .await
-        .map(|_| format!("{action} requested"));
+        .map(|_| {
+            if action == "reboot" {
+                "node returned Ready".into()
+            } else {
+                format!("{action} requested")
+            }
+        });
         status.set(Some(result));
+        pending.set(None);
     });
 }
 

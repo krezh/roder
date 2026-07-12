@@ -7,7 +7,7 @@ use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use futures::stream::select_all;
-use roder_core::{MultiWatchEvent, WatchEvent};
+use roder_core::{MultiWatchEvent, ObjectDetail, TalosCapabilities, WatchEvent};
 use roder_k8s::Backend;
 use serde::Deserialize;
 use tokio_stream::wrappers::BroadcastStream;
@@ -39,6 +39,18 @@ macro_rules! backend_or_return {
 /// A 502 response carrying the upstream error text.
 fn bad_gateway(e: impl std::fmt::Display) -> Response {
     (StatusCode::BAD_GATEWAY, e.to_string()).into_response()
+}
+
+fn talos_error(e: roder_talos::TalosError) -> Response {
+    if e.is_timeout() {
+        return (StatusCode::GATEWAY_TIMEOUT, e.to_string()).into_response();
+    }
+    match e {
+        error if error.is_unavailable() => {
+            (StatusCode::SERVICE_UNAVAILABLE, error.to_string()).into_response()
+        }
+        error => bad_gateway(error),
+    }
 }
 
 /// Normalize an optional namespace query param, treating `""` as `None`.
@@ -82,9 +94,58 @@ pub struct TalosNodeQuery {
     node: String,
 }
 
+fn request_groups(state: &AppState, headers: &HeaderMap) -> Option<Vec<String>> {
+    if state.config.dev_mode {
+        return Some(Vec::new());
+    }
+    let key = state.config.session_key?;
+    let cookie = super::session::cookie_value(headers, super::session::SESSION_COOKIE)?;
+    super::session::open_session(&cookie, &key).map(|tokens| tokens.identity.groups)
+}
+
+fn talos_capabilities(state: &AppState, headers: &HeaderMap) -> TalosCapabilities {
+    if state.talos.is_none() {
+        return TalosCapabilities::default();
+    }
+    let Some(groups) = request_groups(state, headers) else {
+        return TalosCapabilities::default();
+    };
+    let actions = state.config.can_operate_talos(&groups);
+    TalosCapabilities {
+        read: actions || state.config.can_read_talos(&groups),
+        actions,
+    }
+}
+
+async fn visible_node(backend: &Backend, node: &str) -> Result<(String, ObjectDetail), Response> {
+    let key = backend
+        .kinds()
+        .into_iter()
+        .find(|kind| kind.group.is_empty() && kind.kind == "Node")
+        .map(|kind| kind.key)
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Node resource unavailable").into_response())?;
+    let detail = backend.detail(&key, None, node).await.map_err(|error| {
+        tracing::warn!(node, "Talos node validation failed: {error}");
+        (StatusCode::NOT_FOUND, "node is unavailable").into_response()
+    })?;
+    Ok((key, detail))
+}
+
+fn is_control_plane(detail: &ObjectDetail) -> bool {
+    detail
+        .object
+        .pointer("/metadata/labels")
+        .and_then(|labels| labels.as_object())
+        .is_some_and(|labels| {
+            labels.contains_key("node-role.kubernetes.io/control-plane")
+                || labels.contains_key("node-role.kubernetes.io/master")
+        })
+}
+
 /// Read-only machine status through Talos's native in-cluster API service.
 pub async fn talos_node(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(q): Query<TalosNodeQuery>,
 ) -> Response {
     if q.node.is_empty() {
@@ -93,15 +154,27 @@ pub async fn talos_node(
     let Some(talos) = state.talos.as_ref() else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    if !talos_capabilities(&state, &headers).read {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let backend = backend_or_return!(state);
+    let (_, detail) = match visible_node(&backend, &q.node).await {
+        Ok(node) => node,
+        Err(response) => return response,
+    };
     match talos.node(&q.node).await {
-        Ok(status) => Json(status).into_response(),
-        Err(e) => bad_gateway(e),
+        Ok(mut status) => {
+            status.control_plane = is_control_plane(&detail);
+            Json(status).into_response()
+        }
+        Err(e) => talos_error(e),
     }
 }
 
 /// Kernel ring buffer from a Talos node.
 pub async fn talos_dmesg(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(q): Query<TalosNodeQuery>,
 ) -> Response {
     if q.node.is_empty() {
@@ -110,17 +183,25 @@ pub async fn talos_dmesg(
     let Some(talos) = state.talos.as_ref() else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    if !talos_capabilities(&state, &headers).read {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let backend = backend_or_return!(state);
+    if let Err(response) = visible_node(&backend, &q.node).await {
+        return response;
+    }
     match talos.dmesg(&q.node).await {
-        Ok(log) => Json(serde_json::json!({ "log": log })).into_response(),
-        Err(e) => bad_gateway(e),
+        Ok(log) => Json(log).into_response(),
+        Err(e) => talos_error(e),
     }
 }
 
 /// Optional server integrations available to the current deployment.
-pub async fn features(State(state): State<AppState>) -> Response {
+pub async fn features(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let alertmanager = state.alerts.read().await.is_some();
+    let talos = talos_capabilities(&state, &headers);
     Json(serde_json::json!({
-        "talos": state.talos.is_some(),
+        "talos": talos,
         "alertmanager": alertmanager,
     }))
     .into_response()
@@ -322,20 +403,13 @@ pub struct ActionRequest {
     force: Option<bool>,
     reset: Option<bool>,
     service: Option<String>,
+    drain: Option<bool>,
 }
 
 /// Resolve the acting identity for the audit log.
 async fn actor(state: &AppState, headers: &HeaderMap) -> String {
     if state.config.dev_mode {
         return "dev".to_string();
-    }
-    // Prefer the live identity (set by `require_auth`); fall back to the cookie.
-    if let Some(tokens) = state.current.read().await.as_ref() {
-        return tokens
-            .identity
-            .email
-            .clone()
-            .unwrap_or_else(|| tokens.identity.subject.clone());
     }
     if let (Some(key), Some(cookie)) = (
         state.config.session_key,
@@ -374,12 +448,73 @@ pub async fn action(
             | "talos-reboot"
             | "talos-shutdown"
     ) {
+        if !talos_capabilities(&state, &headers).actions {
+            return StatusCode::FORBIDDEN.into_response();
+        }
+        let _action_guard = match state.talos_action_lock.try_lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                return (
+                    StatusCode::CONFLICT,
+                    "another Talos operation is already in progress",
+                )
+                    .into_response()
+            }
+        };
         let Some(talos) = state.talos.as_ref() else {
             return StatusCode::NOT_FOUND.into_response();
         };
         let Some(node) = req.name.as_deref() else {
             return (StatusCode::BAD_REQUEST, "missing node name").into_response();
         };
+        let backend = backend_or_return!(state);
+        let (node_key, detail) = match visible_node(&backend, node).await {
+            Ok(node) => node,
+            Err(response) => return response,
+        };
+        let power_action = matches!(req.action.as_str(), "talos-reboot" | "talos-shutdown");
+        if power_action && state.config.pod_node_name.as_deref() == Some(node) {
+            return (
+                StatusCode::CONFLICT,
+                "refusing to power off the node hosting this Roder instance",
+            )
+                .into_response();
+        }
+        let was_cordoned = detail
+            .object
+            .pointer("/spec/unschedulable")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+        let previous_boot_id = detail
+            .object
+            .pointer("/status/nodeInfo/bootID")
+            .and_then(|value| value.as_str())
+            .map(String::from);
+        let mut drain_summary = None;
+        if power_action && req.drain.unwrap_or(false) {
+            match backend.drain(&node_key, node).await {
+                Ok(summary) if summary.failed.is_empty() => drain_summary = Some(summary),
+                Ok(summary) => {
+                    if !was_cordoned {
+                        let _ = backend.cordon(&node_key, node, false).await;
+                    }
+                    return (
+                        StatusCode::CONFLICT,
+                        Json(serde_json::json!({
+                            "error": "node drain did not complete",
+                            "drain": summary,
+                        })),
+                    )
+                        .into_response();
+                }
+                Err(error) => {
+                    if !was_cordoned {
+                        let _ = backend.cordon(&node_key, node, false).await;
+                    }
+                    return bad_gateway(error);
+                }
+            }
+        }
         let result = match req.action.as_str() {
             "talos-service-start" | "talos-service-stop" | "talos-service-restart" => {
                 let Some(service) = req.service.as_deref() else {
@@ -397,10 +532,34 @@ pub async fn action(
             "talos-shutdown" => talos.power_action(node, "shutdown").await,
             _ => unreachable!(),
         };
-        return match result {
-            Ok(()) => (StatusCode::OK, "ok").into_response(),
-            Err(e) => bad_gateway(e),
-        };
+        if let Err(error) = result {
+            if drain_summary.is_some() && !was_cordoned {
+                let _ = backend.cordon(&node_key, node, false).await;
+            }
+            return talos_error(error);
+        }
+        if req.action == "talos-reboot" {
+            if let Err(error) = backend
+                .wait_for_node_reboot(
+                    node,
+                    previous_boot_id.as_deref(),
+                    std::time::Duration::from_secs(300),
+                )
+                .await
+            {
+                return (StatusCode::GATEWAY_TIMEOUT, error.to_string()).into_response();
+            }
+            if drain_summary.is_some() && !was_cordoned {
+                if let Err(error) = backend.cordon(&node_key, node, false).await {
+                    return bad_gateway(error);
+                }
+            }
+        }
+        return Json(serde_json::json!({
+            "status": if req.action == "talos-reboot" { "ready" } else { "requested" },
+            "drain": drain_summary,
+        }))
+        .into_response();
     }
 
     let b = backend_or_return!(state);

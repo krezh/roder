@@ -176,6 +176,10 @@
   padding: 0.25rem 0.6rem;
   cursor: pointer;
   font-size: 0.82rem;
+  &:disabled {
+    opacity: 0.45;
+    cursor: wait;
+  }
   &:hover { border-color: var(--accent); }
   &.danger:hover {
     border-color: var(--error);

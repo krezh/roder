@@ -158,11 +158,11 @@ pub async fn require_auth(State(state): State<AppState>, req: Request, next: Nex
 /// single-flighted so concurrent requests don't each spend (and rotate away)
 /// the refresh token.
 async fn ensure_session(state: &AppState, cookie_tokens: Tokens) -> Result<Tokens, ()> {
-    // Prefer the in-memory token set (it's the most recently refreshed); fall
-    // back to the cookie's after a restart, when `current` is empty.
+    // Reuse the in-memory token only for the same subject. A different user's
+    // cookie must never inherit the previous user's identity, groups, or token.
     let working = {
         let cur = state.current.read().await;
-        cur.clone().unwrap_or(cookie_tokens)
+        tokens_for_subject(cur.as_ref(), cookie_tokens)
     };
 
     // The cookie carries no id token (kept small), so a cold start yields an
@@ -170,7 +170,14 @@ async fn ensure_session(state: &AppState, cookie_tokens: Tokens) -> Result<Token
     if working.id_token.is_empty() || working.needs_refresh() {
         let _guard = state.refresh_lock.lock().await;
         // Re-check under the lock: another request may have just refreshed.
-        if let Some(c) = state.current.read().await.clone() {
+        if let Some(c) = state
+            .current
+            .read()
+            .await
+            .as_ref()
+            .filter(|tokens| tokens.identity.subject == working.identity.subject)
+            .cloned()
+        {
             if !c.needs_refresh() {
                 ensure_backend(state, &c.id_token).await;
                 return Ok(c);
@@ -199,6 +206,13 @@ async fn ensure_session(state: &AppState, cookie_tokens: Tokens) -> Result<Token
         }
     }
     Ok(working)
+}
+
+fn tokens_for_subject(current: Option<&Tokens>, cookie: Tokens) -> Tokens {
+    current
+        .filter(|tokens| tokens.identity.subject == cookie.identity.subject)
+        .cloned()
+        .unwrap_or(cookie)
 }
 
 /// Ensure the shared backend exists and uses `id_token`, building it on first
@@ -423,6 +437,10 @@ mod tests {
             oidc: None,
             session_key: None,
             signout_redirect_url: None,
+            talos_reader_groups: vec![],
+            talos_operator_groups: vec![],
+            talos_actions_enabled: false,
+            pod_node_name: None,
         })
     }
 
@@ -439,6 +457,10 @@ mod tests {
             }),
             session_key: Some(TEST_KEY),
             signout_redirect_url: None,
+            talos_reader_groups: vec![],
+            talos_operator_groups: vec![],
+            talos_actions_enabled: false,
+            pod_node_name: None,
         })
     }
 
@@ -453,6 +475,7 @@ mod tests {
             backend_build_lock: Arc::new(Mutex::new(())),
             alerts: Arc::new(RwLock::new(None)),
             talos: None,
+            talos_action_lock: Arc::new(Mutex::new(())),
         }
     }
 
@@ -500,6 +523,20 @@ mod tests {
                 groups: vec!["admins".into()],
             },
         }
+    }
+
+    #[test]
+    fn never_reuses_another_subjects_live_tokens() {
+        let current = fake_tokens();
+        let mut cookie = fake_tokens();
+        cookie.identity.subject = "other-user".into();
+        cookie.identity.groups = vec!["readers".into()];
+        cookie.id_token.clear();
+
+        let selected = tokens_for_subject(Some(&current), cookie);
+        assert_eq!(selected.identity.subject, "other-user");
+        assert_eq!(selected.identity.groups, vec!["readers"]);
+        assert!(selected.id_token.is_empty());
     }
 
     fn collect_set_cookies(resp: &Response) -> Vec<String> {

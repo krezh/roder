@@ -22,6 +22,13 @@ pub struct ServerConfig {
     /// the OIDC provider can also end the SSO session (RP-initiated logout).
     /// Example: `https://sso.example.com/application/o/roder/end-session/`
     pub signout_redirect_url: Option<String>,
+    /// Empty means any authenticated user may read Talos status.
+    pub talos_reader_groups: Vec<String>,
+    /// Mutations require both this group allow-list and `talos_actions_enabled`.
+    pub talos_operator_groups: Vec<String>,
+    pub talos_actions_enabled: bool,
+    /// Downward-API node name; coordinated power actions reject their own host.
+    pub pod_node_name: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -48,6 +55,10 @@ impl ServerConfig {
             .to_string();
 
         let signout_redirect_url = std::env::var("RODER_SIGNOUT_REDIRECT_URL").ok();
+        let talos_reader_groups = env_groups("RODER_TALOS_READER_GROUPS");
+        let talos_operator_groups = env_groups("RODER_TALOS_OPERATOR_GROUPS");
+        let talos_actions_enabled = env_bool("RODER_TALOS_ACTIONS_ENABLED");
+        let pod_node_name = std::env::var("RODER_POD_NODE_NAME").ok();
 
         if dev_mode {
             return Ok(Self {
@@ -56,6 +67,10 @@ impl ServerConfig {
                 oidc: None,
                 session_key: None,
                 signout_redirect_url,
+                talos_reader_groups,
+                talos_operator_groups,
+                talos_actions_enabled,
+                pod_node_name,
             });
         }
 
@@ -79,6 +94,10 @@ impl ServerConfig {
             oidc: Some(oidc),
             session_key,
             signout_redirect_url,
+            talos_reader_groups,
+            talos_operator_groups,
+            talos_actions_enabled,
+            pod_node_name,
         })
     }
 
@@ -89,6 +108,17 @@ impl ServerConfig {
 
     pub fn redirect_url(&self) -> String {
         format!("{}/auth/callback", self.base_url)
+    }
+
+    pub fn can_read_talos(&self, groups: &[String]) -> bool {
+        self.dev_mode
+            || self.talos_reader_groups.is_empty()
+            || has_any_group(groups, &self.talos_reader_groups)
+    }
+
+    pub fn can_operate_talos(&self, groups: &[String]) -> bool {
+        self.talos_actions_enabled
+            && (self.dev_mode || has_any_group(groups, &self.talos_operator_groups))
     }
 
     /// Convert to the `roder_auth` config (panics if called in dev mode).
@@ -147,6 +177,24 @@ fn split_csv(s: &str) -> Vec<String> {
         .collect()
 }
 
+fn env_groups(key: &str) -> Vec<String> {
+    let Ok(value) = std::env::var(key) else {
+        return Vec::new();
+    };
+    serde_json::from_str::<Vec<String>>(&value).unwrap_or_else(|_| split_csv(&value))
+}
+
+fn env_bool(key: &str) -> bool {
+    matches!(
+        std::env::var(key).as_deref(),
+        Ok("1") | Ok("true") | Ok("yes")
+    )
+}
+
+fn has_any_group(actual: &[String], allowed: &[String]) -> bool {
+    !allowed.is_empty() && actual.iter().any(|group| allowed.contains(group))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,6 +244,10 @@ mod tests {
             "RODER_OIDC_GROUPS_CLAIM",
             "RODER_SESSION_KEY",
             "RODER_SIGNOUT_REDIRECT_URL",
+            "RODER_TALOS_READER_GROUPS",
+            "RODER_TALOS_OPERATOR_GROUPS",
+            "RODER_TALOS_ACTIONS_ENABLED",
+            "RODER_POD_NODE_NAME",
         ]);
         g.unset("RODER_DEV_MODE");
         g.set("RODER_BASE_URL", "https://roder.example.com");
@@ -207,6 +259,10 @@ mod tests {
             "RODER_SESSION_KEY",
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         );
+        g.unset("RODER_TALOS_READER_GROUPS");
+        g.unset("RODER_TALOS_OPERATOR_GROUPS");
+        g.unset("RODER_TALOS_ACTIONS_ENABLED");
+        g.unset("RODER_POD_NODE_NAME");
         g
     }
 
@@ -402,6 +458,39 @@ mod tests {
         let cfg = ServerConfig::from_env().unwrap();
         let o = cfg.oidc.unwrap();
         assert_eq!(o.groups_claim, "roles");
+    }
+
+    #[test]
+    #[serial]
+    fn talos_reader_groups_restrict_read_access() {
+        let g = prod_env();
+        g.set("RODER_TALOS_READER_GROUPS", "platform,talos-readers");
+        let cfg = ServerConfig::from_env().unwrap();
+        assert!(cfg.can_read_talos(&["platform".into()]));
+        assert!(!cfg.can_read_talos(&["developers".into()]));
+    }
+
+    #[test]
+    #[serial]
+    fn talos_operator_requires_switch_and_group() {
+        let g = prod_env();
+        g.set("RODER_TALOS_OPERATOR_GROUPS", "platform-operators");
+        let groups = vec!["platform-operators".into()];
+        let disabled = ServerConfig::from_env().unwrap();
+        assert!(!disabled.can_operate_talos(&groups));
+        g.set("RODER_TALOS_ACTIONS_ENABLED", "true");
+        let enabled = ServerConfig::from_env().unwrap();
+        assert!(enabled.can_operate_talos(&groups));
+        assert!(!enabled.can_operate_talos(&["developers".into()]));
+    }
+
+    #[test]
+    #[serial]
+    fn talos_groups_accept_json_without_splitting_group_names() {
+        let g = prod_env();
+        g.set("RODER_TALOS_READER_GROUPS", r#"["team,ops"]"#);
+        let cfg = ServerConfig::from_env().unwrap();
+        assert_eq!(cfg.talos_reader_groups, vec!["team,ops"]);
     }
 
     #[test]

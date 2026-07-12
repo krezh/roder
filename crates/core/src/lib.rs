@@ -277,10 +277,25 @@ pub struct NodeSummary {
 pub struct TalosNode {
     pub node: String,
     pub version: String,
+    pub control_plane: bool,
     pub services: Vec<TalosService>,
     pub mounts: Vec<TalosMount>,
     pub interfaces: Vec<TalosNetworkInterface>,
     pub disks: Vec<TalosDiskStat>,
+    /// Per-section upstream failures; successful sections remain populated.
+    pub errors: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TalosDmesg {
+    pub log: String,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TalosCapabilities {
+    pub read: bool,
+    pub actions: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "talos": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "readerGroups": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "roles": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "actions": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "operatorGroups": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

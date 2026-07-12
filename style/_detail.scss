@@ -396,6 +396,25 @@ table.cond {
     color: var(--pending);
   }
 }
+.talos-errors {
+  margin: 0.6rem 0;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
+  background: color-mix(in srgb, var(--warn) 6%, transparent);
+}
+.talos-power-actions {
+  align-items: center;
+}
+.talos-drain {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+
+  input { accent-color: var(--accent); }
+}
 table.rules {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 0.78rem;

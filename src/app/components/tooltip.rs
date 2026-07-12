@@ -101,22 +101,22 @@ pub(crate) fn TooltipLayer() -> impl IntoView {
         {move || tip.get().map(|(text, _, _)| {
             // Newline-separated content renders as a list (e.g. hostnames); a
             // single line renders as plain text.
-            let items: Vec<String> = text.split('\n').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect();
-            let body = if items.len() > 1 {
+                let items: Vec<String> = text.split('\n').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect();
+                let body = if items.len() > 1 {
+                    view! {
+                        <ul class="tip-list">
+                            {items.into_iter().map(|i| view! { <li>{i}</li> }).collect_view()}
+                        </ul>
+                    }.into_any()
+                } else {
+                    view! { <span>{text}</span> }.into_any()
+                };
                 view! {
-                    <ul class="tip-list">
-                        {items.into_iter().map(|i| view! { <li>{i}</li> }).collect_view()}
-                    </ul>
-                }.into_any()
-            } else {
-                view! { <span>{text}</span> }.into_any()
-            };
-            view! {
-                <div class="tooltip" node_ref=tip_ref
-                    style=move || { let (x, y) = pos.get(); format!("left:{x}px;top:{y}px") }>
-                    {body}
-                </div>
-            }
-        })}
+                    <div class="tooltip" node_ref=tip_ref
+                        style=move || { let (x, y) = pos.get(); format!("left:{x}px;top:{y}px") }>
+                        {body}
+                    </div>
+                }
+            })}
     }
 }

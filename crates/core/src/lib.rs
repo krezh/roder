@@ -333,7 +333,7 @@ pub struct TalosDiskStat {
 
 /// A single pod metrics data point, shared between the server (serializes) and
 /// the frontend (deserializes) via the `/api/metrics` endpoint.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct MetricsPoint {
     pub timestamp: u64,
     pub cpu: f64,

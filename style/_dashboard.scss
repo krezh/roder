@@ -249,10 +249,15 @@
   font-weight: 600;
   margin-bottom: 0.25rem;
 }
-.chart-svg {
+.chart-canvas {
+  display: block;
   width: 100%;
-  height: auto;
-  max-height: 200px;
+  height: 180px;
+}
+.metrics-graph-tooltip {
+  display: none;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
 }
 .chart-label {
   font-size: 9px;

@@ -30,6 +30,7 @@
 }
 
 :root {
+  --font-mono: "Monaspace Neon NF", ui-monospace, "Cascadia Code", monospace;
   --bg: #0c0c0d;
   --panel: #0e0e0e;
   --panel-2: #151515;
@@ -82,5 +83,5 @@ body {
 }
 
 .font-mono {
-  font-family: "Monaspace Neon NF", ui-monospace, "Cascadia Code", monospace;
+  font-family: var(--font-mono);
 }

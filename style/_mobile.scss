@@ -169,12 +169,24 @@
     width: 20px;
     height: 20px;
     border-radius: 0;
-    border: 1px solid var(--border);
+    border: 1px solid color-mix(in srgb, var(--muted) 68%, transparent);
+    background: var(--bg);
     flex: 0 0 auto;
+    position: relative;
 
     &.on {
-      background: var(--accent);
+      background: color-mix(in srgb, var(--accent) 9%, var(--bg));
       border-color: var(--accent);
+
+      &::after {
+        content: "";
+        position: absolute;
+        width: 7px;
+        height: 7px;
+        inset: 0;
+        margin: auto;
+        background: var(--accent);
+      }
     }
   }
 
@@ -461,6 +473,15 @@
     display: block;
     position: static;
     margin-top: 0.3rem;
+  }
+
+  .tap-reveal.open .topusage {
+    flex-wrap: wrap;
+
+    .usage-tip {
+      flex-basis: 100%;
+      min-width: min(18rem, calc(100vw - 1.4rem));
+    }
   }
 
   /* ---- full-screen command / namespace palette ---- */

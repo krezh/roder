@@ -141,10 +141,18 @@ where
     F: Fn() -> Option<String> + Copy + Send + Sync + 'static,
     S: Fn() -> Option<RowStatus> + Copy + Send + Sync + 'static,
 {
+    let uid_checked = uid.clone();
     view! {
         <div class="cell cell-name">
             <div class="cw"><div class="cwi">
-                <span class="check" on:click=move |e: leptos::ev::MouseEvent| {
+                <button
+                    type="button"
+                    class="check"
+                    role="checkbox"
+                    aria-label="Toggle row selection"
+                    aria-checked=move || selected.get().contains(&uid_checked)
+                    tabindex=move || if selected.get().is_empty() { -1 } else { 0 }
+                    on:click=move |e: leptos::ev::MouseEvent| {
                     e.stop_propagation();
                     if e.shift_key() {
                         range_select(selected, last_clicked, shown_uids, &uid);
@@ -153,7 +161,7 @@ where
                         selected.update(|s| { if !s.remove(&u) { s.insert(u.clone()); } });
                         last_clicked.set(Some(u));
                     }
-                }></span>
+                }></button>
                 <span class="nm" style=move || name_color(status().unwrap_or(RowStatus::Unknown))>
                     {move || name().unwrap_or_default()}
                 </span>

@@ -139,38 +139,113 @@
   position: relative;
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  padding: 0.25rem 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: 0;
-  background: var(--panel-2);
+  gap: 0;
+  min-height: 2.25rem;
   cursor: default;
   white-space: nowrap;
-  .tu-stat {
-    font-size: 0.8rem;
+  .tu-meter {
+    display: grid;
+    gap: 0.25rem;
+    width: 5rem;
+    padding: 0 0.65rem;
+    border-right: 1px solid var(--border);
+  }
+  .tu-reading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.35rem;
+  }
+  .tu-label {
     color: var(--muted);
-    b {
-      color: var(--fg);
-      font-variant-numeric: tabular-nums;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+  }
+  b {
+    color: var(--fg);
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .tu-track {
+    display: block;
+    height: 3px;
+    background: var(--border);
+    overflow: hidden;
+  }
+  .tu-fill {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+  }
+  .tu-meter-warn .tu-fill { background: var(--warn); }
+  .tu-meter-error .tu-fill { background: var(--error); }
+  .tu-meter-warn b { color: var(--warn); }
+  .tu-meter-error b { color: var(--error); }
+  .tu-nodes {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    align-self: stretch;
+    padding: 0 0.65rem;
+    border: 0;
+    background: transparent;
+    color: var(--fg);
+    cursor: pointer;
+    &:hover,
+    &:focus-visible { background: var(--panel-2); }
+    &:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+  }
+  .tu-node-dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    background: var(--ok);
+  }
+  .tu-nodes-warn {
+    b { color: var(--error); }
+    .tu-node-dot { background: var(--error); }
+  }
+  .tip-node-status {
+    display: inline-block;
+    position: relative;
+    width: 0.55rem;
+    height: 0.55rem;
+    vertical-align: -0.02rem;
+  }
+  .tip-node-ok { background: var(--ok); }
+  .tip-node-err {
+    border: 1px solid var(--error);
+
+    &::after {
+      content: "";
+      position: absolute;
+      width: 1px;
+      inset: 1px auto 1px 50%;
+      background: var(--error);
+      transform: rotate(45deg);
     }
   }
-  .tu-nodes {
-    cursor: pointer;
-    &:hover { color: var(--fg); }
-    &.tu-nodes-warn { color: var(--error); b { color: var(--error); } }
-  }
-  .tip-node-ok  { color: var(--ok); }
-  .tip-node-err { color: var(--error); }
   &:hover .usage-tip {
     display: block;
   }
   .tu-warn {
     position: relative;
     color: var(--warn);
-    font-size: 0.8rem;
+    width: 1rem;
+    height: 1rem;
+    border: 1px solid var(--warn);
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    line-height: calc(1rem - 2px);
+    text-align: center;
     cursor: default;
     .tooltip { display: none; position: absolute; top: 100%; right: 0; margin-top: 6px; }
     &:hover .tooltip { display: block; }
+  }
+  &.tu-stale {
+    .tu-fill { opacity: 0.45; }
+    .tu-reading, .tu-nodes { opacity: 0.72; }
   }
   &.tu-error {
     color: var(--muted);
@@ -207,6 +282,42 @@
   top: 100%;
   right: 0;
   margin-top: 6px;
+  min-width: 18rem;
+
+  .tip-row {
+    display: grid;
+    grid-template-columns: minmax(9rem, 1fr) 3.2rem 3.2rem;
+    gap: 0.65rem;
+    align-items: center;
+    font-size: 0.75rem;
+    padding: 0.18rem 0;
+    .tip-node {
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .tip-usage {
+      padding: 0.08rem 0.2rem;
+      background: linear-gradient(
+        to right,
+        color-mix(in srgb, var(--accent) 20%, transparent) var(--usage),
+        transparent var(--usage)
+      );
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+  }
+  .tip-head {
+    margin-bottom: 0.15rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    span:not(:first-child) { text-align: right; }
+  }
 }
 .tip-row {
   display: flex;

@@ -28,6 +28,7 @@ pub(crate) fn Topbar() -> impl IntoView {
         <header class="topbar">
             <button class="hamburger" on:click=move |_| nav_open.update(|o| *o = !*o)>"☰"</button>
             <Brand />
+            <TopUsage />
             <div class="topbar-group topbar-nav">
                 <button class="palette-btn" on:click=move |_| palette_open.set(true)>
                     "Search " <kbd><ShiftIcon />"K"</kbd>
@@ -47,7 +48,6 @@ pub(crate) fn Topbar() -> impl IntoView {
                 <SyncButton />
             </div>
             <div class="topbar-group topbar-health">
-                <TopUsage />
                 <FailingBadge />
                 <FluxFailingBadge />
                 <AlertsButton />
@@ -267,6 +267,8 @@ pub(crate) fn TopUsage() -> impl IntoView {
                 Some(o) => {
                 let nodes = o.nodes.clone();
                 let (cpu_p, mem_p) = cluster_usage_pct(&nodes);
+                let cpu_width = cpu_p.clamp(0.0, 100.0);
+                let mem_width = mem_p.clamp(0.0, 100.0);
                 let total = nodes.len();
                 let ready = nodes.iter().filter(|n| n.ready).count();
                 let nodes_ok = ready == total;
@@ -279,33 +281,73 @@ pub(crate) fn TopUsage() -> impl IntoView {
                     }
                 };
                 view! {
-                    <div class="topusage" class:tu-stale=move || stale.get()>
-                        <span class="tu-stat">"CPU " <b>{format!("{cpu_p:.0}%")}</b></span>
-                        <span class="tu-stat">"Mem " <b>{format!("{mem_p:.0}%")}</b></span>
-                        <span class="tu-stat tu-nodes"
-                            class:tu-nodes-warn=move || !nodes_ok
-                            on:click=go_nodes>
-                            "Nodes " <b>{ready}</b>"/"<b>{total}</b>
+                    <div
+                        class="topusage"
+                        class:tu-stale=move || stale.get()
+                        aria-label=format!(
+                            "Cluster usage: CPU {cpu_p:.0}%, memory {mem_p:.0}%, {ready} of {total} nodes ready"
+                        )
+                    >
+                        <span class="tu-meter"
+                            class:tu-meter-warn={(75.0..90.0).contains(&cpu_p)}
+                            class:tu-meter-error={cpu_p >= 90.0}>
+                            <span class="tu-reading">
+                                <span class="tu-label">"CPU"</span>
+                                <b>{format!("{cpu_p:.0}%")}</b>
+                            </span>
+                            <span class="tu-track" aria-hidden="true">
+                                <span class="tu-fill" style=format!("width:{cpu_width:.0}%")></span>
+                            </span>
                         </span>
+                        <span class="tu-meter"
+                            class:tu-meter-warn={(75.0..90.0).contains(&mem_p)}
+                            class:tu-meter-error={mem_p >= 90.0}>
+                            <span class="tu-reading">
+                                <span class="tu-label">"MEM"</span>
+                                <b>{format!("{mem_p:.0}%")}</b>
+                            </span>
+                            <span class="tu-track" aria-hidden="true">
+                                <span class="tu-fill" style=format!("width:{mem_width:.0}%")></span>
+                            </span>
+                        </span>
+                        <button class="tu-nodes"
+                            class:tu-nodes-warn=move || !nodes_ok
+                            aria-label=format!("{ready} of {total} nodes ready; view nodes")
+                            on:click=go_nodes>
+                            <span class="tu-node-dot" aria-hidden="true"></span>
+                            <b>{ready}"/"{total}</b>
+                        </button>
                         {move || stale.get().then(|| view! {
-                            <span class="tu-warn">"⚠"
+                            <span class="tu-warn" aria-label="Usage data is stale">"!"
                                 <span class="tooltip">"Failed to refresh — showing last known values"</span>
                             </span>
                         })}
                         <div class="tooltip usage-tip">
+                            <div class="tip-row tip-head" aria-hidden="true">
+                                <span>"Node"</span>
+                                <span>"CPU"</span>
+                                <span>"Mem"</span>
+                            </div>
                             {nodes.into_iter().map(|n| {
                                 let c = pct(n.cpu_used, n.cpu_cores);
                                 let m = pct(n.mem_used, n.mem_bytes);
+                                let c_width = c.clamp(0.0, 100.0);
+                                let m_width = m.clamp(0.0, 100.0);
                                 view! {
                                     <div class="tip-row">
                                         <span class="tip-node">
-                                            <span class=if n.ready { "tip-node-ok" } else { "tip-node-err" }>
-                                                {if n.ready { "✓" } else { "✕" }}
-                                            </span>
+                                            <span
+                                                class=if n.ready { "tip-node-status tip-node-ok" } else { "tip-node-status tip-node-err" }
+                                                aria-label=if n.ready { "Ready" } else { "Not ready" }
+                                            ></span>
                                             " "{n.name}
                                         </span>
-                                        <span>"CPU "{format!("{c:.0}%")}</span>
-                                        <span>"Mem "{format!("{m:.0}%")}</span>
+                                        <span class="tip-usage" style=format!("--usage:{c_width:.0}%")>
+                                            {format!("{c:.0}%")}
+                                        </span>
+                                        <span class="tip-usage" style=format!("--usage:{m_width:.0}%")>
+                                            {format!("{m:.0}%")}
+                                        </span>
                                     </div>
                                 }
                             }).collect_view()}

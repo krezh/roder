@@ -1,11 +1,15 @@
 
 /* ---- multiselect ---- */
 .check {
+  appearance: none;
   width: 0;
-  height: 13px;
-  border: 1.5px solid var(--muted);
+  height: 15px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--muted) 68%, transparent);
   border-width: 0;
   border-radius: 0;
+  background: var(--bg);
+  color: inherit;
   flex: 0 0 auto;
   cursor: pointer;
   opacity: 0;
@@ -20,29 +24,38 @@
     opacity 0.16s ease,
     background 0.12s ease;
   position: relative;
+
+  &:hover { border-color: var(--accent); }
+  &:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 2px;
+  }
 }
 .grid-table.selecting .check,
 .grid-row.row.selected .check {
-  width: 13px;
-  border-width: 1.5px;
+  width: 15px;
+  border-width: 1px;
   margin-right: 0.5rem;
   opacity: 1;
 }
 .grid-row.row.selected .check {
-  background: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg));
   border-color: var(--accent);
 }
 .grid-row.row.selected .check::after {
-  content: "✓";
+  content: "";
   position: absolute;
+  width: 5px;
+  height: 5px;
   inset: 0;
-  font-size: 9px;
-  line-height: 11px;
-  color: #fff;
-  text-align: center;
+  margin: auto;
+  background: var(--accent);
 }
 .grid-row.row.selected .cell {
-  background: rgba(232, 134, 63, 0.1);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+.grid-row.row.selected .cell:first-child {
+  box-shadow: inset 2px 0 var(--accent);
 }
 .bulkbar-wrap {
   --bulk-h: 2.75rem;

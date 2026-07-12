@@ -234,11 +234,20 @@
 .metrics-chart {
   padding: 1rem;
 }
+.metrics-graphs {
+  display: grid;
+  gap: 1rem;
+}
 .chart-container {
   background: var(--panel-2);
   border: 1px solid var(--border);
   border-radius: 0;
   padding: 1rem;
+}
+.chart-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
 }
 .chart-svg {
   width: 100%;

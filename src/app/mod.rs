@@ -398,6 +398,19 @@ pub fn App() -> impl IntoView {
         );
     });
 
+    // Namespaces can appear/disappear as the cluster changes, but the list is
+    // fetched once (see `ns_resource` above). Re-poll periodically so the
+    // namespace switcher stays current without a full browser refresh.
+    Effect::new(move |_| {
+        set_interval(
+            move || {
+                #[cfg(target_arch = "wasm32")]
+                ns_resource.refetch();
+            },
+            std::time::Duration::from_secs(30),
+        );
+    });
+
     view! {
         <Title text="Roder" />
         <Router>

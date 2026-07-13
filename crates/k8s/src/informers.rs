@@ -345,9 +345,12 @@ fn start_informer(
     let cache_objects = is_pod || is_pvc;
     let handle = tokio::spawn(async move {
         // `kube`'s `watcher` is self-healing: on a transient failure it yields
-        // an `Err`, backs off internally, then re-lists and resumes on the same
-        // stream. So we only rebuild the stream when the client itself must
-        // change — i.e. the bearer token rotated and the old client now 401s.
+        // an `Err`, then re-lists and resumes on the same stream. Back off here
+        // until a complete relist succeeds; WatchStreamExt::default_backoff resets
+        // on the synthetic `Init` event emitted before each LIST, so it otherwise
+        // stays at its minimum delay throughout an outage. We only rebuild the
+        // stream when the client itself must change — i.e. the bearer token
+        // rotated and the old client now 401s.
         // Rebuilding on *every* error would force a fresh LIST each time, which
         // both hammers etcd and doubles memory while the new list is buffered.
         let mut backoff_attempt: u32 = 0;
@@ -470,6 +473,15 @@ fn start_informer(
                                     break;
                                 }
                                 tracing::debug!("watch error for {group}/{kind} (self-healing): {e}");
+                                let delay = rebuild_backoff(backoff_attempt);
+                                backoff_attempt = backoff_attempt.saturating_add(1);
+                                tokio::select! {
+                                    _ = tokio::time::sleep(delay) => {}
+                                    _ = task_reproject.notified() => {
+                                        reproject_now = true;
+                                        break;
+                                    }
+                                }
                             }
                         }
                     }
@@ -590,10 +602,10 @@ fn is_auth_error(e: &watcher::Error) -> bool {
     false
 }
 
-/// Backoff before rebuilding a watch stream: 1, 2, 4, 8, 16, 30s (capped) plus
-/// up to ~1s of jitter so many informers don't reconnect in lockstep after a
-/// shared outage.
-fn rebuild_backoff(attempt: u32) -> Duration {
+/// Backoff before retrying or rebuilding a watch stream: 1, 2, 4, 8, 16, 30s
+/// (capped) plus up to ~1s of jitter so many informers don't reconnect in
+/// lockstep after a shared outage.
+pub(crate) fn rebuild_backoff(attempt: u32) -> Duration {
     let secs = (1u64 << attempt.min(5)).min(30);
     let jitter_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)

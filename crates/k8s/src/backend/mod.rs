@@ -323,6 +323,7 @@ fn spawn_crd_watch(
     catalog: Arc<ArcSwap<CatalogData>>,
 ) {
     tokio::spawn(async move {
+        let mut backoff_attempt = 0;
         loop {
             let client = (*cluster.client()).clone();
             let api: Api<PartialObjectMeta<CustomResourceDefinition>> = Api::all(client);
@@ -332,15 +333,33 @@ fn spawn_crd_watch(
             let stream = watcher::watcher(api, watcher::Config::default());
             futures::pin_mut!(stream);
             while let Some(event) = stream.next().await {
-                if let Err(e) = event {
-                    tracing::debug!("CRD watch error (self-healing): {e}");
-                    continue;
+                match event {
+                    Err(e) => {
+                        tracing::debug!("CRD watch error (self-healing): {e}");
+                        let delay = crate::informers::rebuild_backoff(backoff_attempt);
+                        backoff_attempt = backoff_attempt.saturating_add(1);
+                        tokio::time::sleep(delay).await;
+                        continue;
+                    }
+                    // `Init` is emitted before the LIST request, so it does not
+                    // prove connectivity. Any other event does.
+                    Ok(watcher::Event::Init) => {}
+                    Ok(_) => backoff_attempt = 0,
                 }
                 // Coalesce a burst of CRD events: keep draining until the stream
                 // goes quiet for 2s, then rebuild once.
-                while let Ok(Some(_)) =
-                    tokio::time::timeout(Duration::from_secs(2), stream.next()).await
-                {
+                loop {
+                    match tokio::time::timeout(Duration::from_secs(2), stream.next()).await {
+                        Ok(Some(Err(e))) => {
+                            tracing::debug!("CRD watch error (self-healing): {e}");
+                            let delay = crate::informers::rebuild_backoff(backoff_attempt);
+                            backoff_attempt = backoff_attempt.saturating_add(1);
+                            tokio::time::sleep(delay).await;
+                        }
+                        Ok(Some(Ok(watcher::Event::Init))) => {}
+                        Ok(Some(Ok(_))) => backoff_attempt = 0,
+                        Ok(None) | Err(_) => break,
+                    }
                 }
                 rebuild_catalog(&cluster, &registry, &catalog).await;
             }

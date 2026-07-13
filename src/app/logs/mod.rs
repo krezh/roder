@@ -13,7 +13,8 @@ use crate::data;
 #[component]
 pub(crate) fn LogSidebar() -> impl IntoView {
     let log_pods = expect_context::<LogPods>().0;
-    let width = RwSignal::new(520i32);
+    // `None` is the default 50vw width; dragging stores an explicit pixel width.
+    let width = RwSignal::new(None::<i32>);
     let dragging = RwSignal::new(false);
 
     #[cfg(target_arch = "wasm32")]
@@ -27,7 +28,7 @@ pub(crate) fn LogSidebar() -> impl IntoView {
                 .and_then(|v| v.as_f64())
                 .unwrap_or(1280.0);
             let w = (vw - e.client_x() as f64).clamp(300.0, vw * 0.85);
-            width.set(w as i32);
+            width.set(Some(w as i32));
             e.prevent_default();
         });
         let up = window_event_listener(ev::mouseup, move |_| {
@@ -47,7 +48,10 @@ pub(crate) fn LogSidebar() -> impl IntoView {
         <div class="logbar"
             class:open=move || !log_pods.get().is_empty()
             class:dragging=move || dragging.get()
-            style=move || format!("width:{}px", width.get())>
+            style=move || match width.get() {
+                Some(width) => format!("width:{width}px"),
+                None => "width:50vw".to_string(),
+            }>
             <div class="logbar-resize" on:mousedown=move |e: ev::MouseEvent| { e.prevent_default(); dragging.set(true); }></div>
             <div class="logbar-head">
                 <span class="logbar-title">"Logs"</span>

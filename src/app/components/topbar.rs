@@ -119,6 +119,7 @@ pub(crate) fn AlertsButton() -> impl IntoView {
 pub(crate) fn FluxFailingBadge() -> impl IntoView {
     let catalog = expect_context::<Catalog>().0;
     let selected_kind = expect_context::<RwSignal<Option<ResourceKind>>>();
+    let selected_ns = expect_context::<RwSignal<Option<String>>>();
     let only_problems = expect_context::<OnlyProblems>().0;
 
     let ks_kind = Memo::new(move |_| {
@@ -187,6 +188,7 @@ pub(crate) fn FluxFailingBadge() -> impl IntoView {
                         hr_kind.get_untracked()
                     };
                     if let Some(k) = kind {
+                        selected_ns.set(None);
                         only_problems.set(true);
                         selected_kind.set(Some(k));
                     }

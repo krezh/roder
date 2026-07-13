@@ -383,6 +383,10 @@
   box-shadow: 0 14px 34px -8px rgba(0, 0, 0, 0.85);
   padding: 0.25rem;
   min-width: 190px;
+  max-width: calc(100dvw - 1rem);
+  max-height: calc(100dvh - 1rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   animation: popup-in 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);

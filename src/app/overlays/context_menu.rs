@@ -31,6 +31,61 @@ pub(crate) fn ContextMenu() -> impl IntoView {
     let toast = expect_context::<RwSignal<Option<Toast>>>();
 
     let (snapshot, closing, do_close) = super::use_option_overlay(ctx);
+    let pos = RwSignal::new((0i32, 0i32));
+    let menu_ref = NodeRef::<leptos::html::Div>::new();
+
+    Effect::new(move |_| {
+        if let Some(menu) = snapshot.get() {
+            pos.set((menu.x, menu.y));
+        }
+    });
+
+    #[cfg(target_arch = "wasm32")]
+    Effect::new(move |_| {
+        let Some(menu) = snapshot.get() else {
+            return;
+        };
+        let Some(el) = menu_ref.get() else {
+            return;
+        };
+
+        // Measure the untransformed layout box; getBoundingClientRect is scaled
+        // by the opening animation and can underestimate the final menu size.
+        let width = f64::from(el.client_width()) + 2.0;
+        let height = f64::from(el.client_height()) + 2.0;
+        let window = web_sys::window().unwrap();
+        let viewport_width = window
+            .inner_width()
+            .ok()
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let viewport_height = window
+            .inner_height()
+            .ok()
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let margin = 8.0;
+        let anchor_x = f64::from(menu.x);
+        let anchor_y = f64::from(menu.y);
+
+        let mut left = anchor_x;
+        if left + width + margin > viewport_width {
+            left = anchor_x - width;
+        }
+        left = left
+            .max(margin)
+            .min((viewport_width - width - margin).max(margin));
+
+        let mut top = anchor_y;
+        if top + height + margin > viewport_height {
+            top = anchor_y - height;
+        }
+        top = top
+            .max(margin)
+            .min((viewport_height - height - margin).max(margin));
+
+        pos.set((left.round() as i32, top.round() as i32));
+    });
 
     view! {
         {move || snapshot.get().map(|m| {
@@ -46,8 +101,6 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             let is_eso = kk.is_eso();
             let is_cronjob = kk.is_cronjob();
             let is_node = kk.is_node();
-            let style = format!("left:{}px;top:{}px", m.x, m.y);
-
             // When the right-clicked row is part of a multi-selection, all
             // bulk-capable actions fire on every selected row.
             let rows_opt = table_rows.get_value();
@@ -279,7 +332,8 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                 <div class="ctx-scrim"
                     on:click=move |_| do_close()
                     on:contextmenu=move |e: leptos::ev::MouseEvent| { e.prevent_default(); do_close(); }></div>
-                <div class="ctx-menu" class:closing=move || closing.get() style=style>
+                <div class="ctx-menu" node_ref=menu_ref class:closing=move || closing.get()
+                    style=move || { let (x, y) = pos.get(); format!("left:{x}px;top:{y}px") }>
                     {is_bulk.then(|| view! {
                         <div class="ctx-item ctx-bulk-header">{targets.len()}" resources"</div>
                     })}

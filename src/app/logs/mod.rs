@@ -118,12 +118,20 @@ pub(crate) fn LogsView(
     });
 
     // Auto-scroll to the bottom on new lines while following.
+    //
+    // Run inside `request_animation_frame` rather than synchronously: the render
+    // effect that appends the new `<For>` child runs *after* this effect, so a
+    // synchronous `set_scroll_top(scroll_height())` would read the pre-insert
+    // height and leave the newest line just outside the viewport.
     #[cfg(target_arch = "wasm32")]
     Effect::new(move |_| {
         lines.get();
         if follow.get() {
             if let Some(el) = logs_ref.get_untracked() {
-                el.set_scroll_top(el.scroll_height());
+                let el2 = el.clone();
+                request_animation_frame(move || {
+                    el2.set_scroll_top(el2.scroll_height());
+                });
             }
         }
     });

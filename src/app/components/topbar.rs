@@ -48,10 +48,12 @@ pub(crate) fn Topbar() -> impl IntoView {
                 <SyncButton />
             </div>
             <div class="topbar-group topbar-health">
-                <FailingBadge />
-                <FluxFailingBadge />
                 <AlertsButton />
                 <AccessReviewButton />
+                // Conditional badges stay last so appearing failures never move
+                // the permanent health controls out from under the pointer.
+                <FailingBadge />
+                <FluxFailingBadge />
             </div>
             <div class="topbar-account"><Identity /></div>
         </header>

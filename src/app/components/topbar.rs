@@ -164,11 +164,15 @@ pub(crate) fn FluxFailingBadge() -> impl IntoView {
     // so `loaded` may never flip true — but `cached_count` is then also correctly 0.
     let loaded =
         Memo::new(move |_| ks_rows.with(|m| !m.is_empty()) || hr_rows.with(|m| !m.is_empty()));
+    let ks_count = Memo::new(move |_| {
+        ks_rows.with(|m| m.values().filter(|r| r.status == RowStatus::Error).count())
+    });
+    let hr_count = Memo::new(move |_| {
+        hr_rows.with(|m| m.values().filter(|r| r.status == RowStatus::Error).count())
+    });
     let count = Memo::new(move |_| {
         if loaded.get() {
-            let ks = ks_rows.with(|m| m.values().filter(|r| r.status == RowStatus::Error).count());
-            let hr = hr_rows.with(|m| m.values().filter(|r| r.status == RowStatus::Error).count());
-            ks + hr
+            ks_count.get() + hr_count.get()
         } else {
             cached_count.get()
         }
@@ -183,11 +187,20 @@ pub(crate) fn FluxFailingBadge() -> impl IntoView {
         {move || {
             let n = count.get();
             (n > 0).then(|| {
+                let label = if loaded.get() {
+                    match (hr_count.get(), ks_count.get()) {
+                        (hr, 0) => format!("HR {hr}"),
+                        (0, ks) => format!("KS {ks}"),
+                        (hr, ks) => format!("HR {hr} · KS {ks}"),
+                    }
+                } else {
+                    format!("{n} Flux")
+                };
                 let go = move |_| {
-                    let kind = if ks_rows.with(|m| m.values().any(|r| r.status == RowStatus::Error)) {
-                        ks_kind.get_untracked()
-                    } else {
+                    let kind = if hr_rows.with(|m| m.values().any(|r| r.status == RowStatus::Error)) {
                         hr_kind.get_untracked()
+                    } else {
+                        ks_kind.get_untracked()
                     };
                     if let Some(k) = kind {
                         selected_ns.set(None);
@@ -197,7 +210,7 @@ pub(crate) fn FluxFailingBadge() -> impl IntoView {
                 };
                 view! {
                     <button class="fluxbadge" on:click=go>
-                        {n} " Flux"
+                        {label}
                         <span class="tooltip">"Flux resources failing — click to view"</span>
                     </button>
                 }

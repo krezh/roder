@@ -71,7 +71,10 @@ fn is_toast_pod(pod: &Pod) -> bool {
     if status.and_then(|s| s.reason.as_deref()) == Some("Evicted") {
         return true;
     }
-    if let Some("Succeeded") = status.and_then(|s| s.phase.as_deref()) {
+    if matches!(
+        status.and_then(|s| s.phase.as_deref()),
+        Some("Succeeded" | "Failed")
+    ) {
         return true;
     }
     let cs = status
@@ -107,4 +110,31 @@ fn is_finished_job(job: &Job) -> bool {
         .unwrap_or(&[])
         .iter()
         .any(|c| matches!(c.type_.as_str(), "Complete" | "Failed") && c.status == "True")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use k8s_openapi::api::core::v1::PodStatus;
+
+    fn pod_in_phase(phase: &str) -> Pod {
+        Pod {
+            status: Some(PodStatus {
+                phase: Some(phase.to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn sweeps_terminally_failed_pods() {
+        assert!(is_toast_pod(&pod_in_phase("Failed")));
+    }
+
+    #[test]
+    fn does_not_sweep_running_or_pending_pods_by_phase() {
+        assert!(!is_toast_pod(&pod_in_phase("Running")));
+        assert!(!is_toast_pod(&pod_in_phase("Pending")));
+    }
 }

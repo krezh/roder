@@ -512,7 +512,7 @@ pub(crate) fn FailingBadge() -> impl IntoView {
                 view! {
                     <button class="failbadge" on:click=go
                         title="Pods failing — click to view">
-                        {n} " failing"
+                        {n} " Pods"
                     </button>
                 }
             })

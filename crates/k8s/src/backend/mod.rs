@@ -117,6 +117,11 @@ impl Backend {
         (*self.cluster.client()).clone()
     }
 
+    /// Verify that the Kubernetes API is reachable with the current identity.
+    pub async fn probe(&self) -> Result<String, K8sError> {
+        self.cluster.probe().await
+    }
+
     /// The browsable resource catalog as surfaced to the UI.
     pub fn kinds(&self) -> Vec<ResourceKind> {
         self.catalog

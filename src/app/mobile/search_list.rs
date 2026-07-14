@@ -13,7 +13,7 @@ use crate::app::mobile::bulk_bar::MobileBulkBar;
 use crate::app::mobile::row_card::{use_select_mode, CardFields, MobileRowCard};
 use crate::app::overlays::toast::Toast;
 use crate::app::state::{
-    open_logs, Catalog, ConnectionState, CtxMenu, DetailTarget, LogPods, LogTarget,
+    open_logs, Catalog, ConnectionState, Connectivity, CtxMenu, DetailTarget, LogPods, LogTarget,
     MultiKindSearch, OnlyProblems, ResourceFilter, TableRows, TableSelected, Tick,
 };
 use crate::app::table_logic;
@@ -135,9 +135,6 @@ pub(crate) fn MobileSearchList() -> impl IntoView {
                     for ev in batch {
                         match ev {
                             WatchEvent::Snapshot { columns, rows: r } => {
-                                if let Some(c) = conn {
-                                    c.set(None);
-                                }
                                 apply_event(
                                     kr,
                                     ent,
@@ -205,7 +202,7 @@ pub(crate) fn MobileSearchList() -> impl IntoView {
                             let probe = probe_url.clone();
                             leptos::task::spawn_local(async move {
                                 let msg = data::probe_error(probe).await;
-                                c.set(Some(msg));
+                                c.set(Connectivity::Error(msg));
                             });
                         }
                         set_timeout(

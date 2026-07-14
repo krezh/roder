@@ -31,12 +31,23 @@
   }
 
   .mobile-brand {
+    display: inline-flex;
+    align-items: center;
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: 0.1em;
     font-size: 0.95rem;
     color: var(--accent);
     cursor: pointer;
+
+    &.mobile-brand-connected {
+      color: var(--ok);
+    }
+
+    &.mobile-brand-checking {
+      color: var(--warn);
+      animation: connection-pulse 1.1s ease-in-out infinite;
+    }
 
     &.mobile-brand-disconnected {
       color: var(--error);

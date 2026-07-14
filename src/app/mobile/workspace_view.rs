@@ -14,8 +14,8 @@ use crate::app::mobile::bulk_bar::MobileBulkBar;
 use crate::app::mobile::row_card::{use_select_mode, CardFields, MobileRowCard};
 use crate::app::overlays::toast::Toast;
 use crate::app::state::{
-    open_logs, Catalog, CtxMenu, DetailTarget, LogPods, LogTarget, OnlyProblems, SortKey, Tick,
-    WorkspaceConf,
+    open_logs, Catalog, ConnectionState, Connectivity, CtxMenu, DetailTarget, LogPods, LogTarget,
+    OnlyProblems, SortKey, Tick, WorkspaceConf,
 };
 use crate::app::table_logic;
 use crate::app::util::predicate::KindKind;
@@ -25,6 +25,7 @@ use crate::data;
 pub(crate) fn MobileWorkspaceView() -> impl IntoView {
     let ws = expect_context::<WorkspaceConf>().0;
     let catalog = expect_context::<Catalog>().0;
+    let connection = expect_context::<ConnectionState>().0;
 
     let pane_rows: StoredValue<HashMap<String, RowMap>> = StoredValue::new(HashMap::new());
     let pane_loaded: StoredValue<HashMap<String, RwSignal<bool>>> =
@@ -62,6 +63,7 @@ pub(crate) fn MobileWorkspaceView() -> impl IntoView {
                 .map(|p| (p.kind_key.as_str(), p.namespace.as_deref()))
                 .collect::<Vec<_>>(),
         );
+        let probe_url = url.clone();
 
         let coalescer = Coalescer::new(move |batch: Vec<(String, WatchEvent)>| {
             for (key, event) in batch {
@@ -99,6 +101,10 @@ pub(crate) fn MobileWorkspaceView() -> impl IntoView {
             &url,
             move |key, event| coalescer.push((key, event)),
             move || {
+                let url = probe_url.clone();
+                leptos::task::spawn_local(async move {
+                    connection.set(Connectivity::Error(data::probe_error(url).await));
+                });
                 set_timeout(
                     move || reconnect.update(|n| *n += 1),
                     data::reconnect_delay(),

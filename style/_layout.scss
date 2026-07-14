@@ -40,6 +40,8 @@
 
   .brand {
     position: relative;
+    display: inline-flex;
+    align-items: center;
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: 0.16em;
@@ -58,10 +60,19 @@
     }
     &:hover .brand-tip { display: block; }
 
+    &.brand-connected {
+      color: var(--ok);
+    }
+
+    &.brand-checking {
+      color: var(--warn);
+      animation: connection-pulse 1.1s ease-in-out infinite;
+    }
+
     &.brand-disconnected {
       color: inherit;
 
-      span:not(.brand-tip) {
+      .brand-letter {
         color: var(--error);
         animation: brand-wave 2s ease-in-out infinite;
         animation-delay: calc(var(--i) * 0.15s);
@@ -318,6 +329,11 @@
 
 @keyframes brand-wave {
   0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+@keyframes connection-pulse {
+  0%, 100% { opacity: 0.35; }
   50% { opacity: 1; }
 }
 

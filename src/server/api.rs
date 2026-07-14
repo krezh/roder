@@ -57,6 +57,15 @@ fn talos_error(e: roder_talos::TalosError) -> Response {
     }
 }
 
+/// Authenticated end-to-end connectivity check against the Kubernetes API.
+pub async fn health(State(state): State<AppState>) -> Response {
+    let b = backend_or_return!(state);
+    match b.probe().await {
+        Ok(version) => Json(serde_json::json!({ "version": version })).into_response(),
+        Err(e) => bad_gateway(e),
+    }
+}
+
 /// Normalize an optional namespace query param, treating `""` as `None`.
 fn ns_filter(ns: &Option<String>) -> Option<&str> {
     ns.as_deref().filter(|s| !s.is_empty())

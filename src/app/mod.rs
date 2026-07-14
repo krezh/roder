@@ -40,10 +40,10 @@ use overlays::toast::{Toast, ToastView};
 use overlays::tree::ResourceTreeWindow;
 use overlays::AlertsPanel;
 use state::{
-    AccessReviewOpen, AlertsData, AlertsOpen, Catalog, ConnectionState, CtxMenu, ExecOpen,
-    ExecTarget, FilterFocus, LogPods, LogTarget, NavOpen, NsPaletteOpen, OnlyProblems, PaletteOpen,
-    PodModalTarget, ResourceFilter, ShortcutsOpen, TableRows, TableSelected, Tick, TreeOpen,
-    WorkspaceConf, WorkspaceConfig,
+    AccessReviewOpen, AlertsData, AlertsOpen, Catalog, ConnectionState, Connectivity, CtxMenu,
+    ExecOpen, ExecTarget, FilterFocus, LogPods, LogTarget, NavOpen, NsPaletteOpen, OnlyProblems,
+    PaletteOpen, PodModalTarget, ResourceFilter, ShortcutsOpen, TableRows, TableSelected, Tick,
+    TreeOpen, WorkspaceConf, WorkspaceConfig,
 };
 use views::resource::ResourceView;
 use views::search::SearchResultsView;
@@ -69,6 +69,37 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
             </body>
         </html>
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn check_connectivity(state: RwSignal<Connectivity>, generation: RwSignal<u32>) {
+    let Some(window) = web_sys::window() else {
+        state.set(Connectivity::Error("Browser window unavailable".into()));
+        return;
+    };
+    if !window.navigator().on_line() {
+        generation.update(|n| *n = n.wrapping_add(1));
+        state.set(Connectivity::Offline);
+        return;
+    }
+
+    let request_generation = generation.get_untracked().wrapping_add(1);
+    generation.set(request_generation);
+    if !matches!(state.get_untracked(), Connectivity::Connected) {
+        state.set(Connectivity::Checking);
+    }
+    leptos::task::spawn_local(async move {
+        let result = data::fetch_json::<serde_json::Value>("/api/health").await;
+        if generation.get_untracked() != request_generation {
+            return;
+        }
+        match result {
+            Ok(_) => state.set(Connectivity::Connected),
+            Err(error) => state.set(Connectivity::Error(format!(
+                "Cluster connection failed: {error}"
+            ))),
+        }
+    });
 }
 
 #[component]
@@ -152,9 +183,41 @@ pub fn App() -> impl IntoView {
     provide_context(Catalog(catalog));
     provide_context(ctx_menu);
     provide_context(requested_tab);
-    provide_context(ConnectionState(RwSignal::new(None::<String>)));
+    let connection = RwSignal::new(Connectivity::Checking);
+    provide_context(ConnectionState(connection));
     provide_context(TableSelected(StoredValue::new(None)));
     provide_context(TableRows(StoredValue::new(None)));
+
+    // Keep an end-to-end status alive independently of whichever view/SSE streams
+    // happen to be open. Browser network events update immediately; the periodic
+    // probe catches a reachable Roder server whose Kubernetes connection failed.
+    Effect::new(move |_| {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let generation = RwSignal::new(0u32);
+            check_connectivity(connection, generation);
+            set_interval(
+                move || check_connectivity(connection, generation),
+                std::time::Duration::from_secs(15),
+            );
+            let online = window_event_listener(ev::online, move |_| {
+                connection.set(Connectivity::Checking);
+                check_connectivity(connection, generation);
+            });
+            let offline = window_event_listener(ev::offline, move |_| {
+                generation.update(|n| *n = n.wrapping_add(1));
+                connection.set(Connectivity::Offline);
+            });
+            let focus = window_event_listener(ev::focus, move |_| {
+                check_connectivity(connection, generation)
+            });
+            on_cleanup(move || {
+                online.remove();
+                offline.remove();
+                focus.remove();
+            });
+        }
+    });
 
     // Namespace list shared across the topbar selector and all workspace pane dropdowns.
     // Fetched once here so individual panes don't each open a separate HTTP connection.

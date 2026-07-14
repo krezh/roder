@@ -7,7 +7,7 @@ use leptos::task::spawn_local;
 use roder_core::WatchEvent;
 
 use crate::app::events::{apply_event, RowMap, UidSet};
-use crate::app::state::{ConnectionState, SortKey};
+use crate::app::state::{ConnectionState, Connectivity, SortKey};
 use crate::data;
 
 /// How long an SSE burst accumulates before it's drained in one reactive flush.
@@ -107,11 +107,6 @@ pub(crate) fn use_sse_subscription(
     // `Applied` per pod) into a single reactive flush — see [`Coalescer`].
     let coalescer = Coalescer::new(move |batch: Vec<WatchEvent>| {
         for ev in batch {
-            if matches!(ev, WatchEvent::Snapshot { .. }) {
-                if let Some(c) = conn {
-                    c.set(None);
-                }
-            }
             apply_event(rows, entering, removing, columns, ev);
         }
     });
@@ -134,7 +129,7 @@ pub(crate) fn use_sse_subscription(
                     let url = probe_url.clone();
                     spawn_local(async move {
                         let msg = data::probe_error(url).await;
-                        c.set(Some(msg));
+                        c.set(Connectivity::Error(msg));
                     });
                 }
                 set_timeout(

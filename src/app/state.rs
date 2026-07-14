@@ -101,8 +101,28 @@ pub(crate) struct AlertsData(pub(crate) RwSignal<Option<Vec<FiringAlert>>>);
 
 /// `None` = SSE stream is live. `Some(msg)` = disconnected, with the HTTP status
 /// or network error that caused it (e.g. "401 Unauthorized", "Network error").
+#[derive(Clone, PartialEq, Eq)]
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub(crate) enum Connectivity {
+    Checking,
+    Connected,
+    Offline,
+    Error(String),
+}
+
+impl Connectivity {
+    pub(crate) fn message(&self) -> &str {
+        match self {
+            Self::Checking => "Checking cluster connection...",
+            Self::Connected => "Cluster connected",
+            Self::Offline => "Browser is offline",
+            Self::Error(message) => message,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
-pub(crate) struct ConnectionState(pub(crate) RwSignal<Option<String>>);
+pub(crate) struct ConnectionState(pub(crate) RwSignal<Connectivity>);
 
 /// Global text filter for resource search (used by search view).
 #[derive(Clone)]

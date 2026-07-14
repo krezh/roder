@@ -14,8 +14,8 @@ use crate::app::hooks::{table_window, use_table_state, Coalescer};
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::overlays::toast::Toast;
 use crate::app::state::{
-    open_logs, ConnectionState, CtxMenu, DetailTarget, LogPods, LogTarget, MultiKindSearch,
-    OnlyProblems, ResourceFilter, SortKey, TableRows, TableSelected, Tick,
+    open_logs, ConnectionState, Connectivity, CtxMenu, DetailTarget, LogPods, LogTarget,
+    MultiKindSearch, OnlyProblems, ResourceFilter, SortKey, TableRows, TableSelected, Tick,
 };
 #[cfg(target_arch = "wasm32")]
 use crate::app::util::history::history_back;
@@ -267,9 +267,6 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                             // (otherwise the per-kind buffer's safety-net timeouts for
                             // deletes would orphan entries in the parent).
                             Snapshot { columns, rows: r } => {
-                                if let Some(c) = conn {
-                                    c.set(None);
-                                }
                                 apply_event(
                                     kr,
                                     ent,
@@ -329,7 +326,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                             let probe = probe_url.clone();
                             leptos::task::spawn_local(async move {
                                 let msg = data::probe_error(probe).await;
-                                c.set(Some(msg));
+                                c.set(Connectivity::Error(msg));
                             });
                         }
                         set_timeout(

@@ -47,6 +47,7 @@ async fn main() {
     // App pages + private API, gated behind a valid session.
     let protected = Router::new()
         .route("/api/me", get(handlers::me))
+        .route("/api/health", get(api::health))
         .route("/api/overview", get(api::overview))
         .route("/api/features", get(api::features))
         .route("/api/talos/node", get(api::talos_node))

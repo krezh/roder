@@ -6,12 +6,15 @@ use roder_core::{ResourceKind, WatchEvent};
 use crate::app::components::kind_table::KindTable;
 use crate::app::events::RowMap;
 use crate::app::hooks::Coalescer;
-use crate::app::state::{Catalog, DetailTarget, PaneConfig, WorkspaceConf};
+use crate::app::state::{
+    Catalog, ConnectionState, Connectivity, DetailTarget, PaneConfig, WorkspaceConf,
+};
 use crate::data;
 
 #[component]
 pub(crate) fn WorkspaceView() -> impl IntoView {
     let ws = expect_context::<WorkspaceConf>().0;
+    let connection = expect_context::<ConnectionState>().0;
 
     // One row signal per pane (keyed by kind_key). Non-reactive storage so the
     // multi-watch Effect can write into individual signals without loops.
@@ -50,6 +53,7 @@ pub(crate) fn WorkspaceView() -> impl IntoView {
                 .map(|p| (p.kind_key.as_str(), p.namespace.as_deref()))
                 .collect::<Vec<_>>(),
         );
+        let probe_url = url.clone();
 
         // Coalesce the multiplexed burst (one `Applied` per pod per metrics scrape,
         // across every pane) into a single synchronous drain, so each pane's
@@ -93,6 +97,10 @@ pub(crate) fn WorkspaceView() -> impl IntoView {
             &url,
             move |key, event| coalescer.push((key, event)),
             move || {
+                let url = probe_url.clone();
+                leptos::task::spawn_local(async move {
+                    connection.set(Connectivity::Error(data::probe_error(url).await));
+                });
                 set_timeout(
                     move || reconnect.update(|n| *n += 1),
                     data::reconnect_delay(),

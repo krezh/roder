@@ -16,6 +16,41 @@ use crate::app::state::{
 use crate::app::util::format::{cluster_usage_pct, pct};
 use crate::data;
 
+const FAILURE_BADGE_ANIMATION_MS: u64 = 440;
+
+fn use_animated_badge<T: Clone + Send + Sync + 'static>(
+    value: Memo<Option<T>>,
+) -> (RwSignal<Option<T>>, RwSignal<bool>) {
+    let snapshot = RwSignal::new(None::<T>);
+    let closing = RwSignal::new(false);
+    let generation = RwSignal::new(0u64);
+
+    Effect::new(move |_| match value.get() {
+        Some(value) => {
+            generation.update(|n| *n += 1);
+            snapshot.set(Some(value));
+            closing.set(false);
+        }
+        None if snapshot.get_untracked().is_some() && !closing.get_untracked() => {
+            generation.update(|n| *n += 1);
+            let current = generation.get_untracked();
+            closing.set(true);
+            set_timeout(
+                move || {
+                    if closing.get_untracked() && generation.get_untracked() == current {
+                        snapshot.set(None);
+                        closing.set(false);
+                    }
+                },
+                std::time::Duration::from_millis(FAILURE_BADGE_ANIMATION_MS),
+            );
+        }
+        None => {}
+    });
+
+    (snapshot, closing)
+}
+
 #[component]
 pub(crate) fn Topbar() -> impl IntoView {
     let selected_ns = expect_context::<RwSignal<Option<String>>>();
@@ -182,20 +217,25 @@ pub(crate) fn FluxFailingBadge() -> impl IntoView {
             data::storage_set("roder.flux_failing_count", &count.get().to_string());
         }
     });
+    let badge_label = Memo::new(move |_| {
+        let n = count.get();
+        (n > 0).then(|| {
+            if loaded.get() {
+                match (hr_count.get(), ks_count.get()) {
+                    (hr, 0) => format!("HR {hr}"),
+                    (0, ks) => format!("KS {ks}"),
+                    (hr, ks) => format!("HR {hr} · KS {ks}"),
+                }
+            } else {
+                format!("{n} Flux")
+            }
+        })
+    });
+    let (badge_snapshot, badge_closing) = use_animated_badge(badge_label);
 
     view! {
         {move || {
-            let n = count.get();
-            (n > 0).then(|| {
-                let label = if loaded.get() {
-                    match (hr_count.get(), ks_count.get()) {
-                        (hr, 0) => format!("HR {hr}"),
-                        (0, ks) => format!("KS {ks}"),
-                        (hr, ks) => format!("HR {hr} · KS {ks}"),
-                    }
-                } else {
-                    format!("{n} Flux")
-                };
+            badge_snapshot.get().map(|label| {
                 let go = move |_| {
                     let kind = if hr_rows.with(|m| m.values().any(|r| r.status == RowStatus::Error)) {
                         hr_kind.get_untracked()
@@ -209,7 +249,7 @@ pub(crate) fn FluxFailingBadge() -> impl IntoView {
                     }
                 };
                 view! {
-                    <button class="fluxbadge" on:click=go>
+                    <button class="fluxbadge" class:closing=move || badge_closing.get() on:click=go>
                         {label}
                         <span class="tooltip">"Flux resources failing — click to view"</span>
                     </button>
@@ -510,11 +550,15 @@ pub(crate) fn FailingBadge() -> impl IntoView {
             data::storage_set("roder.failing_count", &count.get().to_string());
         }
     });
+    let badge_count = Memo::new(move |_| {
+        let n = count.get();
+        (n > 0).then_some(n)
+    });
+    let (badge_snapshot, badge_closing) = use_animated_badge(badge_count);
 
     view! {
         {move || {
-            let n = count.get();
-            (n > 0).then(|| {
+            badge_snapshot.get().map(|n| {
                 let go = move |_| {
                     if let Some(pk) = pod_kind.get_untracked() {
                         selected_ns.set(None);
@@ -523,7 +567,7 @@ pub(crate) fn FailingBadge() -> impl IntoView {
                     }
                 };
                 view! {
-                    <button class="failbadge" on:click=go
+                    <button class="failbadge" class:closing=move || badge_closing.get() on:click=go
                         title="Pods failing — click to view">
                         {n} " Pods"
                     </button>

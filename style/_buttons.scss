@@ -83,6 +83,44 @@
   cursor: pointer;
 }
 
+@keyframes failure-badge-spring {
+  0%   { opacity: 0; transform: scale(0); }
+  55%  { opacity: 1; transform: scale(1.14); }
+  72%  { transform: scale(0.94); }
+  86%  { transform: scale(1.04); }
+  94%  { transform: scale(0.99); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes failure-badge-spring-out {
+  0%   { opacity: 1; transform: scale(1); }
+  6%   { transform: scale(0.99); }
+  14%  { transform: scale(1.04); }
+  28%  { transform: scale(0.94); }
+  45%  { opacity: 1; transform: scale(1.14); }
+  100% { opacity: 0; transform: scale(0); }
+}
+
+.fluxbadge,
+.failbadge {
+  animation: failure-badge-spring 0.44s linear 1;
+  transform-origin: center;
+
+  &.closing {
+    animation: failure-badge-spring-out 0.44s linear 1 forwards;
+    pointer-events: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fluxbadge,
+  .failbadge {
+    animation: none;
+
+    &.closing { display: none; }
+  }
+}
+
 // Cluster-wide failing Flux resource count; clicking jumps to Kustomizations or HelmReleases.
 .fluxbadge {
   background: color-mix(in srgb, var(--warn) 16%, transparent);

@@ -40,11 +40,11 @@ talos:
     enabled: false
     readerGroups: []
   # The Talos ServiceAccount role(s) roder's ServiceAccount requests — this is
-  # the single knob controlling what roder can actually do against Talos.
-  # os:reader is read-only; add os:admin (Talos has no intermediate role) to
-  # also permit the mutations/config visibility gated by actions/config above.
-  roles:
-    - os:reader
+  # the single knob controlling what roder can actually do against Talos. Must
+  # be set explicitly; e.g. os:reader for read-only, or os:admin (Talos has no
+  # intermediate role) to also permit the mutations/config visibility gated by
+  # actions/config above.
+  roles: []
 
 # ClusterRole + binding for roder's ServiceAccount, granting the read-only
 # cluster metadata roder needs at startup: API discovery and read/watch on CRDs

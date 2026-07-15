@@ -17,7 +17,12 @@ const RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
 impl Backend {
     /// Cordon `name`, then evict every pod scheduled on it except
     /// DaemonSet-owned and mirror (static) pods, which the API can't evict.
-    pub async fn drain(&self, key: &str, name: &str) -> Result<DrainSummary, K8sError> {
+    ///
+    /// Unless `force` is set, refuses to touch a node running unmanaged pods
+    /// or pods with `emptyDir` volumes (mirroring `kubectl drain`'s default
+    /// safety refusal, which normally requires `--force`/`--delete-emptydir-data`
+    /// to override).
+    pub async fn drain(&self, key: &str, name: &str, force: bool) -> Result<DrainSummary, K8sError> {
         self.cordon(key, name, true).await?;
 
         let pod_api: Api<Pod> = Api::all(self.client());
@@ -27,17 +32,19 @@ impl Backend {
         let mut summary = DrainSummary::default();
         let deadline = std::time::Instant::now() + DRAIN_BUDGET;
 
-        for pod in &pods.items {
-            if let Some(reason) = unsafe_drain_blocker(pod) {
-                summary.failed.push(format!(
-                    "{}: {reason}",
-                    pod.metadata.name.as_deref().unwrap_or("unknown pod")
-                ));
+        if !force {
+            for pod in &pods.items {
+                if let Some(reason) = unsafe_drain_blocker(pod) {
+                    summary.failed.push(format!(
+                        "{}: {reason}",
+                        pod.metadata.name.as_deref().unwrap_or("unknown pod")
+                    ));
+                }
             }
-        }
-        if !summary.failed.is_empty() {
-            summary.skipped = pods.items.len();
-            return Ok(summary);
+            if !summary.failed.is_empty() {
+                summary.skipped = pods.items.len();
+                return Ok(summary);
+            }
         }
 
         for pod in pods.items.iter().filter(|p| is_evictable(p)) {

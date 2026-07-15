@@ -640,7 +640,7 @@ pub async fn action(
             .map(String::from);
         let mut drain_summary = None;
         if power_action && req.drain.unwrap_or(false) {
-            match backend.drain(&node_key, node).await {
+            match backend.drain(&node_key, node, false).await {
                 Ok(summary) if summary.failed.is_empty() => drain_summary = Some(summary),
                 Ok(summary) => {
                     if !was_cordoned {
@@ -734,7 +734,7 @@ pub async fn action(
         let (Some(key), Some(name)) = (req.key.as_deref(), req.name.as_deref()) else {
             return (StatusCode::BAD_REQUEST, "missing key or name").into_response();
         };
-        return match b.drain(key, name).await {
+        return match b.drain(key, name, req.force.unwrap_or(false)).await {
             Ok(summary) => {
                 (StatusCode::OK, serde_json::to_string(&summary).unwrap()).into_response()
             }

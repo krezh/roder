@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.24](https://github.com/krezh/roder/compare/0.1.23...0.1.24) (2026-07-15)
+
+
+### Features
+
+* **app:** auto-reload the client when the server redeploys a newer build ([de4c84d](https://github.com/krezh/roder/commit/de4c84d603340930ae87cb050335fde6026e60ff))
+
+
+### Bug Fixes
+
+* **app:** satisfy newer clippy lints in the metrics chart animator ([9130aa7](https://github.com/krezh/roder/commit/9130aa71eb6d606a86c84898f3870ebf84fb8304))
+* **helm:** drop default os:reader for talos.roles ([99a9a6b](https://github.com/krezh/roder/commit/99a9a6b5ff9e2137967d357b7e4ecb6978b911c9))
+* **helm:** make the Talos ServiceAccount role fully configurable ([e49a995](https://github.com/krezh/roder/commit/e49a99507202139da472e9c2e6803f78902d337a))
+
 ## [0.1.23](https://github.com/krezh/roder/compare/0.1.22...0.1.23) (2026-07-15)
 
 

@@ -1,5 +1,61 @@
 # Changelog
 
+## [0.1.23](https://github.com/krezh/roder/compare/0.1.22...0.1.23) (2026-07-15)
+
+
+### Features
+
+* **container:** update image ghcr.io/rust-lang/rust (1.96.1 ➔ 1.97.0) ([#79](https://github.com/krezh/roder/issues/79)) ([3101172](https://github.com/krezh/roder/commit/31011720b9dea2de8f25bd9a7db6205723c40117))
+* **details:** improve graph visuals ([cab6853](https://github.com/krezh/roder/commit/cab6853707fb10698083915783bcd2faf3160120))
+* **details:** Split the details menu metrics into separate stacked CPU and Memory graphs ([c511ad5](https://github.com/krezh/roder/commit/c511ad5a3aac05b6d390ec2206f4eba3aee72733))
+* **gui:** Animate failure badges with spring transitions ([d4631f8](https://github.com/krezh/roder/commit/d4631f8b0757035dce1647022a989ae8e4ff6a8e))
+* **gui:** Make the brand reflect live cluster connectivity ([3522479](https://github.com/krezh/roder/commit/352247993456d15f51bfe0537fc744d549427260))
+* **mobile:** hold to multi-select, bigger touch/text scale, match new panel style ([5a7bdc4](https://github.com/krezh/roder/commit/5a7bdc41833a52adcc5ec518a124d8fd518c71df))
+* **nodes:** add cordon/uncordon actions ([75cb2e1](https://github.com/krezh/roder/commit/75cb2e159f2c98eeb2cd548737af47f4129a8f97))
+* **nodes:** add drain action ([cf7fab4](https://github.com/krezh/roder/commit/cf7fab4010e5a5cb5f2986a2c64ce3261052a78b))
+* **nodes:** add node shell via privileged debug pod ([e4cfbea](https://github.com/krezh/roder/commit/e4cfbeac5dc8d8a502087011568fff792c9eaba0))
+* **resources:** add RBAC access review ([6c50a70](https://github.com/krezh/roder/commit/6c50a70bbaa8441cde204ebbc646d88dd65e2cf3))
+* **style:** improve sidebar ([2771a37](https://github.com/krezh/roder/commit/2771a37c92ed89634938bcdbf15f5d9312835be5))
+* **style:** improve style of status boxes ([d4e35c0](https://github.com/krezh/roder/commit/d4e35c09c111772323793e151351255840130afb))
+* **style:** improve topusage display with visual progress bars and accessibility enhancements ([2314e9c](https://github.com/krezh/roder/commit/2314e9c658dafbec3e8e04fc5b12893d3368133f))
+* **talos:** add node diagnostics and actions ([8f0be82](https://github.com/krezh/roder/commit/8f0be82c8cbd3e2e717715fcd732d8129d3906af))
+* **talos:** complete integrations ([6e88e8e](https://github.com/krezh/roder/commit/6e88e8ef48586cfa042843fb9ed6f61ad9cf4b07))
+* **talos:** harden integration ([579b267](https://github.com/krezh/roder/commit/579b2672b3621fef8878936bbcd877b3387fb998))
+* **talos:** integrate Talos machine API for node status ([c8d28b6](https://github.com/krezh/roder/commit/c8d28b641c3c87ebf61fccb4dbf706de399a6143))
+* **ui:** animate details panel closing ([6d38099](https://github.com/krezh/roder/commit/6d3809971c54326c8b0f2d09d377074c7e41fb9f))
+* **workloads:** add evict pod action ([a454453](https://github.com/krezh/roder/commit/a4544532683986948a480a056e4754223950a945))
+
+
+### Bug Fixes
+
+* **cargo:** update rust crate rustls (0.23.41 ➔ 0.23.42) ([#81](https://github.com/krezh/roder/issues/81)) ([6fd740c](https://github.com/krezh/roder/commit/6fd740c40ffdf442888ec0cf0ef4c56e509aea79))
+* **clippy:** clippy error ([c3dbefb](https://github.com/krezh/roder/commit/c3dbefbe9ac4f62f2cedf5d05f4415364337d23a))
+* **container:** update image gcr.io/distroless/cc-debian13 (a017e74 ➔ bc0f6c3) ([#77](https://github.com/krezh/roder/issues/77)) ([5a02786](https://github.com/krezh/roder/commit/5a027863d61ec4ff9d83297e7bf688e34c553dcd))
+* **container:** update image gcr.io/distroless/cc-debian13 (bc0f6c3 ➔ ed7c407) ([#83](https://github.com/krezh/roder/issues/83)) ([4cd56d5](https://github.com/krezh/roder/commit/4cd56d5c5f4948e7e8209e55e97e0e7a9755fa11))
+* **container:** update image ghcr.io/rust-lang/rust (44637ff ➔ 8e117ca) ([#84](https://github.com/krezh/roder/issues/84)) ([80f26bf](https://github.com/krezh/roder/commit/80f26bfa467bec4f896f9899eef38fa81c089f24))
+* **gui:** Align pod and Flux failure badge labels ([cd400de](https://github.com/krezh/roder/commit/cd400dea4cc5e52bc7c1922bc7653bf28e853012))
+* **gui:** Auto-refresh namespace list so it updates without a browser reload ([2da21c0](https://github.com/krezh/roder/commit/2da21c0d4a325477e82a8b8e8fea9b218ea9d914))
+* **gui:** Clarify Flux failure counts and navigation ([6ea7039](https://github.com/krezh/roder/commit/6ea7039613ecd7de45aa8b1427b817452a6e4143))
+* **gui:** Improve logs sizing and Flux failure navigation ([dc357f5](https://github.com/krezh/roder/commit/dc357f5beed1995278fa404ce89f8032a7e18155))
+* **gui:** Keep context menus within the viewport ([5eebcb2](https://github.com/krezh/roder/commit/5eebcb2b048e811fc77cbc59d0a2fcf9a49a0f00))
+* **gui:** Keep temporary health badges after permanent controls ([a5b294e](https://github.com/krezh/roder/commit/a5b294ede6ea6f5f98a6f2fb415fe45f175cc5e5))
+* **k8s:** Back off watcher retries during cluster outages ([700cfb0](https://github.com/krezh/roder/commit/700cfb0c3cfbdf22b71eafa717ac7ea469ba9b87))
+* **k8s:** Sweep terminally failed pods ([a0e790b](https://github.com/krezh/roder/commit/a0e790b9f372c224beb0ef5a04028c2f7f0077bb))
+* **logs:** Fix log follow not scrolling to newest line ([e80adb6](https://github.com/krezh/roder/commit/e80adb6d88772965e43aca1943074bf9d5334d5c))
+* **table:** fix numeric trend arrows ([a2525ce](https://github.com/krezh/roder/commit/a2525cec0368e89a2b43c7401eeb7cccda272c0b))
+
+
+### Styles
+
+* **details:** improve content hierarchy ([cffa846](https://github.com/krezh/roder/commit/cffa84666374707d354cb9508fd636345fcfb557))
+* elevate/blur/box panels, unify sidebar+panel color ([c82c1a5](https://github.com/krezh/roder/commit/c82c1a51c253c336b7706acf687f5529872fd1df))
+* remove vertical cell borders ([67de60a](https://github.com/krezh/roder/commit/67de60a05900dc44fb38750d73c065faf5dd1108))
+
+
+### Code Refactoring
+
+* reorganize topbar and enhance visual hierarchy ([bf56d07](https://github.com/krezh/roder/commit/bf56d07579f24afd91729d1f1fb0cd96f261a61a))
+
 ## [0.1.22](https://github.com/krezh/roder/compare/0.1.21...0.1.22) (2026-07-08)
 
 

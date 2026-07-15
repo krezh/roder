@@ -17,8 +17,9 @@ serviceAccount:
 
 # Native Talos in-cluster API access. The cluster machine configuration must
 # enable `machine.features.kubernetesTalosAPIAccess` for this namespace and
-# permit `os:reader`. Talos reconciles the custom ServiceAccount below into a
-# short-lived client configuration; no external/admin talosconfig is used.
+# permit whatever roles are listed below. Talos reconciles the custom
+# ServiceAccount below into a short-lived client configuration; no
+# external/admin talosconfig is used.
 talos:
   enabled: false
   # Empty permits any authenticated Roder user to read Talos status. Set this
@@ -26,14 +27,22 @@ talos:
   readerGroups: []
   actions:
     # Mutations are disabled unless this is true and the user belongs to one of
-    # operatorGroups. Enabling this also grants the Talos os:operator role.
+    # operatorGroups. This only gates roder's own authorization check — the
+    # Talos ServiceAccount still needs a role capable of mutating actions (Talos
+    # has no role between os:reader and os:admin, so add os:admin to `roles`
+    # below).
     enabled: false
     operatorGroups: []
   config:
-    # Machine configuration fingerprints and redacted diffs require os:admin.
-    # Keep this disabled unless the additional visibility is explicitly needed.
+    # Machine configuration fingerprints and redacted diffs require the
+    # ServiceAccount to hold os:admin (add it to `roles` below) as well as
+    # roder's own authorization check to be enabled here.
     enabled: false
     readerGroups: []
+  # The Talos ServiceAccount role(s) roder's ServiceAccount requests — this is
+  # the single knob controlling what roder can actually do against Talos.
+  # os:reader is read-only; add os:admin (Talos has no intermediate role) to
+  # also permit the mutations/config visibility gated by actions/config above.
   roles:
     - os:reader
 

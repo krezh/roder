@@ -138,7 +138,7 @@ fn MetricGraph(
         });
         on_cleanup(move || {
             animator.update_value(|animator| {
-                if let Some(animator) = (&mut **animator).take() {
+                if let Some(animator) = (**animator).take() {
                     animator.stop();
                 }
             });
@@ -162,9 +162,13 @@ const GRAPH_POINTS: usize = 14;
 const SAMPLE_INTERVAL_MS: f64 = 15_000.0;
 
 #[cfg(target_arch = "wasm32")]
+type FrameCallback =
+    std::rc::Rc<std::cell::RefCell<Option<wasm_bindgen::closure::Closure<dyn FnMut(f64)>>>>;
+
+#[cfg(target_arch = "wasm32")]
 struct GraphAnimator {
     state: std::rc::Rc<std::cell::RefCell<GraphState>>,
-    frame: std::rc::Rc<std::cell::RefCell<Option<wasm_bindgen::closure::Closure<dyn FnMut(f64)>>>>,
+    frame: FrameCallback,
     frame_id: std::rc::Rc<std::cell::Cell<i32>>,
     mousemove: wasm_bindgen::closure::Closure<dyn FnMut(web_sys::MouseEvent)>,
     mouseleave: wasm_bindgen::closure::Closure<dyn FnMut(web_sys::MouseEvent)>,
@@ -231,9 +235,7 @@ impl GraphAnimator {
             format_value,
             value,
         }));
-        let frame: std::rc::Rc<
-            std::cell::RefCell<Option<wasm_bindgen::closure::Closure<dyn FnMut(f64)>>>,
-        > = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let frame: FrameCallback = std::rc::Rc::new(std::cell::RefCell::new(None));
         let frame_id = std::rc::Rc::new(std::cell::Cell::new(0));
         let state_for_frame = state.clone();
         let frame_for_frame = frame.clone();

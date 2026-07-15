@@ -10,7 +10,10 @@ pub(crate) struct ConfirmButton {
 }
 
 impl ConfirmButton {
-    pub(crate) fn new(label: impl Into<String>, on_click: impl Fn() + Send + Sync + 'static) -> Self {
+    pub(crate) fn new(
+        label: impl Into<String>,
+        on_click: impl Fn() + Send + Sync + 'static,
+    ) -> Self {
         Self {
             label: label.into(),
             on_click: std::sync::Arc::new(on_click),

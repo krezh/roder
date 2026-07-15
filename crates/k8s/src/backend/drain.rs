@@ -22,7 +22,12 @@ impl Backend {
     /// or pods with `emptyDir` volumes (mirroring `kubectl drain`'s default
     /// safety refusal, which normally requires `--force`/`--delete-emptydir-data`
     /// to override).
-    pub async fn drain(&self, key: &str, name: &str, force: bool) -> Result<DrainSummary, K8sError> {
+    pub async fn drain(
+        &self,
+        key: &str,
+        name: &str,
+        force: bool,
+    ) -> Result<DrainSummary, K8sError> {
         self.cordon(key, name, true).await?;
 
         let pod_api: Api<Pod> = Api::all(self.client());

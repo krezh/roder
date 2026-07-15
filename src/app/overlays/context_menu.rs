@@ -510,15 +510,21 @@ fn run_drain(
                 } else {
                     show_toast_detail(
                         toast,
-                        format!("Drain of {name} left {} pod(s) failed", summary.failed.len()),
+                        format!(
+                            "Drain of {name} left {} pod(s) failed",
+                            summary.failed.len()
+                        ),
                         Some(summary.failed.join("\n")),
                         ToastKind::Err,
                     );
                 }
             }
-            Err(e) => {
-                show_toast_detail(toast, format!("Drain of {name} failed"), Some(e), ToastKind::Err)
-            }
+            Err(e) => show_toast_detail(
+                toast,
+                format!("Drain of {name} failed"),
+                Some(e),
+                ToastKind::Err,
+            ),
         }
     });
 }

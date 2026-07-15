@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use crate::{targeted, TalosError};
+use crate::request::targeted;
+use crate::TalosError;
 use tonic::codegen::http::uri::PathAndQuery;
 use tonic::transport::Channel;
 

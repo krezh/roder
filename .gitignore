@@ -5,6 +5,7 @@
 .envrc.local
 result
 result-*
+docs
 
 # cargo-leptos build output
 /crates/app/pkg

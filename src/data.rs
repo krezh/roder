@@ -139,6 +139,7 @@ pub struct SseHandle {
     _on_message: wasm_bindgen::closure::Closure<dyn FnMut(web_sys::MessageEvent)>,
     _on_error: Option<wasm_bindgen::closure::Closure<dyn FnMut(web_sys::Event)>>,
     _on_eof: Option<wasm_bindgen::closure::Closure<dyn FnMut(web_sys::MessageEvent)>>,
+    _on_version: Option<wasm_bindgen::closure::Closure<dyn FnMut(web_sys::MessageEvent)>>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -162,6 +163,25 @@ pub fn reconnect_delay() -> std::time::Duration {
     #[cfg(not(target_arch = "wasm32"))]
     let ms = BASE_MS;
     std::time::Duration::from_millis(ms)
+}
+
+/// Attach a listener for the `version` named SSE event (see `version_event`
+/// in `src/server/api.rs`) that forwards its payload to
+/// `crate::version::on_server_version`, which reloads the tab on a mismatch.
+#[cfg(target_arch = "wasm32")]
+fn attach_version_listener(
+    es: &web_sys::EventSource,
+) -> wasm_bindgen::closure::Closure<dyn FnMut(web_sys::MessageEvent)> {
+    use wasm_bindgen::closure::Closure;
+    use wasm_bindgen::JsCast;
+
+    let cb = Closure::wrap(Box::new(move |e: web_sys::MessageEvent| {
+        if let Some(txt) = e.data().as_string() {
+            crate::version::on_server_version(&txt);
+        }
+    }) as Box<dyn FnMut(web_sys::MessageEvent)>);
+    let _ = es.add_event_listener_with_callback("version", cb.as_ref().unchecked_ref());
+    cb
 }
 
 /// Like [`subscribe_with_error`] but calls `on_error` when the EventSource fires an error
@@ -198,11 +218,13 @@ where
         }
     }) as Box<dyn FnMut(web_sys::Event)>);
     es.set_onerror(Some(err_cb.as_ref().unchecked_ref()));
+    let version_cb = attach_version_listener(&es);
     Some(SseHandle {
         es,
         _on_message: cb,
         _on_error: Some(err_cb),
         _on_eof: None,
+        _on_version: Some(version_cb),
     })
 }
 
@@ -236,11 +258,13 @@ where
         }
     }) as Box<dyn FnMut(web_sys::Event)>);
     es.set_onerror(Some(err_cb.as_ref().unchecked_ref()));
+    let version_cb = attach_version_listener(&es);
     Some(SseHandle {
         es,
         _on_message: cb,
         _on_error: Some(err_cb),
         _on_eof: None,
+        _on_version: Some(version_cb),
     })
 }
 
@@ -281,6 +305,7 @@ where
         _on_message: cb,
         _on_error: None,
         _on_eof: Some(eof),
+        _on_version: None,
     })
 }
 

@@ -414,6 +414,10 @@ pub async fn watch(State(state): State<AppState>, Query(q): Query<WatchQuery>) -
         columns: (**columns.load()).clone(),
         rows: handle.snapshot,
     };
+    // Suppressed in dev mode: cargo-leptos watch's own hot-reload already
+    // owns this concern there, and dev builds don't have a stable hash.
+    let version =
+        tokio_stream::iter((!state.config.dev_mode).then(|| version_event(&state.asset_version)));
     let init = tokio_stream::once(sse_event(&snapshot));
     // On broadcast lag (slow consumer), re-read the current state and send a
     // fresh Snapshot so the client gets a consistent view instead of silently
@@ -437,7 +441,7 @@ pub async fn watch(State(state): State<AppState>, Query(q): Query<WatchQuery>) -
             }
         }
     });
-    let stream = init.chain(live);
+    let stream = version.chain(init).chain(live);
 
     Sse::new(stream)
         .keep_alive(KeepAlive::default())
@@ -479,6 +483,13 @@ pub async fn watch_multi(
     type PaneStream =
         std::pin::Pin<Box<dyn futures::Stream<Item = Result<SseEvent, Infallible>> + Send>>;
     let mut streams: Vec<PaneStream> = Vec::new();
+
+    // Suppressed in dev mode — see the comment in `watch`.
+    if !state.config.dev_mode {
+        streams.push(Box::pin(tokio_stream::once(version_event(
+            &state.asset_version,
+        ))));
+    }
 
     for (key, ns) in pane_specs {
         let handle = match b.subscribe(&key, ns, None).await {
@@ -1041,4 +1052,28 @@ async fn exec_session(socket: axum::extract::ws::WebSocket, b: Arc<Backend>, q: 
 /// Serves the xterm.js terminal page loaded in the exec overlay iframe.
 pub async fn terminal_page() -> impl IntoResponse {
     axum::response::Html(include_str!("terminal.html"))
+}
+
+/// The first event on every watch/watch-multi SSE connection: the server's
+/// current build hash, so an already-open tab can detect a redeploy (see
+/// `src/version.rs` on the client side). Callers suppress this in dev mode.
+fn version_event(asset_version: &str) -> Result<SseEvent, Infallible> {
+    Ok(SseEvent::default().event("version").data(asset_version))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::to_bytes;
+
+    #[tokio::test]
+    async fn version_event_serializes_as_named_sse_event() {
+        let ev = version_event("abc123").unwrap();
+        let stream = tokio_stream::once(Ok::<_, Infallible>(ev));
+        let resp = Sse::new(stream).into_response();
+        let body = to_bytes(resp.into_body(), 1024).await.unwrap();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert!(text.contains("event: version"), "got: {text}");
+        assert!(text.contains("data: abc123"), "got: {text}");
+    }
 }

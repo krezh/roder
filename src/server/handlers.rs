@@ -471,6 +471,7 @@ mod tests {
     fn empty_state(config: Arc<ServerConfig>) -> AppState {
         AppState {
             leptos_options: empty_leptos_options(),
+            asset_version: Arc::from("test-version"),
             config,
             provider: None,
             backend: Arc::new(RwLock::new(None)),

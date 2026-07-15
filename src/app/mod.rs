@@ -49,8 +49,36 @@ use views::resource::ResourceView;
 use views::search::SearchResultsView;
 use views::workspace::WorkspaceView;
 
+/// Set once at startup (`main.rs`) from `AppState::asset_version` — the
+/// build-time hash embedded into every SSR page so a hydrated tab can detect
+/// when the server it's talking to has been redeployed. A module-level
+/// static, not a `shell` parameter, because `shell` must keep the exact
+/// `fn(LeptosOptions) -> impl IntoView` signature that
+/// `leptos_axum::file_and_error_handler` requires.
+#[cfg(feature = "ssr")]
+static ASSET_VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Called once at startup from `main.rs`.
+#[cfg(feature = "ssr")]
+pub fn set_asset_version(v: String) {
+    let _ = ASSET_VERSION.set(v);
+}
+
+/// Empty on the wasm/hydrate build, where `shell` is compiled but never called.
+fn asset_version() -> String {
+    #[cfg(feature = "ssr")]
+    {
+        ASSET_VERSION.get().cloned().unwrap_or_default()
+    }
+    #[cfg(not(feature = "ssr"))]
+    {
+        String::new()
+    }
+}
+
 /// The HTML document shell rendered on the server.
 pub fn shell(options: LeptosOptions) -> impl IntoView {
+    let asset_version = asset_version();
     view! {
         <!DOCTYPE html>
         <html lang="en">
@@ -58,6 +86,7 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                 <meta charset="utf-8" />
                 <meta name="viewport" content="width=device-width, initial-scale=1" />
                 <meta name="color-scheme" content="dark light" />
+                <meta name="roder-asset-version" content=asset_version />
                 <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
                 <AutoReload options=options.clone() />
                 <HydrationScripts options=options.clone() />

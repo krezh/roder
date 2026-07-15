@@ -6,6 +6,7 @@ pub mod config;
 pub mod handlers;
 pub mod session;
 
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
 use axum::extract::FromRef;
@@ -16,11 +17,26 @@ use tokio::sync::{Mutex, RwLock};
 
 pub use config::ServerConfig;
 
+/// Deterministically hash the built WASM bundle's bytes so a redeploy (which
+/// always changes these bytes) yields a new value, while an unchanged image
+/// restarting yields the same one. `DefaultHasher` (unlike `HashMap`'s
+/// `RandomState`) is not randomized per-process — same input always hashes
+/// the same, which is the property this depends on.
+fn compute_asset_version(wasm_bytes: &[u8]) -> String {
+    let mut hasher = DefaultHasher::new();
+    wasm_bytes.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
 /// Shared application state for the axum router. Single user ⇒ one shared cluster
 /// client behind an `RwLock` (rebuilt on token refresh).
 #[derive(Clone)]
 pub struct AppState {
     pub leptos_options: LeptosOptions,
+    /// Hash of the built WASM bundle, computed once at startup. Embedded into
+    /// the SSR shell and pushed over SSE so an already-open tab can detect a
+    /// redeploy and reload itself (see `src/version.rs` on the client side).
+    pub asset_version: Arc<str>,
     pub config: Arc<ServerConfig>,
     /// None in dev mode.
     pub provider: Option<Arc<OidcProvider>>,
@@ -108,8 +124,35 @@ pub async fn build_state(leptos_options: LeptosOptions) -> Result<AppState, Stri
         }
     }
 
+    // cargo-leptos writes the built bundle to `{site_root}/{site_pkg_dir}/{output_name}.wasm`
+    // (the same layout `HydrationScripts`/`HashedStylesheet` already assume). Hashed once at
+    // startup — a redeploy always restarts this process, so "once at startup" is "once per build".
+    let wasm_path = format!(
+        "{}/{}/{}.wasm",
+        leptos_options.site_root, leptos_options.site_pkg_dir, leptos_options.output_name
+    );
+    let asset_version: Arc<str> = match std::fs::read(&wasm_path) {
+        Ok(bytes) => compute_asset_version(&bytes).into(),
+        Err(e) => {
+            // Best-effort: an unusual local layout (e.g. a non-standard dev setup)
+            // must not crash startup. Fall back to a value that's still unique
+            // per process, so equality-based skew detection stays sound even
+            // here — it just won't reflect real build content.
+            tracing::warn!(
+                "could not read {wasm_path} to compute the asset version ({e}); \
+                 version-skew auto-reload will use a per-process fallback"
+            );
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            compute_asset_version(&nanos.to_le_bytes()).into()
+        }
+    };
+
     Ok(AppState {
         leptos_options,
+        asset_version,
         config: Arc::new(config),
         provider,
         backend,
@@ -120,4 +163,23 @@ pub async fn build_state(leptos_options: LeptosOptions) -> Result<AppState, Stri
         talos,
         talos_action_lock: Arc::new(Mutex::new(())),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compute_asset_version_is_deterministic() {
+        let bytes = b"fake wasm bytes";
+        assert_eq!(compute_asset_version(bytes), compute_asset_version(bytes));
+    }
+
+    #[test]
+    fn compute_asset_version_differs_for_different_input() {
+        assert_ne!(
+            compute_asset_version(b"build one"),
+            compute_asset_version(b"build two")
+        );
+    }
 }

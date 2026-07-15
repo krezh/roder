@@ -21,7 +21,7 @@ async fn main() {
     use leptos::logging::log;
     use leptos::prelude::*;
     use leptos_axum::{generate_route_list, LeptosRoutes};
-    use roder::app::{shell, App};
+    use roder::app::{set_asset_version, shell, App};
     use roder::server::{api, build_state, handlers};
 
     tracing_subscriber::fmt()
@@ -43,6 +43,7 @@ async fn main() {
             std::process::exit(1);
         }
     };
+    set_asset_version(state.asset_version.to_string());
 
     // App pages + private API, gated behind a valid session.
     let protected = Router::new()

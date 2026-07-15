@@ -302,7 +302,7 @@ pub(crate) fn RowDetail(
                 })}
                 {move || can_delete().then(|| view! {
                     <button class="act danger" on:click=move |_| {
-                        ask_confirm(confirm, "Delete this resource?", move || run("delete", serde_json::json!({})));
+                        ask_confirm(confirm, "Delete this resource?", "Delete", move || run("delete", serde_json::json!({})));
                     }>"Delete"</button>
                 })}
                 {move || status.get().map(|s| match s {
@@ -488,13 +488,13 @@ fn TalosNodeView(node: String, actions: bool, config: bool) -> impl IntoView {
                                     let target = reboot_node.clone();
                                     let drain = drain_first.get_untracked();
                                     let warning = if control_plane { " This is a control-plane node; verify etcd quorum before continuing." } else { "" };
-                                    ask_confirm(confirm, format!("Reboot {target}?{warning}"), move || talos_power_action(target.clone(), "reboot", drain, action_status, pending_action));
+                                    ask_confirm(confirm, format!("Reboot {target}?{warning}"), "Reboot", move || talos_power_action(target.clone(), "reboot", drain, action_status, pending_action));
                                 }>"Reboot"</button>
                                 <button class="act danger" disabled=move || pending_action.get().is_some() on:click=move |_| {
                                     let target = shutdown_node.clone();
                                     let drain = drain_first.get_untracked();
                                     let warning = if control_plane { " This is a control-plane node; verify etcd quorum before continuing." } else { "" };
-                                    ask_confirm(confirm, format!("Shut down {target}?{warning}"), move || talos_power_action(target.clone(), "shutdown", drain, action_status, pending_action));
+                                    ask_confirm(confirm, format!("Shut down {target}?{warning}"), "Shut down", move || talos_power_action(target.clone(), "shutdown", drain, action_status, pending_action));
                                 }>"Shutdown"</button>
                                 {move || pending_action.get().map(|action| view! {
                                     <span class="muted">{if action == "reboot" { "Waiting for node recovery…".to_string() } else { format!("Running {action}…") }}</span>
@@ -529,12 +529,12 @@ fn TalosNodeView(node: String, actions: bool, config: bool) -> impl IntoView {
                                                 <button class="act" disabled=move || pending_action.get().is_some() on:click=move |_| {
                                                     let node = node_for_stop.clone();
                                                     let service = service_for_stop.clone();
-                                                    ask_confirm(confirm, format!("Stop Talos service {service} on {node}?"), move || talos_service_action(node.clone(), service.clone(), "stop", action_status, pending_action, refresh));
+                                                    ask_confirm(confirm, format!("Stop Talos service {service} on {node}?"), "Stop", move || talos_service_action(node.clone(), service.clone(), "stop", action_status, pending_action, refresh));
                                                 }>"Stop"</button>
                                                 <button class="act" disabled=move || pending_action.get().is_some() on:click=move |_| {
                                                     let node = node_for_restart.clone();
                                                     let service = service_for_restart.clone();
-                                                    ask_confirm(confirm, format!("Restart Talos service {service} on {node}?"), move || talos_service_action(node.clone(), service.clone(), "restart", action_status, pending_action, refresh));
+                                                    ask_confirm(confirm, format!("Restart Talos service {service} on {node}?"), "Restart", move || talos_service_action(node.clone(), service.clone(), "restart", action_status, pending_action, refresh));
                                                 }>"Restart"</button>
                                             })}
                                         </div></td> })}</tr>

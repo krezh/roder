@@ -537,7 +537,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                     }>"Logs"</button>
                     <button class="act danger" on:click=move |_| {
                         let n = selected.get_untracked().len();
-                        ask_confirm(confirm, format!("Delete {n} resources?"), move || do_bulk("delete"));
+                        ask_confirm(confirm, format!("Delete {n} resources?"), "Delete", move || do_bulk("delete"));
                     }>"Delete"</button>
                 </div>
             </div>

@@ -7,7 +7,7 @@ use roder_core::{ResourceKind, ResourceRow, RowStatus};
 
 use crate::app::components::icons::ShiftIcon;
 use crate::app::hooks::use_sse_subscription;
-use crate::app::overlays::confirm::Confirm;
+use crate::app::overlays::confirm::{Confirm, ConfirmButton};
 use crate::app::overlays::toast::{show_toast, show_toast_detail, Toast, ToastKind};
 use crate::app::state::{
     AccessReviewOpen, AlertsData, AlertsOpen, Catalog, ConnectionState, Connectivity, NavOpen,
@@ -455,8 +455,7 @@ fn SanitizeButton() -> impl IntoView {
             on:click=move |_| {
                 confirm.set(Some(Confirm {
                     message: "Delete all dead pods and finished jobs?".into(),
-                    ok_label: Some("Sweep".into()),
-                    on_ok: std::sync::Arc::new(do_sanitize),
+                    buttons: vec![ConfirmButton::new("Sweep", do_sanitize)],
                 }));
             }>
             "Sweep"

@@ -164,7 +164,7 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
                     let n = ts.len();
                     let label = if n == 1 { "Delete this resource?".to_string() }
                                 else { format!("Delete {n} resources?") };
-                    ask_confirm(confirm, label, move || {
+                    ask_confirm(confirm, label, "Delete", move || {
                         fire_action(toast, "delete", &ts);
                         if let Some(sel) = table_selected.get_value() { sel.set(Default::default()); }
                     });

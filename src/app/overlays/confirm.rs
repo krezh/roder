@@ -2,26 +2,44 @@
 
 use leptos::prelude::*;
 
-/// An in-page confirmation request. The action is a plain `Arc`'d closure so it
-/// survives even if the widget that requested it (e.g. the context menu) is
-/// unmounted before the user confirms.
+/// One action button in a [`Confirm`] dialog, beyond the always-present Cancel.
+#[derive(Clone)]
+pub(crate) struct ConfirmButton {
+    pub(crate) label: String,
+    pub(crate) on_click: std::sync::Arc<dyn Fn() + Send + Sync>,
+}
+
+impl ConfirmButton {
+    pub(crate) fn new(label: impl Into<String>, on_click: impl Fn() + Send + Sync + 'static) -> Self {
+        Self {
+            label: label.into(),
+            on_click: std::sync::Arc::new(on_click),
+        }
+    }
+}
+
+/// An in-page confirmation request. Buttons are plain `Arc`'d closures so they
+/// survive even if the widget that requested them (e.g. the context menu) is
+/// unmounted before the user responds. Cancel is always rendered alongside
+/// `buttons` and needs no entry of its own.
 #[derive(Clone)]
 pub(crate) struct Confirm {
     pub(crate) message: String,
-    pub(crate) on_ok: std::sync::Arc<dyn Fn() + Send + Sync>,
-    pub(crate) ok_label: Option<String>,
+    pub(crate) buttons: Vec<ConfirmButton>,
 }
 
-/// Pop an in-page confirmation; runs `on_ok` if the user confirms.
+/// Pop an in-page confirmation with a single labeled action button (plus the
+/// implicit Cancel). For more than one action button, build a [`Confirm`]
+/// directly with as many [`ConfirmButton`]s as needed.
 pub(crate) fn ask_confirm(
     sig: RwSignal<Option<Confirm>>,
     message: impl Into<String>,
+    ok_label: impl Into<String>,
     on_ok: impl Fn() + Send + Sync + 'static,
 ) {
     sig.set(Some(Confirm {
         message: message.into(),
-        on_ok: std::sync::Arc::new(on_ok),
-        ok_label: None,
+        buttons: vec![ConfirmButton::new(ok_label, on_ok)],
     }));
 }
 
@@ -32,7 +50,6 @@ pub(crate) fn ConfirmDialog() -> impl IntoView {
 
     view! {
         {move || snapshot.get().map(|c| {
-            let on_ok = c.on_ok.clone();
             view! {
                 <div class="modal-scrim" class:closing=move || closing.get()
                     on:click=move |_| do_close()></div>
@@ -40,14 +57,18 @@ pub(crate) fn ConfirmDialog() -> impl IntoView {
                     <div class="modal-msg">{c.message.clone()}</div>
                     <div class="modal-actions">
                         <button class="act" on:click=move |_| do_close()>"Cancel"</button>
-                        <button class="act danger" disabled=move || closing.get() on:click=move |_| {
-                            if !closing.get_untracked() {
-                                do_close();
-                                on_ok();
+                        {c.buttons.iter().cloned().map(|b| {
+                            view! {
+                                <button class="act danger" disabled=move || closing.get() on:click=move |_| {
+                                    if !closing.get_untracked() {
+                                        do_close();
+                                        (b.on_click)();
+                                    }
+                                }>
+                                    {b.label.clone()}
+                                </button>
                             }
-                        }>
-                            {c.ok_label.clone().unwrap_or_else(|| "Delete".into())}
-                        </button>
+                        }).collect_view()}
                     </div>
                 </div>
             }

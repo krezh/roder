@@ -50,8 +50,6 @@
 
 .sync-btn { @extend %tooltip-chip-btn; }
 
-.access-btn { @extend %tooltip-chip-btn; }
-
 .errfilter {
   @extend %chip-btn;
   &.active {
@@ -73,14 +71,31 @@
   }
 }
 
-// Topbar mobile menu toggle.
-.hamburger {
-  display: none;
+// Bare button reset: no chrome, just a clickable label/icon.
+%reset-btn {
   background: none;
   border: none;
+  cursor: pointer;
+}
+
+// Topbar mobile menu toggle.
+.hamburger {
+  @extend %reset-btn;
+  display: none;
   color: var(--fg);
   font-size: 1.2rem;
-  cursor: pointer;
+}
+
+// Topbar identity — opens the user menu (Access, Sign out).
+.user-menu-trigger {
+  @extend %reset-btn;
+  color: var(--muted);
+  font: inherit;
+  padding: 0;
+  &:hover,
+  &:focus-visible {
+    color: var(--fg);
+  }
 }
 
 @keyframes failure-badge-spring {

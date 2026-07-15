@@ -84,7 +84,6 @@ pub(crate) fn Topbar() -> impl IntoView {
             </div>
             <div class="topbar-group topbar-health">
                 <AlertsButton />
-                <AccessReviewButton />
                 // Conditional badges stay last so appearing failures never move
                 // the permanent health controls out from under the pointer.
                 <FailingBadge />
@@ -599,23 +598,11 @@ fn Brand() -> impl IntoView {
     }
 }
 
-/// Opens the RBAC access review overlay ("what can I do?", given OIDC passthrough).
-#[component]
-fn AccessReviewButton() -> impl IntoView {
-    let open = expect_context::<AccessReviewOpen>().0;
-    view! {
-        <button class="access-btn" on:click=move |_| open.set(true)>
-            "Access"
-            <span class="tooltip">"RBAC access review — what can I do?"</span>
-        </button>
-    }
-}
-
 #[component]
 fn Identity() -> impl IntoView {
     let identity = RwSignal::new(None::<serde_json::Value>);
-    // Seed from the last-known identity so the name/sign-out link doesn't flash
-    // empty on refresh while the first `/api/me` round-trip is in flight.
+    // Seed from the last-known identity so the name/menu doesn't flash empty
+    // on refresh while the first `/api/me` round-trip is in flight.
     Effect::new(move |_| {
         if let Some(cached) = data::storage_get("roder.identity")
             .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
@@ -633,6 +620,11 @@ fn Identity() -> impl IntoView {
             identity.set(Some(v));
         }
     });
+
+    let menu_open = RwSignal::new(false);
+    let (visible, closing, do_close) = crate::app::overlays::use_bool_overlay(menu_open);
+    let access_open = expect_context::<AccessReviewOpen>().0;
+
     view! {
         <span class="identity">
             {move || identity.get().map(|v| {
@@ -640,7 +632,23 @@ fn Identity() -> impl IntoView {
                     .or_else(|| v.get("name").and_then(|n| n.as_str()))
                     .or_else(|| v.get("subject").and_then(|s| s.as_str()))
                     .unwrap_or("anonymous").to_string();
-                view! { <span>{who}</span> <a class="logout" href="/auth/logout" rel="external">"sign out"</a> }
+                view! {
+                    <div class="user-menu">
+                        <button class="user-menu-trigger" on:click=move |_| menu_open.update(|o| *o = !*o)>
+                            {who}
+                        </button>
+                        {move || visible.get().then(|| view! {
+                            <div class="ctx-scrim" on:click=move |_| do_close()></div>
+                            <div class="ctx-menu user-menu-dropdown" class:closing=move || closing.get()>
+                                <button class="ctx-item"
+                                    on:click=move |_| { do_close(); access_open.set(true); }>
+                                    "Access"
+                                </button>
+                                <a class="ctx-item" href="/auth/logout" rel="external">"Sign out"</a>
+                            </div>
+                        })}
+                    </div>
+                }
             })}
         </span>
     }

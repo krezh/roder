@@ -252,6 +252,26 @@
     font-size: 0.8rem;
   }
 }
+/* Generic host for a `.tooltip` child: hidden until hover, anchored at the
+   host's bottom-left (`.tip-anchor`) or bottom-right (`.tip-anchor-end`).
+   Add either class alongside the host's own class instead of re-declaring
+   the position/reveal rules per component. */
+.tip-anchor,
+.tip-anchor-end {
+  position: relative;
+  .tooltip {
+    display: none;
+    position: absolute;
+    top: 100%;
+    margin-top: 6px;
+  }
+  &:hover .tooltip {
+    display: block;
+  }
+}
+.tip-anchor { .tooltip { left: 0; } }
+.tip-anchor-end { .tooltip { right: 0; } }
+
 /* The one reusable tooltip look — used by the global hover tooltip and by any
    bespoke tooltip bubble (e.g. the cluster-usage per-node popover). */
 .tooltip {

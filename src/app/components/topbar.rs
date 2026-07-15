@@ -132,7 +132,7 @@ pub(crate) fn AlertsButton() -> impl IntoView {
             counts.get().map(|(total, critical, warning, info)| {
                 view! {
                     <button
-                        class="alerts-btn"
+                        class="alerts-btn tip-anchor-end"
                         class:alerts-firing={move || total > 0}
                         class:bouncing=move || bouncing.get()
                         on:click=move |_| open.set(true)
@@ -248,7 +248,7 @@ pub(crate) fn FluxFailingBadge() -> impl IntoView {
                     }
                 };
                 view! {
-                    <button class="fluxbadge" class:closing=move || badge_closing.get() on:click=go>
+                    <button class="fluxbadge tip-anchor" class:closing=move || badge_closing.get() on:click=go>
                         {label}
                         <span class="tooltip">"Flux resources failing — click to view"</span>
                     </button>
@@ -450,7 +450,7 @@ fn SanitizeButton() -> impl IntoView {
     };
 
     view! {
-        <button class="sweep-btn"
+        <button class="sweep-btn tip-anchor"
             on:click=move |_| {
                 confirm.set(Some(Confirm {
                     message: "Delete all dead pods and finished jobs?".into(),
@@ -493,7 +493,7 @@ fn SyncButton() -> impl IntoView {
     };
 
     view! {
-        <button class="sync-btn" on:click=do_sync>
+        <button class="sync-btn tip-anchor" on:click=do_sync>
             "Sync"
             <span class="tooltip">"Reconcile all Flux resources"</span>
         </button>
@@ -580,7 +580,7 @@ fn Brand() -> impl IntoView {
     let selected_kind = expect_context::<RwSignal<Option<ResourceKind>>>();
     let connection = expect_context::<ConnectionState>().0;
     view! {
-        <span class="brand"
+        <span class="brand tip-anchor"
               class:brand-connected=move || matches!(connection.get(), Connectivity::Connected)
               class:brand-checking=move || matches!(connection.get(), Connectivity::Checking)
               class:brand-disconnected=move || matches!(connection.get(), Connectivity::Offline | Connectivity::Error(_))

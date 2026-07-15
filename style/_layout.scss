@@ -38,8 +38,8 @@
     border-left: 1px solid var(--border);
   }
 
+  // Carries `.tip-anchor` in markup for its hover tooltip.
   .brand {
-    position: relative;
     display: inline-flex;
     align-items: center;
     font-weight: 800;
@@ -50,15 +50,9 @@
     user-select: none;
 
     .brand-tip {
-      display: none;
-      position: absolute;
-      top: 100%;
-      left: 0;
-      margin-top: 6px;
       text-transform: none;
       letter-spacing: normal;
     }
-    &:hover .brand-tip { display: block; }
 
     &.brand-connected {
       color: var(--ok);

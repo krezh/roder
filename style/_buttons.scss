@@ -32,23 +32,10 @@
 
 .palette-btn { @extend %chip-btn; }
 
-// Chip button with a hover tooltip anchored below it (Sweep, Sync).
-%tooltip-chip-btn {
-  @extend %chip-btn;
-  position: relative;
-  .tooltip {
-    display: none;
-    position: absolute;
-    top: 100%;
-    left: 0;
-    margin-top: 6px;
-  }
-  &:hover .tooltip { display: block; }
-}
+// Sweep/Sync also carry `.tip-anchor` in markup for their hover tooltip.
+.sweep-btn { @extend %chip-btn; }
 
-.sweep-btn { @extend %tooltip-chip-btn; }
-
-.sync-btn { @extend %tooltip-chip-btn; }
+.sync-btn { @extend %chip-btn; }
 
 .errfilter {
   @extend %chip-btn;
@@ -136,7 +123,8 @@
   }
 }
 
-// Cluster-wide failing Flux resource count; clicking jumps to Kustomizations or HelmReleases.
+// Cluster-wide failing Flux resource count; clicking jumps to Kustomizations
+// or HelmReleases. Carries `.tip-anchor` in markup for its hover tooltip.
 .fluxbadge {
   background: color-mix(in srgb, var(--warn) 16%, transparent);
   border: 1px solid var(--warn);
@@ -146,11 +134,8 @@
   cursor: pointer;
   font-weight: 600;
   white-space: nowrap;
-  position: relative;
-  .tooltip { display: none; position: absolute; top: 100%; left: 0; margin-top: 6px; }
   &:hover {
     background: color-mix(in srgb, var(--warn) 26%, transparent);
-    .tooltip { display: block; }
   }
 }
 
@@ -177,15 +162,12 @@
   100% { transform: scale(1); }
 }
 
-// Topbar alerts count button with severity tooltip.
+// Topbar alerts count button with severity tooltip. Carries `.tip-anchor-end`
+// in markup for its hover tooltip.
 .alerts-btn {
   @extend %chip-btn;
-  position: relative;
   white-space: nowrap;
   font-weight: 600;
-
-  .tooltip { display: none; position: absolute; top: 100%; right: 0; margin-top: 6px; }
-  &:hover .tooltip { display: block; }
 
   &.alerts-firing {
     background: color-mix(in srgb, var(--warn) 16%, transparent);

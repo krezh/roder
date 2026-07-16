@@ -19,5 +19,6 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 prost-types = "0.14"
 sha2 = "0.11"
+hex = "0.4"
 async-stream = "0.3"
 futures = "0.3"

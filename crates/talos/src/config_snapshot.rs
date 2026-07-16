@@ -75,7 +75,7 @@ fn config_snapshot(config: &serde_json::Value) -> ConfigSnapshot {
         digest.update([0]);
     }
     ConfigSnapshot {
-        fingerprint: format!("{:x}", digest.finalize()),
+        fingerprint: hex::encode(digest.finalize()),
         fields,
     }
 }
@@ -90,7 +90,7 @@ fn flatten_config(
         digest.update(serde_json::to_vec(value).unwrap_or_default());
         fields.insert(
             path.into(),
-            ConfigField::Sensitive(format!("{:x}", digest.finalize())),
+            ConfigField::Sensitive(hex::encode(digest.finalize())),
         );
         return;
     }

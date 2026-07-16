@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.1.25](https://github.com/krezh/roder/compare/0.1.24...0.1.25) (2026-07-16)
+
+
+### Features
+
+* **gui:** morph the user button into its dropdown as one continuous box ([7c81464](https://github.com/krezh/roder/commit/7c81464f07a55b5c87e64f2cb9232896f5a538d3))
+* **gui:** move sign out into a user menu alongside Access ([6ca2926](https://github.com/krezh/roder/commit/6ca2926333d353f51319c82401ccb7bc0fcec0e6))
+
+
+### Bug Fixes
+
+* **cargo:** update rust crate tokio (1.52.3 ➔ 1.52.4) ([#88](https://github.com/krezh/roder/issues/88)) ([2cf43e7](https://github.com/krezh/roder/commit/2cf43e704713db7dfb78d307a99a117ac54c56b0))
+* **container:** update image ghcr.io/rust-lang/rust (8e117ca ➔ b92b8c8) ([#86](https://github.com/krezh/roder/issues/86)) ([2723c9d](https://github.com/krezh/roder/commit/2723c9db3adaefe31696f128f8a8bf13409f07c1))
+* **k8s:** allow forcing node drain past unmanaged/emptyDir pods ([1720fb1](https://github.com/krezh/roder/commit/1720fb1c4f962a156d5c4043b8a0a6e9f4e75e40))
+
+
+### Code Refactoring
+
+* **gui:** deduplicate the hover-tooltip reveal pattern ([9a1e8ee](https://github.com/krezh/roder/commit/9a1e8eeaf3e05e83240689c15746ffffcd66185b))
+* **gui:** support multi-button confirm dialogs ([f42abf2](https://github.com/krezh/roder/commit/f42abf27d3903f386c32224f8a187e7865932346))
+* split the four largest files into one-file-per-concern modules ([0a5bdec](https://github.com/krezh/roder/commit/0a5bdec5f7632ea03523dc959f8e40b4f9c27e91))
+
 ## [0.1.24](https://github.com/krezh/roder/compare/0.1.23...0.1.24) (2026-07-15)
 
 

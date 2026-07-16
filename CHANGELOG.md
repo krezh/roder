@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.26](https://github.com/krezh/roder/compare/0.1.25...0.1.26) (2026-07-16)
+
+
+### Miscellaneous Chores
+
+* **main:** release 0.1.25 ([#89](https://github.com/krezh/roder/issues/89)) ([7558d8a](https://github.com/krezh/roder/commit/7558d8a7b4117668d7c78bcef23b4c14a96fe5b0))
+
 ## [0.1.25](https://github.com/krezh/roder/compare/0.1.24...0.1.25) (2026-07-16)
 
 

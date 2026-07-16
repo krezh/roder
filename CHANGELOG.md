@@ -5,6 +5,7 @@
 
 ### Features
 
+* **cargo:** update rust crate sha2 (0.10.9 ➔ 0.11.0) ([#82](https://github.com/krezh/roder/issues/82)) ([160ffdd](https://github.com/krezh/roder/commit/160ffdd125391d1419d191de7e1b07c3a7007f30))
 * **gui:** morph the user button into its dropdown as one continuous box ([7c81464](https://github.com/krezh/roder/commit/7c81464f07a55b5c87e64f2cb9232896f5a538d3))
 * **gui:** move sign out into a user menu alongside Access ([6ca2926](https://github.com/krezh/roder/commit/6ca2926333d353f51319c82401ccb7bc0fcec0e6))
 

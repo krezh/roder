@@ -18,6 +18,6 @@ serde_yaml = "0.9"
 thiserror = { workspace = true }
 tokio = { workspace = true }
 prost-types = "0.14"
-sha2 = "0.10"
+sha2 = "0.11"
 async-stream = "0.3"
 futures = "0.3"

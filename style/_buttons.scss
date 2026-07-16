@@ -73,18 +73,6 @@
   font-size: 1.2rem;
 }
 
-// Topbar identity — opens the user menu (Access, Sign out).
-.user-menu-trigger {
-  @extend %reset-btn;
-  color: var(--muted);
-  font: inherit;
-  padding: 0;
-  &:hover,
-  &:focus-visible {
-    color: var(--fg);
-  }
-}
-
 @keyframes failure-badge-spring {
   0%   { opacity: 0; transform: scale(0); }
   55%  { opacity: 1; transform: scale(1.14); }

@@ -81,13 +81,6 @@
   }
 }
 
-/* ---- user menu dropdown (topbar identity) ---- */
-// Anchors a .ctx-menu under the trigger instead of at the cursor; everything
-// else (chrome, .ctx-item rows, open/close animation) is the shared menu.
-.user-menu {
-  position: relative;
-}
-
 /* ---- body: sidebar + main ---- */
 .body {
   flex: 1;

@@ -1,0 +1,170 @@
+/* ---- morphing user-menu dropdown ---- */
+// A single box in two states, not a button plus a separate popup: closed, it
+// hugs the identity chip's label; open, the *same* box spring-animates to the
+// menu's own natural size. identity.rs measures both natural sizes (FLIP) and
+// drives explicit pixel width/height so the transitions below animate a real
+// size delta instead of `auto`.
+
+.dropdown-anchor {
+  position: relative;
+}
+
+// Invisible replica of the closed face, kept in normal flow so this wrapper's
+// intrinsic size reserves the button's footprint in the topbar row — the
+// shell itself is `position: absolute` and would otherwise collapse it.
+.dropdown-spacer {
+  visibility: hidden;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.6rem;
+  white-space: nowrap;
+}
+
+.dropdown-shell {
+  --dur: 0.34s;
+  // Critically-damped-ish spring: fast attack, one small ~4% overshoot, quick
+  // settle — lively but not rubbery.
+  --spring: linear(
+    0, 0.008, 0.055 2.8%, 0.28 7%, 0.65 12.5%, 0.902 18%, 1.011 23%,
+    1.042 27.5%, 1.038 31.5%, 1.02 36.5%, 1.004 43%, 0.998 50%, 1
+  );
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 71;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  overflow: hidden;
+  display: block;
+  width: max-content;
+  transition:
+    width var(--dur) var(--spring),
+    height var(--dur) var(--spring),
+    background-color 0.25s ease,
+    box-shadow 0.3s ease;
+
+  &.open {
+    background: var(--panel);
+    box-shadow: 0 18px 40px -10px rgba(0, 0, 0, 0.9);
+  }
+}
+
+// Outside-click catcher, matching the app's `.ctx-scrim` pattern; only
+// rendered while the menu is open.
+.dropdown-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+}
+
+/* -- face 1: the closed button -- */
+.dropdown-face-btn {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.6rem;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+  width: max-content;
+  transition: opacity 0.13s ease;
+  &:hover,
+  &:focus-visible {
+    color: var(--accent);
+  }
+}
+.dropdown-caret {
+  font-size: 0.65rem;
+}
+// The button face fades out (no movement — a translate here reads as the
+// label bobbing up and down when the menu closes) as the menu face takes over.
+.dropdown-shell.open .dropdown-face-btn {
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  right: 0;
+}
+.dropdown-shell.closing .dropdown-face-btn {
+  transition-delay: 0.18s;
+}
+
+/* -- face 2: the open menu -- */
+.dropdown-face-menu {
+  display: none;
+  flex-direction: column;
+  width: max-content;
+  min-width: 200px;
+  padding: 0.25rem;
+}
+.dropdown-shell.open .dropdown-face-menu,
+.dropdown-shell.measuring .dropdown-face-menu {
+  display: flex;
+}
+.dropdown-shell.measuring .dropdown-face-btn {
+  display: none;
+}
+
+.dropdown-head {
+  padding: 0.45rem 0.6rem 0.4rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.25rem;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.dropdown-item {
+  background: none;
+  border: none;
+  color: var(--fg);
+  text-align: left;
+  text-decoration: none;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  white-space: nowrap;
+  display: block;
+  &:hover {
+    color: var(--accent);
+  }
+}
+
+// Menu content cascades in behind the leading edge of the box morph: fade +
+// rise, staggered per row. Delays start ~20% into the size morph so the box
+// leads and the content follows.
+.dropdown-face-menu > * {
+  opacity: 0;
+  translate: 0 8px;
+  transition: opacity 0.24s ease, translate 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.dropdown-shell.open .dropdown-face-menu > * {
+  opacity: 1;
+  translate: 0 0;
+}
+.dropdown-shell.open .dropdown-face-menu > :nth-child(1) { transition-delay: 0.07s; }
+.dropdown-shell.open .dropdown-face-menu > :nth-child(2) { transition-delay: 0.12s; }
+.dropdown-shell.open .dropdown-face-menu > :nth-child(3) { transition-delay: 0.17s; }
+
+// Closing: content drops out fast and the box shrink is delayed so the
+// content leads on the way out too.
+.dropdown-shell.closing {
+  transition-delay: 0.06s;
+}
+.dropdown-shell.closing .dropdown-face-menu > * {
+  opacity: 0;
+  translate: 0 6px;
+  transition: opacity 0.12s ease, translate 0.12s ease;
+  transition-delay: 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dropdown-shell,
+  .dropdown-shell * {
+    transition: none !important;
+  }
+}

@@ -2,20 +2,23 @@
 //! over SSE with lossless replay (see `server::drain_jobs`).
 
 use std::convert::Infallible;
-use std::sync::atomic::Ordering;
+use std::future::Future;
+use std::panic::AssertUnwindSafe;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use axum::extract::{Query, State};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use futures::Stream;
-use roder_core::{DrainEvent, DrainEventKind, DrainOptions};
+use futures::{FutureExt, Stream};
+use roder_core::{DrainEvent, DrainEventKind, DrainOptions, DrainSummary};
 use roder_k8s::Backend;
 use serde::Deserialize;
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
 use tokio_stream::StreamExt;
 
+use crate::server::drain_jobs::JobHandle;
 use crate::server::AppState;
 
 /// Spawn a drain as a background job: registers it with `state.drain_jobs`,
@@ -48,19 +51,53 @@ pub(crate) fn spawn_drain_job(
             let tx = tx; // move so it drops when the drain finishes
             backend.drain(&key, &name, &options, &tx, &cancel).await
         };
-        let (result, ()) = tokio::join!(drain, pump);
-        match result {
-            Ok(_summary) if cancel.load(Ordering::Relaxed) => {
-                handle.emit(DrainEventKind::Cancelled)
-            }
-            Ok(summary) => handle.emit(DrainEventKind::Done { summary }),
-            Err(e) => handle.emit(DrainEventKind::Error {
-                message: e.to_string(),
-            }),
-        }
-        handle.finish();
+        finish_with(&handle, &cancel, async { tokio::join!(drain, pump).0 }).await;
     });
     id
+}
+
+/// Run `fut` to completion, then emit exactly one terminal event on `handle`
+/// and finish the job — guaranteed even if `fut` panics.
+///
+/// Without this, a panic anywhere in the drain (or its concurrent event
+/// pump, both of which `fut` wraps) would unwind straight out of the spawned
+/// task: tokio silently drops the task, `handle.finish()` never runs, the
+/// registry entry's broadcast sender never drops, and every subscriber's
+/// `live_events` sits in `rx.recv().await` forever — no terminal event, no
+/// `eof`, no expiry. `catch_unwind` restores the "exactly one terminal event,
+/// always" invariant by converting a panic into an `Error` event instead.
+async fn finish_with<E: std::fmt::Display>(
+    handle: &JobHandle,
+    cancel: &AtomicBool,
+    fut: impl Future<Output = Result<DrainSummary, E>>,
+) {
+    match AssertUnwindSafe(fut).catch_unwind().await {
+        Ok(Ok(_summary)) if cancel.load(Ordering::Relaxed) => {
+            handle.emit(DrainEventKind::Cancelled)
+        }
+        Ok(Ok(summary)) => handle.emit(DrainEventKind::Done { summary }),
+        Ok(Err(e)) => handle.emit(DrainEventKind::Error {
+            message: e.to_string(),
+        }),
+        Err(panic) => handle.emit(DrainEventKind::Error {
+            message: panic_message(&panic),
+        }),
+    }
+    handle.finish();
+}
+
+/// Best-effort text for a panic payload (`&str`/`String` cover `panic!` and
+/// `.expect()`/`.unwrap()`; anything else falls back to a fixed message
+/// rather than failing to produce a terminal event at all).
+fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
+    let detail = panic
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| panic.downcast_ref::<String>().cloned());
+    match detail {
+        Some(msg) => format!("drain job panicked: {msg}"),
+        None => "drain job panicked".to_string(),
+    }
 }
 
 #[derive(Deserialize)]
@@ -194,5 +231,53 @@ mod tests {
         assert_eq!(text.matches("data:").count(), 2, "got: {text}");
         assert!(text.contains("\"cordoned\""), "got: {text}");
         assert!(text.contains("\"done\""), "got: {text}");
+    }
+
+    /// Regression test: a panic inside the wrapped future must not escape
+    /// `finish_with` — it has to land as a single `Error` terminal event,
+    /// with the job marked done, exactly like a normal `Err` outcome would.
+    /// Without `catch_unwind`, this future's panic would instead unwind the
+    /// whole (spawned, in production) task and `handle.finish()` would never
+    /// run, permanently hanging subscribers (see `live_events`).
+    #[tokio::test]
+    async fn finish_with_turns_a_panic_into_a_terminal_error_event() {
+        let jobs = Arc::new(crate::server::drain_jobs::DrainJobs::default());
+        let handle = jobs.create();
+        let id = handle.id;
+        let cancel = AtomicBool::new(false);
+
+        finish_with::<String>(&handle, &cancel, async { panic!("boom") }).await;
+
+        let (replay, _rx, done) = jobs.subscribe(id).unwrap();
+        assert!(done, "job must be finished even after a panic");
+        assert_eq!(
+            replay.len(),
+            1,
+            "exactly one terminal event, got: {replay:?}"
+        );
+        match &replay[0].kind {
+            DrainEventKind::Error { message } => {
+                assert!(message.contains("boom"), "got: {message}")
+            }
+            other => panic!("expected a terminal Error event, got: {other:?}"),
+        }
+    }
+
+    /// A normal (non-panicking) success still produces exactly one `Done`.
+    #[tokio::test]
+    async fn finish_with_reports_done_on_a_normal_success() {
+        let jobs = Arc::new(crate::server::drain_jobs::DrainJobs::default());
+        let handle = jobs.create();
+        let id = handle.id;
+        let cancel = AtomicBool::new(false);
+
+        finish_with::<String>(&handle, &cancel, async { Ok(DrainSummary::default()) }).await;
+
+        let (replay, _rx, done) = jobs.subscribe(id).unwrap();
+        assert!(done);
+        assert!(matches!(
+            replay.last().unwrap().kind,
+            DrainEventKind::Done { .. }
+        ));
     }
 }

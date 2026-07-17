@@ -3,6 +3,7 @@
 
 pub mod api;
 pub mod config;
+pub mod drain_jobs;
 pub mod handlers;
 pub mod session;
 
@@ -61,6 +62,8 @@ pub struct AppState {
     pub talos: Option<Arc<roder_talos::Backend>>,
     /// Serialize Talos mutations so duplicate service/power operations cannot race.
     pub talos_action_lock: Arc<Mutex<()>>,
+    /// In-flight drain jobs: buffered events for lossless SSE replay.
+    pub drain_jobs: Arc<drain_jobs::DrainJobs>,
 }
 
 // Lets Leptos's axum handlers pull `LeptosOptions` out of our custom state.
@@ -162,6 +165,7 @@ pub async fn build_state(leptos_options: LeptosOptions) -> Result<AppState, Stri
         alerts,
         talos,
         talos_action_lock: Arc::new(Mutex::new(())),
+        drain_jobs: Arc::new(drain_jobs::DrainJobs::default()),
     })
 }
 

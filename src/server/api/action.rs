@@ -24,6 +24,8 @@ pub struct ActionRequest {
     reset: Option<bool>,
     pub(crate) service: Option<String>,
     pub(crate) drain: Option<bool>,
+    pub(crate) options: Option<roder_core::DrainOptions>,
+    pub(crate) job: Option<u64>,
 }
 
 /// Resolve the acting identity for the audit log.
@@ -88,20 +90,18 @@ pub async fn action(
         let (Some(key), Some(name)) = (req.key.as_deref(), req.name.as_deref()) else {
             return (StatusCode::BAD_REQUEST, "missing key or name").into_response();
         };
-        // Shim: Tasks 4-5 wire real progress-event streaming and cancellation;
-        // for now drive drain with a throwaway channel/flag, carrying only
-        // the old `force` semantics through `DrainOptions`.
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        let cancel = std::sync::atomic::AtomicBool::new(false);
-        let options = roder_core::DrainOptions {
-            force: req.force.unwrap_or(false),
-            ..Default::default()
+        let options = req.options.clone().unwrap_or_default();
+        let id =
+            super::drain::spawn_drain_job(&state, b, key.to_string(), name.to_string(), options);
+        return (StatusCode::OK, serde_json::json!({ "job": id }).to_string()).into_response();
+    } else if req.action == "drain-cancel" {
+        let Some(id) = req.job else {
+            return (StatusCode::BAD_REQUEST, "missing job").into_response();
         };
-        return match b.drain(key, name, &options, &tx, &cancel).await {
-            Ok(summary) => {
-                (StatusCode::OK, serde_json::to_string(&summary).unwrap()).into_response()
-            }
-            Err(e) => bad_gateway(e),
+        return if state.drain_jobs.cancel(id) {
+            (StatusCode::OK, "ok").into_response()
+        } else {
+            (StatusCode::NOT_FOUND, "unknown job").into_response()
         };
     } else {
         let (Some(key), Some(name)) = (req.key.as_deref(), req.name.as_deref()) else {

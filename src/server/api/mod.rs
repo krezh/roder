@@ -10,6 +10,7 @@ use roder_k8s::Backend;
 use super::AppState;
 
 mod action;
+mod drain;
 mod exec;
 mod logs;
 mod misc;
@@ -18,6 +19,7 @@ mod talos;
 mod watch;
 
 pub use action::action;
+pub use drain::drain_progress;
 pub use exec::{debug_shell, exec_ws, node_shell_create, terminal_page};
 pub use logs::{logs, metrics_history};
 pub use misc::{alerts, features, health, namespaces, overview, resources};

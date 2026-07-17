@@ -66,6 +66,7 @@ async fn main() {
         .route("/api/metrics", get(api::metrics_history))
         .route("/api/alerts", get(api::alerts))
         .route("/api/action", post(api::action))
+        .route("/api/drain-progress", get(api::drain_progress))
         .route("/api/exec", get(api::exec_ws))
         .route("/api/debug-shell", get(api::debug_shell))
         .route("/api/node-shell", get(api::node_shell_create))

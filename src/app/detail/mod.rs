@@ -10,7 +10,7 @@ use roder_core::ObjectDetail;
 
 use crate::app::components::table::ScaleControl;
 use crate::app::logs::LogsView;
-use crate::app::overlays::confirm::{ask_confirm, Confirm};
+use crate::app::overlays::confirm::{ask_confirm, Confirm, ConfirmButton};
 use crate::app::state::{DetailTarget, ExecOpen, ExecTarget};
 use crate::app::util::format::parse_key;
 use crate::app::util::json::selector_from;
@@ -488,13 +488,13 @@ fn TalosNodeView(node: String, actions: bool, config: bool) -> impl IntoView {
                                     let target = reboot_node.clone();
                                     let drain = drain_first.get_untracked();
                                     let warning = if control_plane { " This is a control-plane node; verify etcd quorum before continuing." } else { "" };
-                                    ask_confirm(confirm, format!("Reboot {target}?{warning}"), "Reboot", move || talos_power_action(target.clone(), "reboot", drain, action_status, pending_action));
+                                    ask_confirm(confirm, format!("Reboot {target}?{warning}"), "Reboot", move || talos_power_action(target.clone(), "reboot", drain, false, action_status, pending_action, confirm));
                                 }>"Reboot"</button>
                                 <button class="act danger" disabled=move || pending_action.get().is_some() on:click=move |_| {
                                     let target = shutdown_node.clone();
                                     let drain = drain_first.get_untracked();
                                     let warning = if control_plane { " This is a control-plane node; verify etcd quorum before continuing." } else { "" };
-                                    ask_confirm(confirm, format!("Shut down {target}?{warning}"), "Shut down", move || talos_power_action(target.clone(), "shutdown", drain, action_status, pending_action));
+                                    ask_confirm(confirm, format!("Shut down {target}?{warning}"), "Shut down", move || talos_power_action(target.clone(), "shutdown", drain, false, action_status, pending_action, confirm));
                                 }>"Shutdown"</button>
                                 {move || pending_action.get().map(|action| view! {
                                     <span class="muted">{if action == "reboot" { "Waiting for node recovery…".to_string() } else { format!("Running {action}…") }}</span>
@@ -680,12 +680,18 @@ fn talos_service_action(
     });
 }
 
+/// Drives a Talos reboot/shutdown, optionally draining first. If a drain-first
+/// request is blocked by the safety pre-check (unmanaged or emptyDir-backed
+/// pods, evicting nothing), offer to force past it — mirroring `run_drain` in
+/// `overlays::context_menu`.
 fn talos_power_action(
     node: String,
     action: &'static str,
     drain: bool,
+    force: bool,
     status: RwSignal<Option<Result<String, String>>>,
     pending: RwSignal<Option<String>>,
+    confirm: RwSignal<Option<Confirm>>,
 ) {
     leptos::task::spawn_local(async move {
         status.set(None);
@@ -694,16 +700,34 @@ fn talos_power_action(
             "action": format!("talos-{action}"),
             "name": node,
             "drain": drain,
+            "force": force,
         }))
-        .await
-        .map(|_| {
+        .await;
+        let blocked_drain = result.as_ref().err().and_then(|body| {
+            let drain_value = serde_json::from_str::<serde_json::Value>(body)
+                .ok()?
+                .get("drain")?
+                .clone();
+            let summary: roder_core::DrainSummary = serde_json::from_value(drain_value).ok()?;
+            (!force && summary.evicted == 0).then_some(summary)
+        });
+        if let Some(summary) = blocked_drain {
+            pending.set(None);
+            confirm.set(Some(Confirm {
+                message: crate::app::overlays::context_menu::blocked_drain_message(&node, &summary),
+                buttons: vec![ConfirmButton::new("Force drain", move || {
+                    talos_power_action(node.clone(), action, true, true, status, pending, confirm)
+                })],
+            }));
+            return;
+        }
+        status.set(Some(result.map(|_| {
             if action == "reboot" {
                 "node returned Ready".into()
             } else {
                 format!("{action} requested")
             }
-        });
-        status.set(Some(result));
+        })));
         pending.set(None);
     });
 }

@@ -20,7 +20,7 @@ pub struct ActionRequest {
     pub(crate) name: Option<String>,
     replicas: Option<i32>,
     yaml: Option<String>,
-    force: Option<bool>,
+    pub(crate) force: Option<bool>,
     reset: Option<bool>,
     pub(crate) service: Option<String>,
     pub(crate) drain: Option<bool>,

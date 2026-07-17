@@ -334,7 +334,10 @@ pub(crate) async fn talos_mutation(
         .map(String::from);
     let mut drain_summary = None;
     if power_action && req.drain.unwrap_or(false) {
-        match backend.drain(&node_key, node, false).await {
+        match backend
+            .drain(&node_key, node, req.force.unwrap_or(false))
+            .await
+        {
             Ok(summary) if summary.failed.is_empty() => drain_summary = Some(summary),
             Ok(summary) => {
                 if !was_cordoned {

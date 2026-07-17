@@ -4,7 +4,7 @@
 use std::convert::Infallible;
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use axum::extract::{Query, State};
@@ -21,15 +21,35 @@ use tokio_stream::StreamExt;
 use crate::server::drain_jobs::JobHandle;
 use crate::server::AppState;
 
-/// Spawn a drain as a background job: registers it with `state.drain_jobs`,
-/// runs `Backend::drain` on a detached task, and finishes the job with
-/// exactly one terminal event once the drain returns.
+/// The chained power/wait phase run after a successful, unblocked drain when
+/// the caller requested drain-then-reboot/shutdown (`talos_mutation`'s
+/// drain-first path). Holds the Talos action-serialization guard for the
+/// whole phase — including the reboot wait — so it releases exactly when the
+/// job ends, whether that's success, failure, or a panic.
+pub(crate) struct PowerPhase {
+    pub action: String,
+    pub talos: Arc<roder_talos::Backend>,
+    pub node_key: String,
+    pub was_cordoned: bool,
+    pub previous_boot_id: Option<String>,
+    /// Never read — held only for its `Drop`, which releases the guard when
+    /// this `PowerPhase` (and thus the job) ends.
+    #[allow(dead_code)]
+    pub lock: tokio::sync::OwnedMutexGuard<()>,
+}
+
+/// Spawn a drain (optionally chained into a power action) as a background
+/// job: registers it with `state.drain_jobs`, runs `Backend::drain` on a
+/// detached task, then — if `power` is `Some` and the drain succeeded
+/// without blockers — powers the node off/reboots it and waits for the
+/// reboot, before finishing the job with exactly one terminal event.
 pub(crate) fn spawn_drain_job(
     state: &AppState,
     backend: Arc<Backend>,
     key: String,
     name: String,
     options: DrainOptions,
+    power: Option<PowerPhase>,
 ) -> u64 {
     let handle = state.drain_jobs.create();
     let id = handle.id;
@@ -51,38 +71,113 @@ pub(crate) fn spawn_drain_job(
             let tx = tx; // move so it drops when the drain finishes
             backend.drain(&key, &name, &options, &tx, &cancel).await
         };
-        finish_with(&handle, &cancel, async { tokio::join!(drain, pump).0 }).await;
+        finish_with(&handle, async {
+            // Join drain+pump to completion first, so every progress event is
+            // flushed (in order) before any power-phase event is emitted —
+            // otherwise `PowerRequested` (emitted synchronously, before its
+            // first await) could get a lower `seq` than trailing drain ticks
+            // still sitting in the unbounded channel.
+            let result = tokio::join!(drain, pump).0;
+            match result {
+                Ok(_summary) if cancel.load(Ordering::Relaxed) => DrainEventKind::Cancelled,
+                Ok(summary) if summary.failed.is_empty() => match power.as_ref() {
+                    Some(p) => run_power_phase(&handle, &backend, &name, p, summary).await,
+                    None => DrainEventKind::Done { summary },
+                },
+                Ok(summary) => {
+                    // Blocked or failed drain: mirror the old early-return —
+                    // restore the pre-drain cordon state, do NOT power off.
+                    if let Some(p) = power.as_ref() {
+                        if !p.was_cordoned {
+                            let _ = backend.cordon(&p.node_key, &name, false).await;
+                        }
+                    }
+                    DrainEventKind::Done { summary }
+                }
+                Err(e) => DrainEventKind::Error {
+                    message: e.to_string(),
+                },
+            }
+        })
+        .await;
     });
     id
+}
+
+/// Power off/reboot the node and (for reboot) wait for it to come back,
+/// restoring the pre-drain cordon state along every path — the same
+/// behavior `talos_mutation` used to run inline and return as an HTTP
+/// response, now driving job events instead.
+///
+/// `power.lock` (the Talos action guard) is only borrowed here; it's owned
+/// by the caller's `power: Option<PowerPhase>` and drops when that drops at
+/// the end of the job's task, i.e. exactly when the job finishes.
+async fn run_power_phase(
+    handle: &JobHandle,
+    backend: &Backend,
+    name: &str,
+    power: &PowerPhase,
+    summary: DrainSummary,
+) -> DrainEventKind {
+    handle.emit(DrainEventKind::PowerRequested {
+        action: power.action.clone(),
+    });
+    if let Err(e) = power.talos.power_action(name, &power.action).await {
+        if !power.was_cordoned {
+            let _ = backend.cordon(&power.node_key, name, false).await;
+        }
+        return DrainEventKind::Error {
+            message: e.to_string(),
+        };
+    }
+    if power.action == "reboot" {
+        match backend
+            .wait_for_node_reboot(
+                name,
+                power.previous_boot_id.as_deref(),
+                std::time::Duration::from_secs(300),
+            )
+            .await
+        {
+            Ok(()) => {
+                handle.emit(DrainEventKind::NodeReady);
+                if !power.was_cordoned {
+                    if let Err(e) = backend.cordon(&power.node_key, name, false).await {
+                        return DrainEventKind::Error {
+                            message: e.to_string(),
+                        };
+                    }
+                }
+            }
+            Err(e) => {
+                return DrainEventKind::Error {
+                    message: e.to_string(),
+                };
+            }
+        }
+    }
+    DrainEventKind::Done { summary }
 }
 
 /// Run `fut` to completion, then emit exactly one terminal event on `handle`
 /// and finish the job — guaranteed even if `fut` panics.
 ///
-/// Without this, a panic anywhere in the drain (or its concurrent event
-/// pump, both of which `fut` wraps) would unwind straight out of the spawned
-/// task: tokio silently drops the task, `handle.finish()` never runs, the
-/// registry entry's broadcast sender never drops, and every subscriber's
-/// `live_events` sits in `rx.recv().await` forever — no terminal event, no
-/// `eof`, no expiry. `catch_unwind` restores the "exactly one terminal event,
-/// always" invariant by converting a panic into an `Error` event instead.
-async fn finish_with<E: std::fmt::Display>(
-    handle: &JobHandle,
-    cancel: &AtomicBool,
-    fut: impl Future<Output = Result<DrainSummary, E>>,
-) {
-    match AssertUnwindSafe(fut).catch_unwind().await {
-        Ok(Ok(_summary)) if cancel.load(Ordering::Relaxed) => {
-            handle.emit(DrainEventKind::Cancelled)
-        }
-        Ok(Ok(summary)) => handle.emit(DrainEventKind::Done { summary }),
-        Ok(Err(e)) => handle.emit(DrainEventKind::Error {
-            message: e.to_string(),
-        }),
-        Err(panic) => handle.emit(DrainEventKind::Error {
+/// Without this, a panic anywhere in the drain (or the chained power phase,
+/// or the concurrent event pump — all of which `fut` wraps) would unwind
+/// straight out of the spawned task: tokio silently drops the task,
+/// `handle.finish()` never runs, the registry entry's broadcast sender never
+/// drops, and every subscriber's `live_events` sits in `rx.recv().await`
+/// forever — no terminal event, no `eof`, no expiry. `catch_unwind` restores
+/// the "exactly one terminal event, always" invariant by converting a panic
+/// into an `Error` event instead.
+async fn finish_with(handle: &JobHandle, fut: impl Future<Output = DrainEventKind>) {
+    let kind = match AssertUnwindSafe(fut).catch_unwind().await {
+        Ok(kind) => kind,
+        Err(panic) => DrainEventKind::Error {
             message: panic_message(&panic),
-        }),
-    }
+        },
+    };
+    handle.emit(kind);
     handle.finish();
 }
 
@@ -244,9 +339,8 @@ mod tests {
         let jobs = Arc::new(crate::server::drain_jobs::DrainJobs::default());
         let handle = jobs.create();
         let id = handle.id;
-        let cancel = AtomicBool::new(false);
 
-        finish_with::<String>(&handle, &cancel, async { panic!("boom") }).await;
+        finish_with(&handle, async { panic!("boom") }).await;
 
         let (replay, _rx, done) = jobs.subscribe(id).unwrap();
         assert!(done, "job must be finished even after a panic");
@@ -269,9 +363,13 @@ mod tests {
         let jobs = Arc::new(crate::server::drain_jobs::DrainJobs::default());
         let handle = jobs.create();
         let id = handle.id;
-        let cancel = AtomicBool::new(false);
 
-        finish_with::<String>(&handle, &cancel, async { Ok(DrainSummary::default()) }).await;
+        finish_with(&handle, async {
+            DrainEventKind::Done {
+                summary: DrainSummary::default(),
+            }
+        })
+        .await;
 
         let (replay, _rx, done) = jobs.subscribe(id).unwrap();
         assert!(done);

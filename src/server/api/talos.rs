@@ -4,6 +4,7 @@
 
 use std::collections::BTreeSet;
 use std::convert::Infallible;
+use std::sync::Arc;
 
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -11,8 +12,7 @@ use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use roder_core::{
-    DrainOptions, ObjectDetail, TalosCapabilities, TalosConfigDiff, TalosConfigDifference,
-    TalosConfigPeerDiff,
+    ObjectDetail, TalosCapabilities, TalosConfigDiff, TalosConfigDifference, TalosConfigPeerDiff,
 };
 use roder_k8s::Backend;
 use serde::Deserialize;
@@ -266,6 +266,14 @@ pub async fn talos_dmesg(
         .into_response()
 }
 
+fn talos_lock_conflict() -> Response {
+    (
+        StatusCode::CONFLICT,
+        "another Talos operation is already in progress",
+    )
+        .into_response()
+}
+
 /// The Talos-specific branch of `POST /api/action` (service start/stop/
 /// restart, reboot, shutdown). Returns `None` when `req.action` isn't a Talos
 /// action, so the generic dispatcher in `action.rs` can fall through to it.
@@ -287,18 +295,6 @@ pub(crate) async fn talos_mutation(
     if !talos_capabilities(state, headers).actions {
         return Some(StatusCode::FORBIDDEN.into_response());
     }
-    let _action_guard = match state.talos_action_lock.try_lock() {
-        Ok(guard) => guard,
-        Err(_) => {
-            return Some(
-                (
-                    StatusCode::CONFLICT,
-                    "another Talos operation is already in progress",
-                )
-                    .into_response(),
-            )
-        }
-    };
     let Some(talos) = state.talos.as_ref() else {
         return Some(StatusCode::NOT_FOUND.into_response());
     };
@@ -333,42 +329,43 @@ pub(crate) async fn talos_mutation(
         .pointer("/status/nodeInfo/bootID")
         .and_then(|value| value.as_str())
         .map(String::from);
-    let mut drain_summary = None;
+
     if power_action && req.drain.unwrap_or(false) {
-        // Shim: Tasks 4-5 wire real progress-event streaming and cancellation;
-        // for now drive drain with a throwaway channel/flag, carrying only
-        // the old `force` semantics through `DrainOptions`.
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        let cancel = std::sync::atomic::AtomicBool::new(false);
-        let options = DrainOptions {
-            force: req.force.unwrap_or(false),
-            ..Default::default()
+        // Drain-first power actions run as a chained background job (drain,
+        // then power off/reboot + wait), streamed over SSE — see
+        // `drain::spawn_drain_job`/`drain::PowerPhase`. The guard has to be
+        // an *owned* lock so it can move into the job and release when the
+        // job (including the reboot wait) ends, rather than when this
+        // request handler returns.
+        let lock = match Arc::clone(&state.talos_action_lock).try_lock_owned() {
+            Ok(guard) => guard,
+            Err(_) => return Some(talos_lock_conflict()),
         };
-        match backend.drain(&node_key, node, &options, &tx, &cancel).await {
-            Ok(summary) if summary.failed.is_empty() => drain_summary = Some(summary),
-            Ok(summary) => {
-                if !was_cordoned {
-                    let _ = backend.cordon(&node_key, node, false).await;
-                }
-                return Some(
-                    (
-                        StatusCode::CONFLICT,
-                        Json(serde_json::json!({
-                            "error": "node drain did not complete",
-                            "drain": summary,
-                        })),
-                    )
-                        .into_response(),
-                );
-            }
-            Err(error) => {
-                if !was_cordoned {
-                    let _ = backend.cordon(&node_key, node, false).await;
-                }
-                return Some(bad_gateway(error));
-            }
-        }
+        let phase = super::drain::PowerPhase {
+            action: req.action.trim_start_matches("talos-").to_string(),
+            talos: Arc::clone(talos),
+            node_key: node_key.clone(),
+            was_cordoned,
+            previous_boot_id,
+            lock,
+        };
+        let id = super::drain::spawn_drain_job(
+            state,
+            backend,
+            node_key,
+            node.to_string(),
+            req.options.clone().unwrap_or_default(),
+            Some(phase),
+        );
+        return Some(
+            (StatusCode::OK, serde_json::json!({ "job": id }).to_string()).into_response(),
+        );
     }
+
+    let _action_guard = match state.talos_action_lock.try_lock() {
+        Ok(guard) => guard,
+        Err(_) => return Some(talos_lock_conflict()),
+    };
     let result = match req.action.as_str() {
         "talos-service-start" | "talos-service-stop" | "talos-service-restart" => {
             let Some(service) = req.service.as_deref() else {
@@ -387,9 +384,6 @@ pub(crate) async fn talos_mutation(
         _ => unreachable!(),
     };
     if let Err(error) = result {
-        if drain_summary.is_some() && !was_cordoned {
-            let _ = backend.cordon(&node_key, node, false).await;
-        }
         return Some(talos_error(error));
     }
     if req.action == "talos-reboot" {
@@ -403,16 +397,10 @@ pub(crate) async fn talos_mutation(
         {
             return Some((StatusCode::GATEWAY_TIMEOUT, error.to_string()).into_response());
         }
-        if drain_summary.is_some() && !was_cordoned {
-            if let Err(error) = backend.cordon(&node_key, node, false).await {
-                return Some(bad_gateway(error));
-            }
-        }
     }
     Some(
         Json(serde_json::json!({
             "status": if req.action == "talos-reboot" { "ready" } else { "requested" },
-            "drain": drain_summary,
         }))
         .into_response(),
     )

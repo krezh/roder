@@ -91,8 +91,14 @@ pub async fn action(
             return (StatusCode::BAD_REQUEST, "missing key or name").into_response();
         };
         let options = req.options.clone().unwrap_or_default();
-        let id =
-            super::drain::spawn_drain_job(&state, b, key.to_string(), name.to_string(), options);
+        let id = super::drain::spawn_drain_job(
+            &state,
+            b,
+            key.to_string(),
+            name.to_string(),
+            options,
+            None,
+        );
         return (StatusCode::OK, serde_json::json!({ "job": id }).to_string()).into_response();
     } else if req.action == "drain-cancel" {
         let Some(id) = req.job else {

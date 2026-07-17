@@ -520,6 +520,9 @@
   animation: overlay-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
   .modal-msg {
     margin-bottom: 1rem;
+    white-space: pre-line;
+    max-height: 50vh;
+    overflow-y: auto;
   }
   .modal-actions {
     display: flex;

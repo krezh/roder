@@ -5,7 +5,9 @@ use roder_core::{ResourceKind, RowStatus};
 
 use crate::app::events::{fire_action, fire_action_with};
 use crate::app::overlays::confirm::{ask_confirm, Confirm, ConfirmButton};
-use crate::app::overlays::toast::{show_toast, show_toast_detail, Toast, ToastKind};
+use crate::app::overlays::toast::{
+    show_toast, show_toast_detail, Toast, ToastKind, MAX_TOAST_ITEMS,
+};
 use crate::app::state::{
     open_logs, Catalog, CtxMenu, DetailTarget, ExecOpen, ExecTarget, LogPods, LogTarget, TableRows,
     TableSelected, TreeOpen,
@@ -498,11 +500,8 @@ fn run_drain(
                         ToastKind::Ok,
                     );
                 } else if !force && summary.evicted == 0 {
-                    let detail = summary.failed.join("\n");
                     confirm.set(Some(Confirm {
-                        message: format!(
-                            "Drain of {name} blocked:\n{detail}\n\nForce drain anyway? This may delete unmanaged pods and lose emptyDir data."
-                        ),
+                        message: blocked_drain_message(&name, &summary),
                         buttons: vec![ConfirmButton::new("Force drain", move || {
                             run_drain(toast, confirm, key.clone(), name.clone(), true)
                         })],
@@ -527,4 +526,64 @@ fn run_drain(
             ),
         }
     });
+}
+
+/// The message for a blocked-drain confirm — shared by `run_drain` above and
+/// the Talos power-action drain-first flow (`talos_power_action` in
+/// `app::detail`). Caps the listed failures the same way toasts do (see
+/// [`MAX_TOAST_ITEMS`]) so a node with many blocking pods doesn't grow the
+/// confirm dialog without bound.
+pub(crate) fn blocked_drain_message(node: &str, summary: &roder_core::DrainSummary) -> String {
+    let mut lines = summary.failed.clone();
+    if lines.len() > MAX_TOAST_ITEMS {
+        let rest = lines.len() - (MAX_TOAST_ITEMS - 1);
+        lines.truncate(MAX_TOAST_ITEMS - 1);
+        lines.push(format!("+{rest} more"));
+    }
+    format!(
+        "Drain of {node} blocked:\n{}\n\nForce drain anyway? This may delete unmanaged pods and lose emptyDir data.",
+        lines.join("\n")
+    )
+}
+
+#[cfg(test)]
+mod blocked_drain_message_tests {
+    use super::blocked_drain_message;
+    use roder_core::DrainSummary;
+
+    fn summary(failed: Vec<&str>) -> DrainSummary {
+        DrainSummary {
+            evicted: 0,
+            skipped: 0,
+            failed: failed.into_iter().map(String::from).collect(),
+        }
+    }
+
+    #[test]
+    fn lists_all_lines_under_the_cap() {
+        let s = summary(vec!["pod-a: unmanaged", "pod-b: emptyDir"]);
+        let msg = blocked_drain_message("node1", &s);
+        assert_eq!(
+            msg,
+            "Drain of node1 blocked:\npod-a: unmanaged\npod-b: emptyDir\n\nForce drain anyway? This may delete unmanaged pods and lose emptyDir data."
+        );
+    }
+
+    #[test]
+    fn caps_at_six_lines_with_a_more_summary() {
+        let s = summary(vec![
+            "pod-1", "pod-2", "pod-3", "pod-4", "pod-5", "pod-6", "pod-7", "pod-8",
+        ]);
+        let msg = blocked_drain_message("node1", &s);
+        let listed = msg
+            .strip_prefix("Drain of node1 blocked:\n")
+            .unwrap()
+            .split("\n\nForce drain anyway?")
+            .next()
+            .unwrap();
+        let lines: Vec<&str> = listed.split('\n').collect();
+        assert_eq!(lines.len(), 6);
+        assert_eq!(lines[..5], ["pod-1", "pod-2", "pod-3", "pod-4", "pod-5"]);
+        assert_eq!(lines[5], "+3 more");
+    }
 }

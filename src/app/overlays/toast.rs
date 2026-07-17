@@ -11,8 +11,9 @@ pub(crate) enum ToastKind {
 }
 
 /// Cap on how many names a toast will list individually; beyond this a "+N more"
-/// row is appended instead of letting the toast grow unbounded.
-const MAX_TOAST_ITEMS: usize = 6;
+/// row is appended instead of letting the toast grow unbounded. Also reused by
+/// `context_menu::blocked_drain_message` for the same capping in a confirm dialog.
+pub(crate) const MAX_TOAST_ITEMS: usize = 6;
 
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct Toast {

@@ -32,6 +32,7 @@ use mobile::MobileShell;
 use overlays::access_review::AccessReview;
 use overlays::confirm::{Confirm, ConfirmDialog};
 use overlays::context_menu::ContextMenu;
+use overlays::drain::DrainOverlay;
 use overlays::exec::ExecWindow;
 use overlays::ns_palette::NsPalette;
 use overlays::palette::CommandPalette;
@@ -41,9 +42,9 @@ use overlays::tree::ResourceTreeWindow;
 use overlays::AlertsPanel;
 use state::{
     AccessReviewOpen, AlertsData, AlertsOpen, Catalog, ConnectionState, Connectivity, CtxMenu,
-    ExecOpen, ExecTarget, FilterFocus, LogPods, LogTarget, NavOpen, NsPaletteOpen, OnlyProblems,
-    PaletteOpen, PodModalTarget, ResourceFilter, ShortcutsOpen, TableRows, TableSelected, Tick,
-    TreeOpen, WorkspaceConf, WorkspaceConfig,
+    DrainOpen, DrainTarget, ExecOpen, ExecTarget, FilterFocus, LogPods, LogTarget, NavOpen,
+    NsPaletteOpen, OnlyProblems, PaletteOpen, PodModalTarget, ResourceFilter, ShortcutsOpen,
+    TableRows, TableSelected, Tick, TreeOpen, WorkspaceConf, WorkspaceConfig,
 };
 use views::resource::ResourceView;
 use views::search::SearchResultsView;
@@ -186,6 +187,8 @@ pub fn App() -> impl IntoView {
     provide_context(ExecOpen(exec_open));
     let tree_open = RwSignal::new(None::<DetailTarget>);
     provide_context(TreeOpen(tree_open));
+    let drain_open = RwSignal::new(None::<DrainTarget>);
+    provide_context(DrainOpen(drain_open));
     let shortcuts_open = RwSignal::new(false);
     provide_context(ShortcutsOpen(shortcuts_open));
     let alerts_open = RwSignal::new(false);
@@ -528,6 +531,7 @@ pub fn App() -> impl IntoView {
                         <NsPalette />
                         <ContextMenu />
                         <ConfirmDialog />
+                        <DrainOverlay />
                         <PodModal />
                         <ExecWindow />
                         <ResourceTreeWindow />

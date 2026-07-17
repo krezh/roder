@@ -10,8 +10,8 @@ use roder_core::ObjectDetail;
 
 use crate::app::components::table::ScaleControl;
 use crate::app::logs::LogsView;
-use crate::app::overlays::confirm::{ask_confirm, Confirm, ConfirmButton};
-use crate::app::state::{DetailTarget, ExecOpen, ExecTarget};
+use crate::app::overlays::confirm::{ask_confirm, Confirm};
+use crate::app::state::{DetailTarget, DrainOpen, DrainTarget, ExecOpen, ExecTarget};
 use crate::app::util::format::parse_key;
 use crate::app::util::json::selector_from;
 use crate::app::util::predicate::KindKind;
@@ -344,7 +344,7 @@ pub(crate) fn RowDetail(
                             view! { <LogsView url=format!("/api/talos/dmesg?node={}", data::percent_encode(&pod)) /> }.into_any()
                         },
                         Tab::Metrics => view! { <MetricsChart namespace=ns.clone() name=pod.clone() /> }.into_any(),
-                        Tab::Talos => view! { <TalosNodeView node=pod.clone() actions=talos_actions() config=talos_config() /> }.into_any(),
+                        Tab::Talos => view! { <TalosNodeView node=pod.clone() key=tv.get_value().key actions=talos_actions() config=talos_config() /> }.into_any(),
                         Tab::Yaml => view! {
                             <div class="yaml-pane">
                                 <div class="yaml-head">
@@ -388,8 +388,9 @@ pub(crate) fn RowDetail(
 }
 
 #[component]
-fn TalosNodeView(node: String, actions: bool, config: bool) -> impl IntoView {
+fn TalosNodeView(node: String, key: String, actions: bool, config: bool) -> impl IntoView {
     let confirm = expect_context::<RwSignal<Option<Confirm>>>();
+    let drain_open = expect_context::<DrainOpen>().0;
     let action_status = RwSignal::new(None::<Result<String, String>>);
     let pending_action = RwSignal::new(None::<String>);
     let drain_first = RwSignal::new(true);
@@ -429,6 +430,7 @@ fn TalosNodeView(node: String, actions: bool, config: bool) -> impl IntoView {
         <Suspense fallback=|| view! { <div class="pad muted">"Loading Talos status…"</div> }>
             {move || {
                 let node = node.clone();
+                let key = key.clone();
                 status.get().map(move |result| match result {
                 Err(e) => view! { <div class="pad muted">{format!("Talos integration unavailable: {e}")}</div> }.into_any(),
                 Ok(s) => {
@@ -465,6 +467,8 @@ fn TalosNodeView(node: String, actions: bool, config: bool) -> impl IntoView {
                     let reboot_node = node.clone();
                     let shutdown_node = node.clone();
                     let services_node = node.clone();
+                    let reboot_key = key.clone();
+                    let shutdown_key = key.clone();
                     view! {
                         <div class="info talos-view">
                             <div class="detail-stats">
@@ -486,15 +490,34 @@ fn TalosNodeView(node: String, actions: bool, config: bool) -> impl IntoView {
                                     on:change=move |e| drain_first.set(event_target_checked(&e)) />"Drain first"</label>
                                 <button class="act danger" disabled=move || pending_action.get().is_some() on:click=move |_| {
                                     let target = reboot_node.clone();
-                                    let drain = drain_first.get_untracked();
-                                    let warning = if control_plane { " This is a control-plane node; verify etcd quorum before continuing." } else { "" };
-                                    ask_confirm(confirm, format!("Reboot {target}?{warning}"), "Reboot", move || talos_power_action(target.clone(), "reboot", drain, false, action_status, pending_action, confirm));
+                                    if drain_first.get_untracked() {
+                                        // The etcd-quorum warning for a control-plane node
+                                        // moves into the drain dialog itself (see
+                                        // `overlays::drain`) — it shows there instead of here.
+                                        drain_open.set(Some(DrainTarget {
+                                            key: reboot_key.clone(),
+                                            name: target,
+                                            power: Some("reboot".to_string()),
+                                            control_plane,
+                                        }));
+                                    } else {
+                                        let warning = if control_plane { " This is a control-plane node; verify etcd quorum before continuing." } else { "" };
+                                        ask_confirm(confirm, format!("Reboot {target}?{warning}"), "Reboot", move || talos_power_action(target.clone(), "reboot", action_status, pending_action));
+                                    }
                                 }>"Reboot"</button>
                                 <button class="act danger" disabled=move || pending_action.get().is_some() on:click=move |_| {
                                     let target = shutdown_node.clone();
-                                    let drain = drain_first.get_untracked();
-                                    let warning = if control_plane { " This is a control-plane node; verify etcd quorum before continuing." } else { "" };
-                                    ask_confirm(confirm, format!("Shut down {target}?{warning}"), "Shut down", move || talos_power_action(target.clone(), "shutdown", drain, false, action_status, pending_action, confirm));
+                                    if drain_first.get_untracked() {
+                                        drain_open.set(Some(DrainTarget {
+                                            key: shutdown_key.clone(),
+                                            name: target,
+                                            power: Some("shutdown".to_string()),
+                                            control_plane,
+                                        }));
+                                    } else {
+                                        let warning = if control_plane { " This is a control-plane node; verify etcd quorum before continuing." } else { "" };
+                                        ask_confirm(confirm, format!("Shut down {target}?{warning}"), "Shut down", move || talos_power_action(target.clone(), "shutdown", action_status, pending_action));
+                                    }
                                 }>"Shutdown"</button>
                                 {move || pending_action.get().map(|action| view! {
                                     <span class="muted">{if action == "reboot" { "Waiting for node recovery…".to_string() } else { format!("Running {action}…") }}</span>
@@ -680,18 +703,15 @@ fn talos_service_action(
     });
 }
 
-/// Drives a Talos reboot/shutdown, optionally draining first. If a drain-first
-/// request is blocked by the safety pre-check (unmanaged or emptyDir-backed
-/// pods, evicting nothing), offer to force past it — mirroring `run_drain` in
-/// `overlays::context_menu`.
+/// Drives a plain (non-drain-first) Talos reboot/shutdown. The drain-first
+/// path no longer goes through here — it opens the drain dialog
+/// (`overlays::drain::DrainOverlay`) instead, which POSTs the same
+/// `talos-{action}` action itself with `drain: true`.
 fn talos_power_action(
     node: String,
     action: &'static str,
-    drain: bool,
-    force: bool,
     status: RwSignal<Option<Result<String, String>>>,
     pending: RwSignal<Option<String>>,
-    confirm: RwSignal<Option<Confirm>>,
 ) {
     leptos::task::spawn_local(async move {
         status.set(None);
@@ -699,28 +719,8 @@ fn talos_power_action(
         let result = data::post_action(&serde_json::json!({
             "action": format!("talos-{action}"),
             "name": node,
-            "drain": drain,
-            "force": force,
         }))
         .await;
-        let blocked_drain = result.as_ref().err().and_then(|body| {
-            let drain_value = serde_json::from_str::<serde_json::Value>(body)
-                .ok()?
-                .get("drain")?
-                .clone();
-            let summary: roder_core::DrainSummary = serde_json::from_value(drain_value).ok()?;
-            (!force && summary.evicted == 0).then_some(summary)
-        });
-        if let Some(summary) = blocked_drain {
-            pending.set(None);
-            confirm.set(Some(Confirm {
-                message: crate::app::overlays::context_menu::blocked_drain_message(&node, &summary),
-                buttons: vec![ConfirmButton::new("Force drain", move || {
-                    talos_power_action(node.clone(), action, true, true, status, pending, confirm)
-                })],
-            }));
-            return;
-        }
         status.set(Some(result.map(|_| {
             if action == "reboot" {
                 "node returned Ready".into()

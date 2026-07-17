@@ -83,6 +83,24 @@ pub(crate) struct ExecOpen(pub(crate) RwSignal<Option<ExecTarget>>);
 #[derive(Clone, Copy)]
 pub(crate) struct TreeOpen(pub(crate) RwSignal<Option<DetailTarget>>);
 
+/// Target for the drain overlay: a node to drain, optionally as the first
+/// phase of a Talos power action (`power`), in which case `control_plane`
+/// drives the etcd-quorum warning shown in the dialog.
+#[derive(Clone, PartialEq)]
+pub(crate) struct DrainTarget {
+    /// Node kind key (used to build the plain `"drain"` action payload;
+    /// unused when `power` is set — the server resolves the node itself).
+    pub(crate) key: String,
+    pub(crate) name: String,
+    /// "reboot" | "shutdown" when this drain is the first phase of a Talos
+    /// power action; `None` for a bare drain (context menu).
+    pub(crate) power: Option<String>,
+    pub(crate) control_plane: bool,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct DrainOpen(pub(crate) RwSignal<Option<DrainTarget>>);
+
 /// Whether the keyboard shortcuts help overlay is open.
 #[derive(Clone, Copy)]
 pub(crate) struct ShortcutsOpen(pub(crate) RwSignal<bool>);

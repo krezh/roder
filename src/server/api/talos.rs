@@ -11,7 +11,8 @@ use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use roder_core::{
-    ObjectDetail, TalosCapabilities, TalosConfigDiff, TalosConfigDifference, TalosConfigPeerDiff,
+    DrainOptions, ObjectDetail, TalosCapabilities, TalosConfigDiff, TalosConfigDifference,
+    TalosConfigPeerDiff,
 };
 use roder_k8s::Backend;
 use serde::Deserialize;
@@ -334,10 +335,16 @@ pub(crate) async fn talos_mutation(
         .map(String::from);
     let mut drain_summary = None;
     if power_action && req.drain.unwrap_or(false) {
-        match backend
-            .drain(&node_key, node, req.force.unwrap_or(false))
-            .await
-        {
+        // Shim: Tasks 4-5 wire real progress-event streaming and cancellation;
+        // for now drive drain with a throwaway channel/flag, carrying only
+        // the old `force` semantics through `DrainOptions`.
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let options = DrainOptions {
+            force: req.force.unwrap_or(false),
+            ..Default::default()
+        };
+        match backend.drain(&node_key, node, &options, &tx, &cancel).await {
             Ok(summary) if summary.failed.is_empty() => drain_summary = Some(summary),
             Ok(summary) => {
                 if !was_cordoned {

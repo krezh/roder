@@ -2,64 +2,81 @@
 //! `kubectl drain`'s default behaviour (skip DaemonSet-owned and mirror pods,
 //! respect PodDisruptionBudgets with a short retry).
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
+
 use k8s_openapi::api::core::v1::{Node, Pod};
 use kube::api::{Api, ListParams};
-use roder_core::DrainSummary;
+use roder_core::{DrainEventKind, DrainOptions, DrainSummary};
 
 use super::{api_err, Backend};
 use crate::client::K8sError;
 
-/// Overall wall-clock budget for the eviction retry loop, so a node stuck
-/// behind an unsatisfiable PodDisruptionBudget can't hang the request forever.
-const DRAIN_BUDGET: std::time::Duration = std::time::Duration::from_secs(60);
-const RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
+const RETRY_DELAY: Duration = Duration::from_secs(2);
+
+/// Channel a caller streams progress on; send failures are ignored (a
+/// disconnected/dropped receiver shouldn't abort the drain itself).
+pub type DrainEvents = tokio::sync::mpsc::UnboundedSender<DrainEventKind>;
 
 impl Backend {
     /// Cordon `name`, then evict every pod scheduled on it except
     /// DaemonSet-owned and mirror (static) pods, which the API can't evict.
     ///
-    /// Unless `force` is set, refuses to touch a node running unmanaged pods
-    /// or pods with `emptyDir` volumes (mirroring `kubectl drain`'s default
-    /// safety refusal, which normally requires `--force`/`--delete-emptydir-data`
-    /// to override).
+    /// Refuses to touch a node with unmanaged pods, pods using `emptyDir`
+    /// volumes, or (unless `ignore_daemonsets`) DaemonSet pods, unless the
+    /// matching `options` flag opts in — mirroring `kubectl drain`'s default
+    /// safety refusal. Progress is streamed on `events` (best-effort); `cancel`
+    /// is polled between pods and in the termination-wait loop, and drain
+    /// stops early (returning the partial summary) once it's set.
     pub async fn drain(
         &self,
         key: &str,
         name: &str,
-        force: bool,
+        options: &DrainOptions,
+        events: &DrainEvents,
+        cancel: &AtomicBool,
     ) -> Result<DrainSummary, K8sError> {
         self.cordon(key, name, true).await?;
+        let _ = events.send(DrainEventKind::Cordoned);
 
         let pod_api: Api<Pod> = Api::all(self.client());
         let lp = ListParams::default().fields(&format!("spec.nodeName={name}"));
         let pods = pod_api.list(&lp).await.map_err(api_err)?;
 
         let mut summary = DrainSummary::default();
-        let deadline = std::time::Instant::now() + DRAIN_BUDGET;
+        let deadline = Instant::now() + Duration::from_secs(options.timeout_secs);
 
-        if !force {
-            for pod in &pods.items {
-                if let Some(reason) = unsafe_drain_blocker(pod) {
-                    summary.failed.push(format!(
-                        "{}: {reason}",
-                        pod.metadata.name.as_deref().unwrap_or("unknown pod")
-                    ));
-                }
-            }
-            if !summary.failed.is_empty() {
-                summary.skipped = pods.items.len();
-                return Ok(summary);
-            }
+        let blockers: Vec<_> = pods
+            .items
+            .iter()
+            .filter_map(|p| drain_blocker(p, options))
+            .collect();
+        if !blockers.is_empty() {
+            summary.failed = blockers
+                .iter()
+                .map(|b| format!("{}: {}", b.pod, b.reason))
+                .collect();
+            summary.skipped = pods.items.len();
+            let _ = events.send(DrainEventKind::Blocked { blockers });
+            return Ok(summary);
         }
 
-        for pod in pods.items.iter().filter(|p| is_evictable(p)) {
+        let evictable: Vec<_> = pods.items.iter().filter(|p| is_evictable(p)).collect();
+        let total = evictable.len();
+        let _ = events.send(DrainEventKind::Started { total });
+
+        for pod in evictable {
+            if cancel.load(Ordering::Relaxed) {
+                summary.skipped = pods.items.len() - summary.evicted;
+                return Ok(summary);
+            }
             let pod_name = pod.metadata.name.clone().unwrap_or_default();
             let ns = pod.metadata.namespace.clone().unwrap_or_default();
 
             let mut last_err = String::new();
             let mut ok = false;
-            while std::time::Instant::now() < deadline {
-                match self.evict_pod(&ns, &pod_name).await {
+            while Instant::now() < deadline {
+                match self.remove_pod(&ns, &pod_name, options).await {
                     Ok(()) => {
                         ok = true;
                         break;
@@ -72,15 +89,27 @@ impl Backend {
             }
             if ok {
                 summary.evicted += 1;
+                let _ = events.send(DrainEventKind::Evicted {
+                    pod: pod_name,
+                    done: summary.evicted,
+                    total,
+                });
             } else {
                 summary.failed.push(format!("{pod_name}: {last_err}"));
+                let _ = events.send(DrainEventKind::EvictFailed {
+                    pod: pod_name,
+                    reason: last_err,
+                });
             }
         }
         summary.skipped = pods.items.len() - summary.evicted;
 
         // Eviction acceptance is not completion: wait for evictable pods to
         // disappear so preStop hooks and volume detach can finish before power-off.
-        while summary.failed.is_empty() && std::time::Instant::now() < deadline {
+        while summary.failed.is_empty() && Instant::now() < deadline {
+            if cancel.load(Ordering::Relaxed) {
+                return Ok(summary);
+            }
             let remaining = pod_api.list(&lp).await.map_err(api_err)?;
             let names: Vec<_> = remaining
                 .items
@@ -91,6 +120,9 @@ impl Backend {
             if names.is_empty() {
                 return Ok(summary);
             }
+            let _ = events.send(DrainEventKind::WaitingTermination {
+                remaining: names.len(),
+            });
             tokio::time::sleep(RETRY_DELAY).await;
         }
         if summary.failed.is_empty() {
@@ -100,6 +132,31 @@ impl Backend {
         }
 
         Ok(summary)
+    }
+
+    /// Evict `pod`, or DELETE it when eviction is disabled; either way honoring
+    /// the grace-period override.
+    async fn remove_pod(
+        &self,
+        ns: &str,
+        name: &str,
+        options: &DrainOptions,
+    ) -> Result<(), K8sError> {
+        let api: Api<Pod> = Api::namespaced(self.client(), ns);
+        let dp = kube::api::DeleteParams {
+            grace_period_seconds: options.grace_period,
+            ..Default::default()
+        };
+        if options.disable_eviction {
+            api.delete(name, &dp).await.map_err(api_err)?;
+            return Ok(());
+        }
+        let ep = kube::api::EvictParams {
+            delete_options: Some(dp),
+            ..Default::default()
+        };
+        api.evict(name, &ep).await.map_err(api_err)?;
+        Ok(())
     }
 
     /// Wait until a rebooting node has first become NotReady and then Ready again.
@@ -179,41 +236,62 @@ fn is_evictable(pod: &Pod) -> bool {
     )
 }
 
-fn unsafe_drain_blocker(pod: &Pod) -> Option<&'static str> {
+/// Why `pod` blocks the drain under `options`, or None if it doesn't.
+fn drain_blocker(pod: &Pod, options: &DrainOptions) -> Option<roder_core::DrainBlocker> {
+    let name = pod
+        .metadata
+        .name
+        .clone()
+        .unwrap_or_else(|| "unknown pod".into());
     let terminal = matches!(
-        pod.status
-            .as_ref()
-            .and_then(|status| status.phase.as_deref()),
+        pod.status.as_ref().and_then(|s| s.phase.as_deref()),
         Some("Succeeded" | "Failed")
     );
     let mirror = pod
         .metadata
         .annotations
         .as_ref()
-        .is_some_and(|annotations| annotations.contains_key("kubernetes.io/config.mirror"));
+        .is_some_and(|a| a.contains_key("kubernetes.io/config.mirror"));
+    if terminal || mirror || pod.metadata.deletion_timestamp.is_some() {
+        return None;
+    }
     let daemonset = pod
         .metadata
         .owner_references
         .as_ref()
-        .is_some_and(|refs| refs.iter().any(|owner| owner.kind == "DaemonSet"));
-    if terminal || mirror || daemonset || pod.metadata.deletion_timestamp.is_some() {
-        return None;
+        .is_some_and(|refs| refs.iter().any(|o| o.kind == "DaemonSet"));
+    if daemonset {
+        return (!options.ignore_daemonsets).then(|| roder_core::DrainBlocker {
+            pod: name,
+            reason: "DaemonSet-managed pod".into(),
+            clearable_by: "ignore_daemonsets".into(),
+        });
     }
     if pod
         .metadata
         .owner_references
         .as_ref()
         .is_none_or(Vec::is_empty)
+        && !options.force
     {
-        return Some("unmanaged pod requires an explicit force drain");
+        return Some(roder_core::DrainBlocker {
+            pod: name,
+            reason: "unmanaged pod".into(),
+            clearable_by: "force".into(),
+        });
     }
-    if pod
-        .spec
-        .as_ref()
-        .and_then(|spec| spec.volumes.as_ref())
-        .is_some_and(|volumes| volumes.iter().any(|volume| volume.empty_dir.is_some()))
+    if !options.delete_emptydir_data
+        && pod
+            .spec
+            .as_ref()
+            .and_then(|s| s.volumes.as_ref())
+            .is_some_and(|vs| vs.iter().any(|v| v.empty_dir.is_some()))
     {
-        return Some("pod uses emptyDir storage and requires explicit data-loss approval");
+        return Some(roder_core::DrainBlocker {
+            pod: name,
+            reason: "uses emptyDir storage".into(),
+            clearable_by: "delete_emptydir_data".into(),
+        });
     }
     None
 }
@@ -230,10 +308,14 @@ mod tests {
             "spec": { "containers": [{ "name": "app", "image": "app" }] }
         }))
         .unwrap();
-        assert_eq!(
-            unsafe_drain_blocker(&pod),
-            Some("unmanaged pod requires an explicit force drain")
-        );
+        let blocker = drain_blocker(&pod, &DrainOptions::default()).unwrap();
+        assert_eq!(blocker.clearable_by, "force");
+
+        let forced = DrainOptions {
+            force: true,
+            ..Default::default()
+        };
+        assert!(drain_blocker(&pod, &forced).is_none());
     }
 
     #[test]
@@ -252,9 +334,58 @@ mod tests {
             }
         }))
         .unwrap();
-        assert_eq!(
-            unsafe_drain_blocker(&pod),
-            Some("pod uses emptyDir storage and requires explicit data-loss approval")
-        );
+        let blocker = drain_blocker(&pod, &DrainOptions::default()).unwrap();
+        assert_eq!(blocker.clearable_by, "delete_emptydir_data");
+
+        let allowed = DrainOptions {
+            delete_emptydir_data: true,
+            ..Default::default()
+        };
+        assert!(drain_blocker(&pod, &allowed).is_none());
+    }
+
+    #[test]
+    fn blocks_daemonset_pods_when_not_ignored() {
+        let pod: Pod = serde_json::from_value(json!({
+            "metadata": {
+                "name": "ds-pod",
+                "ownerReferences": [{
+                    "apiVersion": "apps/v1", "kind": "DaemonSet",
+                    "name": "ds", "uid": "1"
+                }]
+            },
+            "spec": { "containers": [{ "name": "app", "image": "app" }] }
+        }))
+        .unwrap();
+        let strict = DrainOptions {
+            ignore_daemonsets: false,
+            ..Default::default()
+        };
+        let blocker = drain_blocker(&pod, &strict).unwrap();
+        assert_eq!(blocker.clearable_by, "ignore_daemonsets");
+
+        // Default options ignore DaemonSets.
+        assert!(drain_blocker(&pod, &DrainOptions::default()).is_none());
+    }
+
+    #[test]
+    fn mirror_and_terminal_pods_never_block() {
+        let mirror: Pod = serde_json::from_value(json!({
+            "metadata": {
+                "name": "static-pod",
+                "annotations": { "kubernetes.io/config.mirror": "abc" }
+            },
+            "spec": { "containers": [{ "name": "app", "image": "app" }] }
+        }))
+        .unwrap();
+        assert!(drain_blocker(&mirror, &DrainOptions::default()).is_none());
+
+        let terminal: Pod = serde_json::from_value(json!({
+            "metadata": { "name": "done-pod" },
+            "spec": { "containers": [{ "name": "app", "image": "app" }] },
+            "status": { "phase": "Succeeded" }
+        }))
+        .unwrap();
+        assert!(drain_blocker(&terminal, &DrainOptions::default()).is_none());
     }
 }

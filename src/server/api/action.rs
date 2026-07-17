@@ -88,7 +88,16 @@ pub async fn action(
         let (Some(key), Some(name)) = (req.key.as_deref(), req.name.as_deref()) else {
             return (StatusCode::BAD_REQUEST, "missing key or name").into_response();
         };
-        return match b.drain(key, name, req.force.unwrap_or(false)).await {
+        // Shim: Tasks 4-5 wire real progress-event streaming and cancellation;
+        // for now drive drain with a throwaway channel/flag, carrying only
+        // the old `force` semantics through `DrainOptions`.
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let options = roder_core::DrainOptions {
+            force: req.force.unwrap_or(false),
+            ..Default::default()
+        };
+        return match b.drain(key, name, &options, &tx, &cancel).await {
             Ok(summary) => {
                 (StatusCode::OK, serde_json::to_string(&summary).unwrap()).into_response()
             }

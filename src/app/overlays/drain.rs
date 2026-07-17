@@ -481,6 +481,21 @@ fn detach_and_close(job: u64, name: String, toast: RwSignal<Option<Toast>>, do_c
             }
         });
     *sse_bg.borrow_mut() = handle;
+
+    // Belt-and-braces over the server's exactly-one-terminal-event guarantee:
+    // if this stream never delivers one (e.g. the job's registry entry had
+    // already expired when we subscribed, leaving an open but inert
+    // `EventSource`, or a future server regression), drop the handle
+    // unconditionally after a generous cap rather than let it — and its
+    // listeners — live for the rest of the tab's life. 30 minutes is well
+    // past any real drain/reboot/shutdown; dropping just closes the stream,
+    // same as the early-return above.
+    set_timeout(
+        move || {
+            sse_bg.borrow_mut().take();
+        },
+        std::time::Duration::from_secs(30 * 60),
+    );
 }
 
 /// Parse the grace-period/timeout text inputs into `DrainOptions`, falling

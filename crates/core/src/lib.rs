@@ -441,13 +441,131 @@ pub struct CleanupSummary {
     pub jobs_deleted: usize,
 }
 
-/// Result of a node drain operation. `skipped` counts DaemonSet-owned and
-/// mirror (static) pods, which can't be evicted through the API.
+/// Result of a node drain operation. `skipped` counts pods that did not require
+/// eviction: DaemonSet-owned, mirror (static), terminal, and already-deleting pods.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DrainSummary {
     pub evicted: usize,
     pub skipped: usize,
     pub failed: Vec<String>,
+}
+
+/// Minimum overall drain timeout accepted by [`DrainOptions::validate`].
+pub const DRAIN_TIMEOUT_MIN_SECS: u64 = 1;
+/// Maximum overall drain timeout accepted by [`DrainOptions::validate`].
+pub const DRAIN_TIMEOUT_MAX_SECS: u64 = 3_600;
+/// Maximum pod termination grace period accepted by [`DrainOptions::validate`].
+pub const DRAIN_GRACE_PERIOD_MAX_SECS: u32 = 86_400;
+
+/// Options for a node drain, mirroring `kubectl drain`'s flags.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct DrainOptions {
+    /// Evict pods not managed by a controller (`--force`).
+    pub force: bool,
+    /// Evict pods using emptyDir volumes (`--delete-emptydir-data`).
+    pub delete_emptydir_data: bool,
+    /// Proceed while leaving DaemonSet pods in place (`--ignore-daemonsets`).
+    /// When false, DaemonSet pods block the drain, matching kubectl's default.
+    pub ignore_daemonsets: bool,
+    /// Delete pods directly instead of the eviction API, bypassing
+    /// PodDisruptionBudgets (`--disable-eviction`).
+    pub disable_eviction: bool,
+    /// Per-pod termination grace period override in seconds (`--grace-period`).
+    pub grace_period: Option<u32>,
+    /// Overall wall-clock budget for eviction + termination (`--timeout`).
+    pub timeout_secs: u64,
+}
+
+impl Default for DrainOptions {
+    fn default() -> Self {
+        Self {
+            force: false,
+            delete_emptydir_data: false,
+            ignore_daemonsets: true,
+            disable_eviction: false,
+            grace_period: None,
+            timeout_secs: 60,
+        }
+    }
+}
+
+impl DrainOptions {
+    /// Validate user-controlled duration fields against the shared drain bounds.
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if !(DRAIN_TIMEOUT_MIN_SECS..=DRAIN_TIMEOUT_MAX_SECS).contains(&self.timeout_secs) {
+            return Err("timeout must be between 1 and 3600 seconds");
+        }
+        if self
+            .grace_period
+            .is_some_and(|seconds| seconds > DRAIN_GRACE_PERIOD_MAX_SECS)
+        {
+            return Err("grace period must not exceed 86400 seconds");
+        }
+        Ok(())
+    }
+}
+
+/// One pod blocking a drain, and which [`DrainOptions`] field would clear it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DrainBlocker {
+    pub pod: String,
+    pub reason: String,
+    /// `"force"`, `"delete_emptydir_data"`, or `"ignore_daemonsets"`.
+    pub clearable_by: String,
+}
+
+/// One progress event from a drain job. `seq` increases monotonically from 0
+/// so a resubscribing client can de-duplicate replayed events.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DrainEvent {
+    pub seq: u64,
+    #[serde(flatten)]
+    pub kind: DrainEventKind,
+}
+
+/// Metadata needed by a refreshed client to reopen an unfinished drain job.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActiveDrainJob {
+    pub job: u64,
+    pub key: String,
+    pub name: String,
+    pub power: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DrainEventKind {
+    Started {
+        total: usize,
+    },
+    Cordoned,
+    Evicted {
+        pod: String,
+        done: usize,
+        total: usize,
+    },
+    EvictFailed {
+        pod: String,
+        reason: String,
+    },
+    Blocked {
+        blockers: Vec<DrainBlocker>,
+    },
+    WaitingTermination {
+        pods: Vec<String>,
+    },
+    PowerRequested {
+        action: String,
+    },
+    NodeReady,
+    Done {
+        summary: DrainSummary,
+    },
+    Error {
+        message: String,
+    },
+    Cancelled,
 }
 
 /// One resource kind's RBAC access review row: which verbs the current
@@ -515,5 +633,76 @@ mod tests {
         assert_eq!(format_age_secs(86400), "1d0h");
         assert_eq!(format_age_secs(86400 + 3600 * 5), "1d5h");
         assert_eq!(format_age_secs(86400 * 7 + 3600 * 12), "7d12h");
+    }
+
+    #[test]
+    fn drain_options_defaults() {
+        let o = DrainOptions::default();
+        assert!(!o.force && !o.delete_emptydir_data && !o.disable_eviction);
+        assert!(o.ignore_daemonsets);
+        assert_eq!(o.timeout_secs, 60);
+        assert_eq!(o.grace_period, None);
+        // An empty JSON object deserializes to the same defaults.
+        let from_empty: DrainOptions = serde_json::from_str("{}").unwrap();
+        assert_eq!(from_empty, o);
+    }
+
+    #[test]
+    fn drain_options_validates_timeout_boundaries() {
+        let mut options = DrainOptions {
+            timeout_secs: DRAIN_TIMEOUT_MIN_SECS,
+            ..Default::default()
+        };
+        assert_eq!(options.validate(), Ok(()));
+
+        options.timeout_secs = DRAIN_TIMEOUT_MAX_SECS;
+        assert_eq!(options.validate(), Ok(()));
+
+        options.timeout_secs = DRAIN_TIMEOUT_MIN_SECS - 1;
+        assert_eq!(
+            options.validate(),
+            Err("timeout must be between 1 and 3600 seconds")
+        );
+
+        options.timeout_secs = DRAIN_TIMEOUT_MAX_SECS + 1;
+        assert_eq!(
+            options.validate(),
+            Err("timeout must be between 1 and 3600 seconds")
+        );
+    }
+
+    #[test]
+    fn drain_options_validates_grace_period_boundary() {
+        let mut options = DrainOptions {
+            grace_period: Some(DRAIN_GRACE_PERIOD_MAX_SECS),
+            ..Default::default()
+        };
+        assert_eq!(options.validate(), Ok(()));
+
+        options.grace_period = Some(DRAIN_GRACE_PERIOD_MAX_SECS + 1);
+        assert_eq!(
+            options.validate(),
+            Err("grace period must not exceed 86400 seconds")
+        );
+
+        options.grace_period = None;
+        assert_eq!(options.validate(), Ok(()));
+    }
+
+    #[test]
+    fn drain_event_round_trips() {
+        let ev = DrainEvent {
+            seq: 3,
+            kind: DrainEventKind::Blocked {
+                blockers: vec![DrainBlocker {
+                    pod: "standalone".into(),
+                    reason: "unmanaged pod".into(),
+                    clearable_by: "force".into(),
+                }],
+            },
+        };
+        let json = serde_json::to_string(&ev).unwrap();
+        assert!(json.contains("\"kind\":\"blocked\""));
+        assert_eq!(serde_json::from_str::<DrainEvent>(&json).unwrap(), ev);
     }
 }

@@ -9,7 +9,8 @@ use axum::Json;
 use serde::Deserialize;
 
 use super::talos::talos_mutation;
-use super::{backend, backend_or_return, bad_gateway, ns_filter};
+use super::{backend, backend_or_return, bad_gateway, ns_filter, request_caller};
+use crate::server::drain_jobs::CancelResult;
 use crate::server::AppState;
 
 #[derive(Deserialize)]
@@ -20,26 +21,12 @@ pub struct ActionRequest {
     pub(crate) name: Option<String>,
     replicas: Option<i32>,
     yaml: Option<String>,
-    force: Option<bool>,
+    pub(crate) force: Option<bool>,
     reset: Option<bool>,
     pub(crate) service: Option<String>,
     pub(crate) drain: Option<bool>,
-}
-
-/// Resolve the acting identity for the audit log.
-async fn actor(state: &AppState, headers: &HeaderMap) -> String {
-    if state.config.dev_mode {
-        return "dev".to_string();
-    }
-    if let (Some(key), Some(cookie)) = (
-        state.config.session_key,
-        crate::server::session::cookie_value(headers, crate::server::session::SESSION_COOKIE),
-    ) {
-        if let Some(tokens) = crate::server::session::open_session(&cookie, &key) {
-            return tokens.identity.email.unwrap_or(tokens.identity.subject);
-        }
-    }
-    "unknown".to_string()
+    pub(crate) options: Option<roder_core::DrainOptions>,
+    pub(crate) job: Option<u64>,
 }
 
 /// Single mutation endpoint dispatching by `action`.
@@ -48,11 +35,13 @@ pub async fn action(
     headers: HeaderMap,
     Json(req): Json<ActionRequest>,
 ) -> Response {
+    let Some(caller) = request_caller(&state, &headers) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
     // Audit every mutation with the acting identity.
-    let who = actor(&state, &headers).await;
     let ns = ns_filter(&req.namespace);
     tracing::info!(
-        actor = %who,
+        actor = %caller.audit,
         action = %req.action,
         key = req.key.as_deref().unwrap_or("-"),
         namespace = ns.unwrap_or("-"),
@@ -60,7 +49,30 @@ pub async fn action(
         "mutation requested"
     );
 
-    if let Some(response) = talos_mutation(&state, &headers, &req).await {
+    if req.action == "drain-cancel" {
+        let Some(id) = req.job else {
+            return (StatusCode::BAD_REQUEST, "missing job").into_response();
+        };
+        return match state.drain_jobs.cancel(&caller.owner, id) {
+            CancelResult::Accepted => (StatusCode::OK, "ok").into_response(),
+            CancelResult::NotFound => (StatusCode::NOT_FOUND, "unknown job").into_response(),
+            CancelResult::NotCancellable => {
+                (StatusCode::CONFLICT, "job is no longer cancellable").into_response()
+            }
+        };
+    }
+
+    let drain_options = if req.action == "drain" {
+        let options = req.options.clone().unwrap_or_default();
+        if let Err(error) = options.validate() {
+            return (StatusCode::BAD_REQUEST, error.to_string()).into_response();
+        }
+        Some(options)
+    } else {
+        None
+    };
+
+    if let Some(response) = talos_mutation(&state, &headers, &caller.owner, &req).await {
         return response;
     }
 
@@ -88,12 +100,26 @@ pub async fn action(
         let (Some(key), Some(name)) = (req.key.as_deref(), req.name.as_deref()) else {
             return (StatusCode::BAD_REQUEST, "missing key or name").into_response();
         };
-        return match b.drain(key, name, req.force.unwrap_or(false)).await {
-            Ok(summary) => {
-                (StatusCode::OK, serde_json::to_string(&summary).unwrap()).into_response()
+        let options = drain_options.expect("drain options validated above");
+        let id = match super::drain::spawn_drain_job(
+            &state,
+            b,
+            caller.owner,
+            key.to_string(),
+            name.to_string(),
+            options,
+            None,
+        ) {
+            Ok(id) => id,
+            Err(_) => {
+                return (
+                    StatusCode::CONFLICT,
+                    "a drain is already active for this node",
+                )
+                    .into_response()
             }
-            Err(e) => bad_gateway(e),
         };
+        return (StatusCode::OK, serde_json::json!({ "job": id }).to_string()).into_response();
     } else {
         let (Some(key), Some(name)) = (req.key.as_deref(), req.name.as_deref()) else {
             return (StatusCode::BAD_REQUEST, "missing key or name").into_response();
@@ -146,5 +172,99 @@ pub async fn action(
     match res {
         Ok(()) => (StatusCode::OK, "ok").into_response(),
         Err(e) => bad_gateway(e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::server::handlers::fixtures::{
+        fake_tokens, prod_state_without_provider, sealed_cookie_header,
+    };
+
+    fn request(action: &str) -> ActionRequest {
+        ActionRequest {
+            action: action.into(),
+            key: None,
+            namespace: None,
+            name: None,
+            replicas: None,
+            yaml: None,
+            force: None,
+            reset: None,
+            service: None,
+            drain: None,
+            options: None,
+            job: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn drain_cancel_is_owner_scoped_without_requiring_a_backend() {
+        let state = prod_state_without_provider();
+        let mut owner = fake_tokens();
+        owner.identity.subject = "owner-a".into();
+        let handle = state
+            .drain_jobs
+            .create("owner-a".into(), "node-a".into())
+            .unwrap();
+        let flag = handle.cancel_flag();
+        let mut cancel = request("drain-cancel");
+        cancel.job = Some(handle.id);
+
+        let response = action(
+            State(state.clone()),
+            sealed_cookie_header(&owner),
+            Json(cancel),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(flag.load(std::sync::atomic::Ordering::Relaxed));
+
+        let second = state
+            .drain_jobs
+            .create("owner-a".into(), "node-b".into())
+            .unwrap();
+        let second_flag = second.cancel_flag();
+        let mut foreign = fake_tokens();
+        foreign.identity.subject = "owner-b".into();
+        let mut cancel = request("drain-cancel");
+        cancel.job = Some(second.id);
+        let response = action(State(state), sealed_cookie_header(&foreign), Json(cancel)).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert!(!second_flag.load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn drain_cancel_reports_non_cancellable_power_phase() {
+        let state = prod_state_without_provider();
+        let mut owner = fake_tokens();
+        owner.identity.subject = "owner-a".into();
+        let handle = state
+            .drain_jobs
+            .create("owner-a".into(), "node-a".into())
+            .unwrap();
+        assert!(handle.begin_non_cancellable());
+        let mut cancel = request("drain-cancel");
+        cancel.job = Some(handle.id);
+
+        let response = action(State(state), sealed_cookie_header(&owner), Json(cancel)).await;
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn drain_options_are_rejected_before_backend_resolution() {
+        let state = prod_state_without_provider();
+        let tokens = fake_tokens();
+        let mut drain = request("drain");
+        drain.key = Some("nodes.v1.".into());
+        drain.name = Some("node-a".into());
+        drain.options = Some(roder_core::DrainOptions {
+            timeout_secs: 0,
+            ..Default::default()
+        });
+
+        let response = action(State(state), sealed_cookie_header(&tokens), Json(drain)).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 }

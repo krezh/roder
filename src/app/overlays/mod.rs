@@ -2,6 +2,7 @@ pub(crate) mod access_review;
 mod alerts;
 pub(crate) mod confirm;
 pub(crate) mod context_menu;
+pub(crate) mod drain;
 pub(crate) mod exec;
 pub(crate) mod ns_palette;
 pub(crate) mod palette;

@@ -24,6 +24,7 @@ use leptos_router::StaticSegment;
 use crate::app::components::sidebar::Sidebar;
 use crate::app::detail::pods::PodModal;
 use crate::app::overlays::confirm::ConfirmDialog;
+use crate::app::overlays::drain::DrainOverlay;
 use crate::app::overlays::exec::ExecWindow;
 use crate::app::overlays::ns_palette::NsPalette;
 use crate::app::overlays::palette::CommandPalette;
@@ -61,6 +62,7 @@ pub(crate) fn MobileShell() -> impl IntoView {
             <NsPalette />
             <MobileActionSheet />
             <ConfirmDialog />
+            <DrainOverlay />
             <PodModal />
             <ExecWindow />
             <ShortcutsHelp />

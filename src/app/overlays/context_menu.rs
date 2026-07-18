@@ -4,11 +4,11 @@ use leptos::prelude::*;
 use roder_core::{ResourceKind, RowStatus};
 
 use crate::app::events::{fire_action, fire_action_with};
-use crate::app::overlays::confirm::{ask_confirm, Confirm, ConfirmButton};
+use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::overlays::toast::{show_toast, show_toast_detail, Toast, ToastKind};
 use crate::app::state::{
-    open_logs, Catalog, CtxMenu, DetailTarget, ExecOpen, ExecTarget, LogPods, LogTarget, TableRows,
-    TableSelected, TreeOpen,
+    open_logs, Catalog, CtxMenu, DetailTarget, DrainOpen, DrainTarget, ExecOpen, ExecTarget,
+    LogPods, LogTarget, TableRows, TableSelected, TreeOpen,
 };
 use crate::app::util::clipboard::copy_to_clipboard;
 use crate::app::util::format::parse_key;
@@ -25,6 +25,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
     let log_pods = expect_context::<LogPods>().0;
     let exec_open = expect_context::<ExecOpen>().0;
     let tree_open = expect_context::<TreeOpen>().0;
+    let drain_open = expect_context::<DrainOpen>().0;
     // Provided at App level; ResourceView fills in the Option on mount.
     let table_selected = expect_context::<TableSelected>().0;
     let table_rows = expect_context::<TableRows>().0;
@@ -231,19 +232,18 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             let trigger   = bulk_act!("cronjob-trigger");
             let cordon    = bulk_act!("cordon");
             let uncordon  = bulk_act!("uncordon");
-            // Drain returns a structured summary (evicted/skipped/failed), so it
-            // reports its own toast rather than going through `fire_action`.
+            // Opens the drain options dialog (`overlays::drain`) rather than
+            // running immediately — see `DrainOpen`.
             let drain = {
                 let key = m.target.key.clone();
                 let name = m.target.name.clone();
                 move |_| {
-                    let key = key.clone();
-                    let name = name.clone();
-                    confirm.set(Some(Confirm {
-                        message: format!("Drain node {name}? This cordons it and evicts its pods."),
-                        buttons: vec![ConfirmButton::new("Drain", move || {
-                            run_drain(toast, confirm, key.clone(), name.clone(), false)
-                        })],
+                    drain_open.set(Some(DrainTarget {
+                        key: key.clone(),
+                        name: name.clone(),
+                        power: None,
+                        control_plane: false,
+                        job: None,
                     }));
                     do_close();
                 }
@@ -468,63 +468,4 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             }
         })}
     }
-}
-
-/// Drain `name`, reporting a toast on success. If the safety pre-check blocks
-/// the drain (unmanaged or emptyDir-backed pods, evicting nothing), offer to
-/// force past it — mirroring `kubectl drain --force --delete-emptydir-data`.
-fn run_drain(
-    toast: RwSignal<Option<Toast>>,
-    confirm: RwSignal<Option<Confirm>>,
-    key: String,
-    name: String,
-    force: bool,
-) {
-    let payload = serde_json::json!({
-        "action": "drain", "key": key, "name": name, "force": force,
-    });
-    leptos::task::spawn_local(async move {
-        match crate::data::post_action(&payload).await {
-            Ok(body) => {
-                let summary: roder_core::DrainSummary =
-                    serde_json::from_str(&body).unwrap_or_default();
-                if summary.failed.is_empty() {
-                    show_toast(
-                        toast,
-                        format!(
-                            "Drained {name}: evicted {}, skipped {}",
-                            summary.evicted, summary.skipped
-                        ),
-                        ToastKind::Ok,
-                    );
-                } else if !force && summary.evicted == 0 {
-                    let detail = summary.failed.join("\n");
-                    confirm.set(Some(Confirm {
-                        message: format!(
-                            "Drain of {name} blocked:\n{detail}\n\nForce drain anyway? This may delete unmanaged pods and lose emptyDir data."
-                        ),
-                        buttons: vec![ConfirmButton::new("Force drain", move || {
-                            run_drain(toast, confirm, key.clone(), name.clone(), true)
-                        })],
-                    }));
-                } else {
-                    show_toast_detail(
-                        toast,
-                        format!(
-                            "Drain of {name} left {} pod(s) failed",
-                            summary.failed.len()
-                        ),
-                        Some(summary.failed.join("\n")),
-                        ToastKind::Err,
-                    );
-                }
-            }
-            Err(e) => show_toast_detail(
-                toast,
-                format!("Drain of {name} failed"),
-                Some(e),
-                ToastKind::Err,
-            ),
-        }
-    });
 }

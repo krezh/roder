@@ -441,14 +441,21 @@ pub struct CleanupSummary {
     pub jobs_deleted: usize,
 }
 
-/// Result of a node drain operation. `skipped` counts DaemonSet-owned and
-/// mirror (static) pods, which can't be evicted through the API.
+/// Result of a node drain operation. `skipped` counts pods that did not require
+/// eviction: DaemonSet-owned, mirror (static), terminal, and already-deleting pods.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DrainSummary {
     pub evicted: usize,
     pub skipped: usize,
     pub failed: Vec<String>,
 }
+
+/// Minimum overall drain timeout accepted by [`DrainOptions::validate`].
+pub const DRAIN_TIMEOUT_MIN_SECS: u64 = 1;
+/// Maximum overall drain timeout accepted by [`DrainOptions::validate`].
+pub const DRAIN_TIMEOUT_MAX_SECS: u64 = 3_600;
+/// Maximum pod termination grace period accepted by [`DrainOptions::validate`].
+pub const DRAIN_GRACE_PERIOD_MAX_SECS: u32 = 86_400;
 
 /// Options for a node drain, mirroring `kubectl drain`'s flags.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -483,6 +490,22 @@ impl Default for DrainOptions {
     }
 }
 
+impl DrainOptions {
+    /// Validate user-controlled duration fields against the shared drain bounds.
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if !(DRAIN_TIMEOUT_MIN_SECS..=DRAIN_TIMEOUT_MAX_SECS).contains(&self.timeout_secs) {
+            return Err("timeout must be between 1 and 3600 seconds");
+        }
+        if self
+            .grace_period
+            .is_some_and(|seconds| seconds > DRAIN_GRACE_PERIOD_MAX_SECS)
+        {
+            return Err("grace period must not exceed 86400 seconds");
+        }
+        Ok(())
+    }
+}
+
 /// One pod blocking a drain, and which [`DrainOptions`] field would clear it.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DrainBlocker {
@@ -499,6 +522,15 @@ pub struct DrainEvent {
     pub seq: u64,
     #[serde(flatten)]
     pub kind: DrainEventKind,
+}
+
+/// Metadata needed by a refreshed client to reopen an unfinished drain job.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActiveDrainJob {
+    pub job: u64,
+    pub key: String,
+    pub name: String,
+    pub power: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -521,7 +553,7 @@ pub enum DrainEventKind {
         blockers: Vec<DrainBlocker>,
     },
     WaitingTermination {
-        remaining: usize,
+        pods: Vec<String>,
     },
     PowerRequested {
         action: String,
@@ -613,6 +645,48 @@ mod tests {
         // An empty JSON object deserializes to the same defaults.
         let from_empty: DrainOptions = serde_json::from_str("{}").unwrap();
         assert_eq!(from_empty, o);
+    }
+
+    #[test]
+    fn drain_options_validates_timeout_boundaries() {
+        let mut options = DrainOptions {
+            timeout_secs: DRAIN_TIMEOUT_MIN_SECS,
+            ..Default::default()
+        };
+        assert_eq!(options.validate(), Ok(()));
+
+        options.timeout_secs = DRAIN_TIMEOUT_MAX_SECS;
+        assert_eq!(options.validate(), Ok(()));
+
+        options.timeout_secs = DRAIN_TIMEOUT_MIN_SECS - 1;
+        assert_eq!(
+            options.validate(),
+            Err("timeout must be between 1 and 3600 seconds")
+        );
+
+        options.timeout_secs = DRAIN_TIMEOUT_MAX_SECS + 1;
+        assert_eq!(
+            options.validate(),
+            Err("timeout must be between 1 and 3600 seconds")
+        );
+    }
+
+    #[test]
+    fn drain_options_validates_grace_period_boundary() {
+        let mut options = DrainOptions {
+            grace_period: Some(DRAIN_GRACE_PERIOD_MAX_SECS),
+            ..Default::default()
+        };
+        assert_eq!(options.validate(), Ok(()));
+
+        options.grace_period = Some(DRAIN_GRACE_PERIOD_MAX_SECS + 1);
+        assert_eq!(
+            options.validate(),
+            Err("grace period must not exceed 86400 seconds")
+        );
+
+        options.grace_period = None;
+        assert_eq!(options.validate(), Ok(()));
     }
 
     #[test]

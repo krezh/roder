@@ -8,6 +8,7 @@ const TOAST_MS: u64 = 4000;
 pub(crate) enum ToastKind {
     Ok,
     Err,
+    Progress,
 }
 
 /// Cap on how many names a toast will list individually; beyond this a "+N more"
@@ -21,6 +22,16 @@ pub(crate) struct Toast {
     pub(crate) items: Vec<String>,
     pub(crate) detail: Option<String>,
     pub(crate) kind: ToastKind,
+    pub(crate) progress: Option<usize>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct ProgressToast(u64);
+
+fn next_toast_id() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+    NEXT_ID.fetch_add(1, Ordering::Relaxed)
 }
 
 /// Show a toast; auto-dismisses after a few seconds, or is replaced by a newer one.
@@ -66,16 +77,51 @@ pub(crate) fn show_toast_full(
         items.push(format!("+{rest} more"));
     }
 
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
-    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    let id = next_toast_id();
     sig.set(Some(Toast {
         id,
         title: title.into(),
         items,
         detail: detail.map(Into::into),
         kind,
+        progress: None,
     }));
+}
+
+/// Show a persistent progress toast. Updates through the returned handle only
+/// apply while this toast is still visible, so unrelated newer toasts are not
+/// overwritten by a background job tick.
+pub(crate) fn show_progress_toast(
+    sig: RwSignal<Option<Toast>>,
+    title: impl Into<String>,
+    detail: impl Into<String>,
+) -> ProgressToast {
+    let id = next_toast_id();
+    sig.set(Some(Toast {
+        id,
+        title: title.into(),
+        items: Vec::new(),
+        detail: Some(detail.into()),
+        kind: ToastKind::Progress,
+        progress: Some(0),
+    }));
+    ProgressToast(id)
+}
+
+pub(crate) fn update_progress_toast(
+    sig: RwSignal<Option<Toast>>,
+    handle: ProgressToast,
+    detail: impl Into<String>,
+    progress: usize,
+) {
+    let detail = detail.into();
+    sig.update(|current| {
+        let Some(current) = current.as_mut().filter(|toast| toast.id == handle.0) else {
+            return;
+        };
+        current.detail = Some(detail);
+        current.progress = Some(progress.min(100));
+    });
 }
 
 #[component]
@@ -89,6 +135,9 @@ pub(crate) fn ToastView() -> impl IntoView {
         let Some(current) = toast.get() else {
             return;
         };
+        if current.kind == ToastKind::Progress {
+            return;
+        }
         set_timeout(
             move || {
                 if toast.get_untracked().is_some_and(|t| t.id == current.id) {
@@ -103,9 +152,14 @@ pub(crate) fn ToastView() -> impl IntoView {
         {move || snapshot.get().map(|t| {
             view! {
                 <div class="toast" class:toast-err=move || t.kind == ToastKind::Err
+                    class:toast-progress-active=move || t.kind == ToastKind::Progress
                     class:closing=move || closing.get()
                     on:click=move |_| do_close()>
-                    <span class="toast-icon">{if t.kind == ToastKind::Err { "\u{2715}" } else { "\u{2713}" }}</span>
+                    <span class="toast-icon">{match t.kind {
+                        ToastKind::Ok => "\u{2713}",
+                        ToastKind::Err => "\u{2715}",
+                        ToastKind::Progress => "\u{2022}",
+                    }}</span>
                     <span class="toast-body">
                         <span class="toast-title">{t.title.clone()}</span>
                         {(!t.items.is_empty()).then(|| {
@@ -117,6 +171,12 @@ pub(crate) fn ToastView() -> impl IntoView {
                             }
                         })}
                         {t.detail.clone().map(|d| view! { <span class="toast-detail">{d}</span> })}
+                        {t.progress.map(|progress| view! {
+                            <span class="toast-progress">
+                                <span class="toast-progress-fill"
+                                    style:width=format!("{progress}%")></span>
+                            </span>
+                        })}
                     </span>
                 </div>
             }

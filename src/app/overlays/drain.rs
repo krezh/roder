@@ -4,9 +4,16 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use leptos::prelude::*;
-use roder_core::{DrainBlocker, DrainEvent, DrainEventKind, DrainOptions};
+use roder_core::{
+    DrainBlocker, DrainEvent, DrainEventKind, DrainOptions, DRAIN_GRACE_PERIOD_MAX_SECS,
+    DRAIN_TIMEOUT_MAX_SECS, DRAIN_TIMEOUT_MIN_SECS,
+};
+#[cfg(target_arch = "wasm32")]
+use roder_core::ActiveDrainJob;
 
-use crate::app::overlays::toast::{show_toast, show_toast_detail, Toast, ToastKind};
+use crate::app::overlays::toast::{
+    show_progress_toast, show_toast, show_toast_detail, update_progress_toast, Toast, ToastKind,
+};
 use crate::app::state::{DrainOpen, DrainTarget};
 
 #[derive(Clone, PartialEq)]
@@ -16,8 +23,8 @@ enum Phase {
 }
 
 /// Always mounted (alongside `ConfirmDialog`/`ExecWindow`); opening it is just
-/// setting `DrainOpen`'s signal. The per-open form state lives in `DrainForm`
-/// below, not here — `DrainForm` is created fresh every time `snapshot` picks
+/// setting `DrainOpen`'s signal. The per-open form state lives in `DrainOpenView`
+/// below, not here — it is created fresh every time `snapshot` picks
 /// up a new target, so reopening always starts at `Phase::Options` with
 /// default options (mirrors `ResourceTreeWindow`/`TreeContent`).
 #[component]
@@ -25,33 +32,90 @@ pub(crate) fn DrainOverlay() -> impl IntoView {
     let open = expect_context::<DrainOpen>().0;
     let (snapshot, closing, do_close) = super::use_option_overlay(open);
 
+    #[cfg(target_arch = "wasm32")]
+    Effect::new(move |_| {
+        leptos::task::spawn_local(async move {
+            let Ok(Some(active)) =
+                crate::data::fetch_json::<Option<ActiveDrainJob>>("/api/drain-active").await
+            else {
+                return;
+            };
+            if open.get_untracked().is_none() {
+                open.set(Some(DrainTarget {
+                    key: active.key,
+                    name: active.name,
+                    power: active.power,
+                    control_plane: false,
+                    job: Some(active.job),
+                }));
+            }
+        });
+    });
+
     view! {
         {move || snapshot.get().map(|target| view! {
-            <div class="modal-scrim" class:closing=move || closing.get()
-                on:click=move |_| do_close()></div>
-            <div class="modal drain-modal" class:closing=move || closing.get()>
-                <DrainForm target=target do_close=do_close />
-            </div>
+            <DrainOpenView target=target closing=closing do_close=do_close />
         })}
     }
 }
 
 #[component]
-fn DrainForm(target: DrainTarget, do_close: impl Fn() + Copy + Send + 'static) -> impl IntoView {
+fn DrainOpenView(
+    target: DrainTarget,
+    closing: RwSignal<bool>,
+    do_close: impl Fn() + Copy + Send + 'static,
+) -> impl IntoView {
+    let toast = expect_context::<RwSignal<Option<Toast>>>();
+    let phase = RwSignal::new(match target.job {
+        Some(job) => Phase::Running { job },
+        None => Phase::Options,
+    });
+    let request_pending = RwSignal::new(false);
+    let name = StoredValue::new(target.name.clone());
+    let power = StoredValue::new(target.power.clone());
+
+    let scrim_close = move |_: leptos::ev::MouseEvent| {
+        if closing.get_untracked() || request_pending.get_untracked() {
+            return;
+        }
+        match phase.get_untracked() {
+            Phase::Options => do_close(),
+            Phase::Running { job } => {
+                detach_and_close(job, name.get_value(), power.get_value(), toast, do_close)
+            }
+        }
+    };
+
+    view! {
+        <div class="modal-scrim" class:closing=move || closing.get()
+            on:click=scrim_close></div>
+        <div class="modal drain-modal" class:closing=move || closing.get()>
+            <DrainForm
+                target=target phase=phase request_pending=request_pending do_close=do_close
+            />
+        </div>
+    }
+}
+
+#[component]
+fn DrainForm(
+    target: DrainTarget,
+    phase: RwSignal<Phase>,
+    request_pending: RwSignal<bool>,
+    do_close: impl Fn() + Copy + Send + 'static,
+) -> impl IntoView {
     // Captured here (not inside `spawn_local`, after the `.await`): every
     // other async handler in this codebase resolves its context signals at
     // component-body level and only carries the `Copy` handle across the
     // await, since `expect_context` isn't guaranteed to resolve once a task
     // has been polled back in after suspending.
     let toast = expect_context::<RwSignal<Option<Toast>>>();
-    let phase = RwSignal::new(Phase::Options);
     let force = RwSignal::new(false);
     let delete_emptydir = RwSignal::new(false);
     let ignore_daemonsets = RwSignal::new(true);
     let disable_eviction = RwSignal::new(false);
     let grace = RwSignal::new(String::new()); // blank = pod default
     let timeout = RwSignal::new("60".to_string());
-    let submitting = RwSignal::new(false);
 
     let name = target.name.clone();
     let running_name = name.clone();
@@ -76,10 +140,10 @@ fn DrainForm(target: DrainTarget, do_close: impl Fn() + Copy + Send + 'static) -
     let target_sv = StoredValue::new(target);
 
     let submit = move |_: leptos::ev::MouseEvent| {
-        if submitting.get_untracked() {
+        if request_pending.get_untracked() {
             return;
         }
-        submitting.set(true);
+        request_pending.set(true);
         let options = options_from_signals(
             force,
             delete_emptydir,
@@ -91,9 +155,12 @@ fn DrainForm(target: DrainTarget, do_close: impl Fn() + Copy + Send + 'static) -
         let target = target_sv.get_value();
         leptos::task::spawn_local(async move {
             match start_drain(&target, &options).await {
-                Ok(job) => phase.set(Phase::Running { job }),
+                Ok(job) => {
+                    request_pending.set(false);
+                    phase.set(Phase::Running { job });
+                }
                 Err(e) => {
-                    submitting.set(false);
+                    request_pending.set(false);
                     show_toast_detail(
                         toast,
                         format!("Drain of {} failed", target.name),
@@ -108,51 +175,62 @@ fn DrainForm(target: DrainTarget, do_close: impl Fn() + Copy + Send + 'static) -
     view! {
         {move || match phase.get() {
             Phase::Options => view! {
-                <div class="modal-msg">{title.clone()}</div>
-                {show_warning.then(|| view! {
-                    <div class="drain-warning">
-                        "This is a control-plane node; verify etcd quorum before continuing."
+                <div class="drain-head">
+                    <span class="drain-title">{title.clone()}</span>
+                    <button class="drain-close" disabled=move || request_pending.get()
+                        on:click=move |_| do_close()>"✕"</button>
+                </div>
+                <div class="drain-body">
+                    {show_warning.then(|| view! {
+                        <div class="drain-warning">
+                            "This is a control-plane node; verify etcd quorum before continuing."
+                        </div>
+                    })}
+                    <div class="drain-options">
+                        <label class="drain-opt">
+                            <input type="checkbox" prop:checked=move || force.get()
+                                on:change=move |e| force.set(event_target_checked(&e)) />
+                            <span>"Force"</span>
+                            <span class="hint">"Evict pods not managed by a controller."</span>
+                        </label>
+                        <label class="drain-opt">
+                            <input type="checkbox" prop:checked=move || delete_emptydir.get()
+                                on:change=move |e| delete_emptydir.set(event_target_checked(&e)) />
+                            <span>"Delete emptyDir data"</span>
+                            <span class="hint">"Evict pods using emptyDir volumes."</span>
+                        </label>
+                        <label class="drain-opt">
+                            <input type="checkbox" prop:checked=move || ignore_daemonsets.get()
+                                on:change=move |e| ignore_daemonsets.set(event_target_checked(&e)) />
+                            <span>"Ignore DaemonSets"</span>
+                            <span class="hint">"Proceed while leaving DaemonSet pods in place."</span>
+                        </label>
+                        <label class="drain-opt">
+                            <input type="checkbox" prop:checked=move || disable_eviction.get()
+                                on:change=move |e| disable_eviction.set(event_target_checked(&e)) />
+                            <span>"Disable eviction"</span>
+                            <span class="hint">"Delete pods directly, bypassing PodDisruptionBudgets."</span>
+                        </label>
                     </div>
-                })}
-                <label class="drain-opt">
-                    <input type="checkbox" prop:checked=move || force.get()
-                        on:change=move |e| force.set(event_target_checked(&e)) />
-                    <span>"Force"</span>
-                    <span class="hint">"Evict pods not managed by a controller."</span>
-                </label>
-                <label class="drain-opt">
-                    <input type="checkbox" prop:checked=move || delete_emptydir.get()
-                        on:change=move |e| delete_emptydir.set(event_target_checked(&e)) />
-                    <span>"Delete emptyDir data"</span>
-                    <span class="hint">"Evict pods using emptyDir volumes."</span>
-                </label>
-                <label class="drain-opt">
-                    <input type="checkbox" prop:checked=move || ignore_daemonsets.get()
-                        on:change=move |e| ignore_daemonsets.set(event_target_checked(&e)) />
-                    <span>"Ignore DaemonSets"</span>
-                    <span class="hint">"Proceed while leaving DaemonSet pods in place."</span>
-                </label>
-                <label class="drain-opt">
-                    <input type="checkbox" prop:checked=move || disable_eviction.get()
-                        on:change=move |e| disable_eviction.set(event_target_checked(&e)) />
-                    <span>"Disable eviction"</span>
-                    <span class="hint">"Delete pods directly, bypassing PodDisruptionBudgets."</span>
-                </label>
-                <label class="drain-num">
-                    <span>"Grace period (s)"</span>
-                    <input type="number" min="0" placeholder="pod default"
-                        prop:value=move || grace.get()
-                        on:input=move |e| grace.set(event_target_value(&e)) />
-                </label>
-                <label class="drain-num">
-                    <span>"Timeout (s)"</span>
-                    <input type="number" min="1"
-                        prop:value=move || timeout.get()
-                        on:input=move |e| timeout.set(event_target_value(&e)) />
-                </label>
-                <div class="modal-actions">
-                    <button class="act" on:click=move |_| do_close()>"Cancel"</button>
-                    <button class="act danger" disabled=move || submitting.get() on:click=submit>
+                    <div class="drain-numbers">
+                        <label class="drain-num">
+                            <span>"Grace period"</span>
+                            <input type="number" min="0" max="86400" placeholder="pod default"
+                                prop:value=move || grace.get()
+                                on:input=move |e| grace.set(event_target_value(&e)) />
+                        </label>
+                        <label class="drain-num">
+                            <span>"Timeout"</span>
+                            <input type="number" min="1" max="3600"
+                                prop:value=move || timeout.get()
+                                on:input=move |e| timeout.set(event_target_value(&e)) />
+                        </label>
+                    </div>
+                </div>
+                <div class="drain-actions modal-actions">
+                    <button class="act" disabled=move || request_pending.get()
+                        on:click=move |_| do_close()>"Cancel"</button>
+                    <button class="act danger" disabled=move || request_pending.get() on:click=submit>
                         {action_label}
                     </button>
                 </div>
@@ -167,7 +245,7 @@ fn DrainForm(target: DrainTarget, do_close: impl Fn() + Copy + Send + 'static) -
                     job=job name=running_name.clone() target=target_sv phase=phase
                     force=force delete_emptydir=delete_emptydir ignore_daemonsets=ignore_daemonsets
                     disable_eviction=disable_eviction grace=grace timeout=timeout
-                    toast=toast do_close=do_close
+                    toast=toast request_pending=request_pending do_close=do_close
                 />
             }.into_any(),
         }}
@@ -194,6 +272,7 @@ fn DrainProgress(
     grace: RwSignal<String>,
     timeout: RwSignal<String>,
     toast: RwSignal<Option<Toast>>,
+    request_pending: RwSignal<bool>,
     do_close: impl Fn() + Copy + Send + 'static,
 ) -> impl IntoView {
     let heading = match target.get_value().power {
@@ -210,6 +289,10 @@ fn DrainProgress(
     let done_count = RwSignal::new(0usize);
     let total = RwSignal::new(0usize);
     let finished = RwSignal::new(false);
+    let successful_done = RwSignal::new(false);
+    let power_requested = RwSignal::new(false);
+    let node_ready = RwSignal::new(false);
+    let cancel_pending = RwSignal::new(false);
     // One entry per distinct `DrainBlocker::clearable_by` seen in the last
     // `Blocked` event, pre-checked; empty whenever the job isn't blocked.
     let retry_toggles: RwSignal<Vec<(String, RwSignal<bool>)>> = RwSignal::new(Vec::new());
@@ -256,15 +339,18 @@ fn DrainProgress(
                             .map(|k| (k, RwSignal::new(true)))
                             .collect(),
                     );
-                    finished.set(true);
                 }
-                DrainEventKind::WaitingTermination { remaining } => {
-                    log.update(|l| l.push(format!("waiting for {remaining} pod(s) to terminate")));
+                DrainEventKind::WaitingTermination { pods } => {
+                    log.update(|l| l.push(waiting_message(&pods)));
                 }
                 DrainEventKind::PowerRequested { action } => {
+                    power_requested.set(true);
                     log.update(|l| l.push(format!("{action} requested")));
                 }
-                DrainEventKind::NodeReady => log.update(|l| l.push("node returned Ready".into())),
+                DrainEventKind::NodeReady => {
+                    node_ready.set(true);
+                    log.update(|l| l.push("node returned Ready".into()));
+                }
                 DrainEventKind::Done { summary } => {
                     log.update(|l| {
                         l.push(format!(
@@ -273,16 +359,11 @@ fn DrainProgress(
                             summary.skipped,
                             summary.failed.len()
                         ));
+                        for reason in &summary.failed {
+                            l.push(format!("FAILED: {reason}"));
+                        }
                     });
-                    // Skipped pods (already terminal, already gone) never
-                    // get their own `Evicted` tick, so `done_count` can sit
-                    // below `total` forever even on a clean finish — snap the
-                    // bar to full then. Not when a `Blocked` preceded this
-                    // `Done` (the retry footer's already showing the run
-                    // stopped short; a full bar next to it would mislead).
-                    if retry_toggles.get_untracked().is_empty() {
-                        done_count.set(total.get_untracked());
-                    }
+                    successful_done.set(summary.failed.is_empty());
                     finished.set(true);
                 }
                 DrainEventKind::Error { message } => {
@@ -314,6 +395,10 @@ fn DrainProgress(
     });
 
     let retry = move |_: leptos::ev::MouseEvent| {
+        if request_pending.get_untracked() || !finished.get_untracked() {
+            return;
+        }
+        request_pending.set(true);
         for (key, checked) in retry_toggles.get_untracked() {
             let val = checked.get_untracked();
             match key.as_str() {
@@ -338,22 +423,33 @@ fn DrainProgress(
         let retry_name = name.get_value();
         leptos::task::spawn_local(async move {
             match start_drain(&t, &options).await {
-                Ok(new_job) => phase.set(Phase::Running { job: new_job }),
-                Err(e) => show_toast_detail(
-                    toast,
-                    format!("Retry of {retry_name} failed"),
-                    Some(e),
-                    ToastKind::Err,
-                ),
+                Ok(new_job) => {
+                    request_pending.set(false);
+                    phase.set(Phase::Running { job: new_job });
+                }
+                Err(e) => {
+                    request_pending.set(false);
+                    show_toast_detail(
+                        toast,
+                        format!("Retry of {retry_name} failed"),
+                        Some(e),
+                        ToastKind::Err,
+                    );
+                }
             }
         });
     };
 
     let cancel = move |_: leptos::ev::MouseEvent| {
+        if cancel_pending.get_untracked() || power_requested.get_untracked() {
+            return;
+        }
+        cancel_pending.set(true);
         let cancel_name = name.get_value();
         leptos::task::spawn_local(async move {
             let payload = serde_json::json!({"action": "drain-cancel", "job": job});
             if let Err(e) = crate::data::post_action(&payload).await {
+                cancel_pending.set(false);
                 show_toast_detail(
                     toast,
                     format!("Cancel of {cancel_name} failed"),
@@ -367,48 +463,97 @@ fn DrainProgress(
         // the same SSE stream like any other terminal event.
     };
 
-    let hide =
-        move |_: leptos::ev::MouseEvent| detach_and_close(job, name.get_value(), toast, do_close);
+    let hide = move |_: leptos::ev::MouseEvent| {
+        detach_and_close(
+            job,
+            name.get_value(),
+            target.get_value().power,
+            toast,
+            do_close,
+        )
+    };
+
+    let close = move |_: leptos::ev::MouseEvent| {
+        if request_pending.get_untracked() {
+            return;
+        }
+        if finished.get_untracked() {
+            do_close();
+        } else {
+            detach_and_close(
+                job,
+                name.get_value(),
+                target.get_value().power,
+                toast,
+                do_close,
+            );
+        }
+    };
 
     view! {
-        <div class="modal-msg">{heading}</div>
-        <div class="drain-bar"><div class="drain-bar-fill"
-            style:width=move || {
-                let t = total.get().max(1);
-                format!("{}%", done_count.get() * 100 / t)
-            }></div></div>
-        <div class="drain-log" node_ref=log_ref>
-            <For each={move || log.get().into_iter().enumerate().collect::<Vec<_>>()} key=|(i, _)| *i let:item>
-                <div class="drain-log-line">{item.1}</div>
-            </For>
+        <div class="drain-head">
+            <span class="drain-title">{heading}</span>
+            <button class="drain-close" disabled=move || request_pending.get()
+                on:click=close>"✕"</button>
         </div>
-        {move || (!retry_toggles.get().is_empty()).then(|| view! {
-            <div class="drain-blocked">
-                <div class="drain-warning">"Drain blocked — choose how to proceed, then retry."</div>
-                <For each=move || retry_toggles.get() key=|(k, _)| k.clone() let:item>
-                    {
-                        let (key, checked) = item;
-                        let label = clearable_by_label(&key);
-                        view! {
-                            <label class="drain-opt">
-                                <input type="checkbox" prop:checked=move || checked.get()
-                                    on:change=move |e| checked.set(event_target_checked(&e)) />
-                                <span>{label}</span>
-                            </label>
-                        }
-                    }
+        <div class="drain-body drain-progress-body">
+            <div class="drain-bar"><div class="drain-bar-fill"
+                style:width=move || {
+                    format!(
+                        "{}%",
+                        progress_percent(
+                            done_count.get(),
+                            total.get(),
+                            target.get_value().power.as_deref(),
+                            power_requested.get(),
+                            node_ready.get(),
+                            successful_done.get(),
+                        )
+                    )
+                }></div></div>
+            <div class="drain-log" node_ref=log_ref>
+                <For each={move || log.get().into_iter().enumerate().collect::<Vec<_>>()} key=|(i, _)| *i let:item>
+                    <div class="drain-log-line">{item.1}</div>
                 </For>
-                <div class="modal-actions">
-                    <button class="act danger" on:click=retry>"Retry"</button>
-                </div>
             </div>
-        })}
-        <div class="modal-actions">
+            {move || (!retry_toggles.get().is_empty()).then(|| view! {
+                <div class="drain-blocked">
+                    <div class="drain-warning">"Drain blocked — choose how to proceed, then retry."</div>
+                    <For each=move || retry_toggles.get() key=|(k, _)| k.clone() let:item>
+                        {
+                            let (key, checked) = item;
+                            let label = clearable_by_label(&key);
+                            view! {
+                                <label class="drain-opt">
+                                    <input type="checkbox" prop:checked=move || checked.get()
+                                        on:change=move |e| checked.set(event_target_checked(&e)) />
+                                    <span>{label}</span>
+                                </label>
+                            }
+                        }
+                    </For>
+                    <div class="modal-actions">
+                        <button class="act danger"
+                            disabled=move || request_pending.get() || !finished.get()
+                            on:click=retry>
+                            "Retry"
+                        </button>
+                    </div>
+                </div>
+            })}
+        </div>
+        <div class="drain-actions modal-actions">
             {move || if finished.get() {
-                view! { <button class="act" on:click=move |_| do_close()>"Close"</button> }.into_any()
+                view! {
+                    <button class="act" disabled=move || request_pending.get()
+                        on:click=move |_| do_close()>"Close"</button>
+                }.into_any()
             } else {
                 view! {
-                    <button class="act danger" on:click=cancel>"Cancel drain"</button>
+                    {move || (!power_requested.get() && retry_toggles.get().is_empty()).then(|| view! {
+                        <button class="act danger" disabled=move || cancel_pending.get()
+                            on:click=cancel>"Cancel drain"</button>
+                    })}
                     <button class="act" on:click=hide>"Hide"</button>
                 }.into_any()
             }}
@@ -438,10 +583,74 @@ fn clearable_by_label(key: &str) -> &'static str {
     }
 }
 
+/// Percentage across pod eviction and any requested Talos milestones.
+fn progress_percent(
+    evicted: usize,
+    total: usize,
+    power: Option<&str>,
+    power_requested: bool,
+    node_ready: bool,
+    successful_done: bool,
+) -> usize {
+    if successful_done {
+        return 100;
+    }
+
+    let milestones = match power {
+        // The final milestone is successful job completion. Keeping it
+        // separate prevents a later uncordon/power failure from showing 100%.
+        Some("reboot") => 3,
+        Some("shutdown") => 2,
+        _ => 0,
+    };
+    let completed_milestones = match power {
+        Some("reboot") => usize::from(power_requested) + usize::from(node_ready),
+        Some("shutdown") => usize::from(power_requested),
+        _ => 0,
+    };
+    let steps = total.saturating_add(milestones);
+    let completed = evicted
+        .min(total)
+        .saturating_add(completed_milestones)
+        .min(steps);
+    completed.saturating_mul(100) / steps.max(1)
+}
+
+fn waiting_message(pods: &[String]) -> String {
+    let count = pods.len();
+    let noun = if count == 1 { "pod" } else { "pods" };
+    format!(
+        "waiting for {count} {noun} to terminate: {}",
+        pods.join(", ")
+    )
+}
+
+#[derive(Default)]
+struct DetachedProgress {
+    evicted: usize,
+    total: usize,
+    power_requested: bool,
+    node_ready: bool,
+}
+
 /// Closing mid-run: drop the window's subscription but keep watching the job
 /// in the background just long enough to toast the final result.
-fn detach_and_close(job: u64, name: String, toast: RwSignal<Option<Toast>>, do_close: impl Fn()) {
+fn detach_and_close(
+    job: u64,
+    name: String,
+    power: Option<String>,
+    toast: RwSignal<Option<Toast>>,
+    do_close: impl Fn(),
+) {
     do_close();
+    let progress_title = match power.as_deref() {
+        Some("reboot") => format!("Draining and rebooting {name}"),
+        Some("shutdown") => format!("Draining and shutting down {name}"),
+        _ => format!("Draining {name}"),
+    };
+    let progress_toast = show_progress_toast(toast, progress_title, "Starting drain");
+    let progress = Rc::new(RefCell::new(DetachedProgress::default()));
+    let progress2 = Rc::clone(&progress);
     let sse_bg: Rc<RefCell<Option<crate::data::SseHandle>>> = Rc::new(RefCell::new(None));
     let sse_bg2 = Rc::clone(&sse_bg);
     let handle =
@@ -449,30 +658,96 @@ fn detach_and_close(job: u64, name: String, toast: RwSignal<Option<Toast>>, do_c
             let Ok(ev) = serde_json::from_str::<DrainEvent>(&line) else {
                 return;
             };
+            let detail = {
+                let mut progress = progress2.borrow_mut();
+                match &ev.kind {
+                    DrainEventKind::Cordoned => Some("Node cordoned".to_string()),
+                    DrainEventKind::Started { total } => {
+                        progress.total = *total;
+                        Some(format!("Evicting {total} pods"))
+                    }
+                    DrainEventKind::Evicted { pod, done, total } => {
+                        progress.evicted = *done;
+                        progress.total = *total;
+                        Some(format!("Evicted {done} of {total}: {pod}"))
+                    }
+                    DrainEventKind::EvictFailed { pod, reason } => {
+                        Some(format!("Failed to evict {pod}: {reason}"))
+                    }
+                    DrainEventKind::WaitingTermination { pods } => Some(waiting_message(pods)),
+                    DrainEventKind::PowerRequested { action } => {
+                        progress.power_requested = true;
+                        Some(format!("{action} requested"))
+                    }
+                    DrainEventKind::NodeReady => {
+                        progress.node_ready = true;
+                        Some("Node returned Ready".to_string())
+                    }
+                    DrainEventKind::Blocked { .. }
+                    | DrainEventKind::Done { .. }
+                    | DrainEventKind::Error { .. }
+                    | DrainEventKind::Cancelled => None,
+                }
+            };
+            if let Some(detail) = detail {
+                let progress = progress2.borrow();
+                let percent = progress_percent(
+                    progress.evicted,
+                    progress.total,
+                    power.as_deref(),
+                    progress.power_requested,
+                    progress.node_ready,
+                    false,
+                );
+                update_progress_toast(toast, progress_toast, detail, percent);
+            }
             let msg = match ev.kind {
                 DrainEventKind::Done { summary } if summary.failed.is_empty() => Some((
-                    format!(
-                        "Drained {name}: evicted {}, skipped {}",
-                        summary.evicted, summary.skipped
-                    ),
+                    match power.as_deref() {
+                        Some("reboot") => format!(
+                            "Drained and rebooted {name}: evicted {}, skipped {}",
+                            summary.evicted, summary.skipped
+                        ),
+                        Some("shutdown") => format!(
+                            "Drained and shut down {name}: evicted {}, skipped {}",
+                            summary.evicted, summary.skipped
+                        ),
+                        _ => format!(
+                            "Drained {name}: evicted {}, skipped {}",
+                            summary.evicted, summary.skipped
+                        ),
+                    },
                     ToastKind::Ok,
                 )),
                 DrainEventKind::Done { summary } => Some((
-                    format!(
-                        "Drain of {name} left {} pod(s) failed",
-                        summary.failed.len()
-                    ),
+                    match power.as_deref() {
+                        Some("reboot") => format!(
+                            "Drain before rebooting {name} left {} pod(s) failed",
+                            summary.failed.len()
+                        ),
+                        Some("shutdown") => format!(
+                            "Drain before shutting down {name} left {} pod(s) failed",
+                            summary.failed.len()
+                        ),
+                        _ => format!(
+                            "Drain of {name} left {} pod(s) failed",
+                            summary.failed.len()
+                        ),
+                    },
                     ToastKind::Err,
                 )),
-                DrainEventKind::Blocked { .. } => {
-                    Some((format!("Drain of {name} blocked"), ToastKind::Err))
-                }
-                DrainEventKind::Error { message } => {
-                    Some((format!("Drain of {name} failed: {message}"), ToastKind::Err))
-                }
-                DrainEventKind::Cancelled => {
-                    Some((format!("Drain of {name} cancelled"), ToastKind::Err))
-                }
+                DrainEventKind::Blocked { .. } => Some((
+                    power_failure_text(&name, power.as_deref(), "blocked"),
+                    ToastKind::Err,
+                )),
+                DrainEventKind::Error { message } => Some((
+                    power_failure_text(&name, power.as_deref(), &format!("failed: {message}")),
+                    ToastKind::Err,
+                )),
+                DrainEventKind::Cancelled => Some((
+                    power_failure_text(&name, power.as_deref(), "cancelled"),
+                    ToastKind::Err,
+                )),
                 _ => None,
             };
             if let Some((text, kind)) = msg {
@@ -498,10 +773,19 @@ fn detach_and_close(job: u64, name: String, toast: RwSignal<Option<Toast>>, do_c
     );
 }
 
+fn power_failure_text(name: &str, power: Option<&str>, result: &str) -> String {
+    match power {
+        Some("reboot") => format!("Drain/reboot of {name} {result}"),
+        Some("shutdown") => format!("Drain/shutdown of {name} {result}"),
+        _ => format!("Drain of {name} {result}"),
+    }
+}
+
 /// Parse the grace-period/timeout text inputs into `DrainOptions`, falling
 /// back to safe defaults on anything unparsable rather than panicking:
 /// a blank or invalid grace period means "pod default" (`None`), and an
-/// invalid or zero timeout falls back to the server's own default (60s).
+/// invalid timeout falls back to the server default, while parsed values are
+/// clamped to the shared core bounds.
 fn options_from_signals(
     force: RwSignal<bool>,
     delete_emptydir: RwSignal<bool>,
@@ -510,14 +794,8 @@ fn options_from_signals(
     grace: RwSignal<String>,
     timeout: RwSignal<String>,
 ) -> DrainOptions {
-    let grace_period = grace.get_untracked().trim().parse::<u32>().ok();
-    let timeout_secs = timeout
-        .get_untracked()
-        .trim()
-        .parse::<u64>()
-        .ok()
-        .filter(|&secs| secs > 0)
-        .unwrap_or(60);
+    let (grace_period, timeout_secs) =
+        parse_drain_limits(&grace.get_untracked(), &timeout.get_untracked());
     DrainOptions {
         force: force.get_untracked(),
         delete_emptydir_data: delete_emptydir.get_untracked(),
@@ -526,6 +804,20 @@ fn options_from_signals(
         grace_period,
         timeout_secs,
     }
+}
+
+fn parse_drain_limits(grace: &str, timeout: &str) -> (Option<u32>, u64) {
+    let grace_period = grace
+        .trim()
+        .parse::<u32>()
+        .ok()
+        .map(|secs| secs.min(DRAIN_GRACE_PERIOD_MAX_SECS));
+    let timeout_secs = timeout
+        .trim()
+        .parse::<u64>()
+        .unwrap_or(DrainOptions::default().timeout_secs)
+        .clamp(DRAIN_TIMEOUT_MIN_SECS, DRAIN_TIMEOUT_MAX_SECS);
+    (grace_period, timeout_secs)
 }
 
 /// POST the drain (or drain-first power) action; resolve to the job id.
@@ -585,5 +877,59 @@ mod tests {
         );
         assert_eq!(clearable_by_label("ignore_daemonsets"), "Ignore DaemonSets");
         assert_eq!(clearable_by_label("something_else"), "Unknown option");
+    }
+
+    #[test]
+    fn progress_tracks_drain_and_power_milestones() {
+        assert_eq!(progress_percent(2, 4, None, false, false, false), 50);
+        assert_eq!(
+            progress_percent(4, 4, Some("reboot"), false, false, false),
+            57
+        );
+        assert_eq!(
+            progress_percent(4, 4, Some("reboot"), true, false, false),
+            71
+        );
+        assert_eq!(
+            progress_percent(4, 4, Some("reboot"), true, true, false),
+            85
+        );
+        assert_eq!(
+            progress_percent(4, 4, Some("shutdown"), true, false, false),
+            83
+        );
+        assert_eq!(
+            progress_percent(4, 4, Some("shutdown"), true, false, true),
+            100
+        );
+    }
+
+    #[test]
+    fn progress_only_forces_full_on_successful_done() {
+        assert_eq!(progress_percent(1, 3, None, false, false, false), 33);
+        assert_eq!(progress_percent(1, 3, None, false, false, true), 100);
+        assert_eq!(progress_percent(0, 0, None, false, false, false), 0);
+        assert_eq!(progress_percent(0, 0, None, false, false, true), 100);
+    }
+
+    #[test]
+    fn parse_drain_limits_clamps_values() {
+        assert_eq!(
+            parse_drain_limits("999999", "999999"),
+            (Some(DRAIN_GRACE_PERIOD_MAX_SECS), DRAIN_TIMEOUT_MAX_SECS)
+        );
+        assert_eq!(
+            parse_drain_limits("0", "0"),
+            (Some(0), DRAIN_TIMEOUT_MIN_SECS)
+        );
+    }
+
+    #[test]
+    fn parse_drain_limits_uses_defaults_for_invalid_values() {
+        assert_eq!(
+            parse_drain_limits("", "not-a-number"),
+            (None, DrainOptions::default().timeout_secs)
+        );
+        assert_eq!(parse_drain_limits("invalid", "30"), (None, 30));
     }
 }

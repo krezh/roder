@@ -499,6 +499,7 @@ fn TalosNodeView(node: String, key: String, actions: bool, config: bool) -> impl
                                             name: target,
                                             power: Some("reboot".to_string()),
                                             control_plane,
+                                            job: None,
                                         }));
                                     } else {
                                         let warning = if control_plane { " This is a control-plane node; verify etcd quorum before continuing." } else { "" };
@@ -513,6 +514,7 @@ fn TalosNodeView(node: String, key: String, actions: bool, config: bool) -> impl
                                             name: target,
                                             power: Some("shutdown".to_string()),
                                             control_plane,
+                                            job: None,
                                         }));
                                     } else {
                                         let warning = if control_plane { " This is a control-plane node; verify etcd quorum before continuing." } else { "" };

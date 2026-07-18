@@ -280,6 +280,7 @@ fn talos_lock_conflict() -> Response {
 pub(crate) async fn talos_mutation(
     state: &AppState,
     headers: &HeaderMap,
+    owner: &str,
     req: &ActionRequest,
 ) -> Option<Response> {
     if !matches!(
@@ -301,6 +302,16 @@ pub(crate) async fn talos_mutation(
     let Some(node) = req.name.as_deref() else {
         return Some((StatusCode::BAD_REQUEST, "missing node name").into_response());
     };
+    let power_action = matches!(req.action.as_str(), "talos-reboot" | "talos-shutdown");
+    let drain_options = if power_action && req.drain.unwrap_or(false) {
+        let options = req.options.clone().unwrap_or_default();
+        if let Err(error) = options.validate() {
+            return Some((StatusCode::BAD_REQUEST, error.to_string()).into_response());
+        }
+        Some(options)
+    } else {
+        None
+    };
     let backend = match backend(state).await {
         Ok(b) => b,
         Err(r) => return Some(r),
@@ -309,7 +320,6 @@ pub(crate) async fn talos_mutation(
         Ok(node) => node,
         Err(response) => return Some(response),
     };
-    let power_action = matches!(req.action.as_str(), "talos-reboot" | "talos-shutdown");
     if power_action && state.config.pod_node_name.as_deref() == Some(node) {
         return Some(
             (
@@ -329,8 +339,10 @@ pub(crate) async fn talos_mutation(
         .pointer("/status/nodeInfo/bootID")
         .and_then(|value| value.as_str())
         .map(String::from);
+    let drain_session = power_action.then(|| backend.drain_session());
 
     if power_action && req.drain.unwrap_or(false) {
+        let options = drain_options.expect("drain options validated above");
         // Drain-first power actions run as a chained background job (drain,
         // then power off/reboot + wait), streamed over SSE — see
         // `drain::spawn_drain_job`/`drain::PowerPhase`. The guard has to be
@@ -344,19 +356,30 @@ pub(crate) async fn talos_mutation(
         let phase = super::drain::PowerPhase {
             action: req.action.trim_start_matches("talos-").to_string(),
             talos: Arc::clone(talos),
-            node_key: node_key.clone(),
             was_cordoned,
             previous_boot_id,
             lock,
         };
-        let id = super::drain::spawn_drain_job(
+        let id = match super::drain::spawn_drain_job(
             state,
             backend,
+            owner.to_string(),
             node_key,
             node.to_string(),
-            req.options.clone().unwrap_or_default(),
+            options,
             Some(phase),
-        );
+        ) {
+            Ok(id) => id,
+            Err(_) => {
+                return Some(
+                    (
+                        StatusCode::CONFLICT,
+                        "a drain is already active for this node",
+                    )
+                        .into_response(),
+                )
+            }
+        };
         return Some(
             (StatusCode::OK, serde_json::json!({ "job": id }).to_string()).into_response(),
         );
@@ -387,7 +410,9 @@ pub(crate) async fn talos_mutation(
         return Some(talos_error(error));
     }
     if req.action == "talos-reboot" {
-        if let Err(error) = backend
+        if let Err(error) = drain_session
+            .as_ref()
+            .expect("power actions capture a drain session")
             .wait_for_node_reboot(
                 node,
                 previous_boot_id.as_deref(),

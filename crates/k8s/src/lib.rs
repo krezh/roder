@@ -19,7 +19,7 @@ mod project;
 mod test_alloc;
 
 pub use alertmanager::{discover_alertmanager, AlertsCache};
-pub use backend::Backend;
+pub use backend::{Backend, DrainSession};
 pub use client::{ClusterAccess, K8sError};
 pub use informers::WatchHandle;
 pub use kube::api::{AttachedProcess, TerminalSize};

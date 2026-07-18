@@ -243,6 +243,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                         name: name.clone(),
                         power: None,
                         control_plane: false,
+                        job: None,
                     }));
                     do_close();
                 }

@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use roder_k8s::Backend;
 
@@ -19,7 +19,7 @@ mod talos;
 mod watch;
 
 pub use action::action;
-pub use drain::drain_progress;
+pub use drain::{active_drain, drain_progress};
 pub use exec::{debug_shell, exec_ws, node_shell_create, terminal_page};
 pub use logs::{logs, metrics_history};
 pub use misc::{alerts, features, health, namespaces, overview, resources};
@@ -49,6 +49,32 @@ macro_rules! backend_or_return {
 }
 pub(crate) use backend_or_return;
 
+/// Stable ownership and human-readable audit identities for a request.
+pub(crate) struct RequestCaller {
+    pub owner: String,
+    pub audit: String,
+}
+
+pub(crate) fn request_caller(state: &AppState, headers: &HeaderMap) -> Option<RequestCaller> {
+    if state.config.dev_mode {
+        return Some(RequestCaller {
+            owner: "dev".into(),
+            audit: "dev".into(),
+        });
+    }
+    let key = state.config.session_key?;
+    let cookie =
+        crate::server::session::cookie_value(headers, crate::server::session::SESSION_COOKIE)?;
+    let identity = crate::server::session::open_session(&cookie, &key)?.identity;
+    if identity.subject.is_empty() {
+        return None;
+    }
+    Some(RequestCaller {
+        owner: identity.subject.clone(),
+        audit: identity.email.unwrap_or(identity.subject),
+    })
+}
+
 /// A 502 response carrying the upstream error text.
 fn bad_gateway(e: impl std::fmt::Display) -> Response {
     (StatusCode::BAD_GATEWAY, e.to_string()).into_response()
@@ -57,4 +83,44 @@ fn bad_gateway(e: impl std::fmt::Display) -> Response {
 /// Normalize an optional namespace query param, treating `""` as `None`.
 fn ns_filter(ns: &Option<String>) -> Option<&str> {
     ns.as_deref().filter(|s| !s.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::server::handlers::fixtures::{
+        dev_state, fake_tokens, prod_state_without_provider, sealed_cookie_header,
+    };
+
+    #[test]
+    fn dev_caller_uses_dev_for_owner_and_audit() {
+        let caller = request_caller(&dev_state(), &HeaderMap::new()).unwrap();
+        assert_eq!(caller.owner, "dev");
+        assert_eq!(caller.audit, "dev");
+    }
+
+    #[test]
+    fn production_caller_uses_subject_for_owner_and_email_for_audit() {
+        let state = prod_state_without_provider();
+        let mut tokens = fake_tokens();
+        tokens.identity.subject = "stable-subject".into();
+        tokens.identity.email = Some("person@example.com".into());
+
+        let caller = request_caller(&state, &sealed_cookie_header(&tokens)).unwrap();
+        assert_eq!(caller.owner, "stable-subject");
+        assert_eq!(caller.audit, "person@example.com");
+    }
+
+    #[test]
+    fn production_caller_falls_back_to_subject_for_audit() {
+        let state = prod_state_without_provider();
+        let mut tokens = fake_tokens();
+        tokens.identity.subject = "stable-subject".into();
+        tokens.identity.email = None;
+
+        let caller = request_caller(&state, &sealed_cookie_header(&tokens)).unwrap();
+        assert_eq!(caller.owner, "stable-subject");
+        assert_eq!(caller.audit, "stable-subject");
+        assert!(request_caller(&state, &HeaderMap::new()).is_none());
+    }
 }

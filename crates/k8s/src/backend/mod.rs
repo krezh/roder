@@ -26,6 +26,7 @@ use crate::informers::{InformerRegistry, WatchHandle};
 use crate::project::ts_string;
 
 mod drain;
+pub use drain::DrainSession;
 mod exec;
 mod flux;
 mod helm_release;

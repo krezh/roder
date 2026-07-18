@@ -96,6 +96,8 @@ pub(crate) struct DrainTarget {
     /// power action; `None` for a bare drain (context menu).
     pub(crate) power: Option<String>,
     pub(crate) control_plane: bool,
+    /// Existing job to reopen after a browser refresh; `None` starts at options.
+    pub(crate) job: Option<u64>,
 }
 
 #[derive(Clone, Copy)]

@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.27](https://github.com/krezh/roder/compare/0.1.26...0.1.27) (2026-07-18)
+
+
+### Features
+
+* **cargo:** update rust crate tokio (1.52.4 ➔ 1.53.0) ([#93](https://github.com/krezh/roder/issues/93)) ([dfcf935](https://github.com/krezh/roder/commit/dfcf935124e151463af0346da0d6f90dd7dd490c))
+* **drain:** improve node drain ([#95](https://github.com/krezh/roder/issues/95)) ([3378c99](https://github.com/krezh/roder/commit/3378c99e2d8cc6ece275b3a679d433ca2facc73f))
+
+
+### Bug Fixes
+
+* **container:** update image ghcr.io/rust-lang/rust (1.97.0 ➔ 1.97.1) ([#92](https://github.com/krezh/roder/issues/92)) ([3b8bc1a](https://github.com/krezh/roder/commit/3b8bc1a2604469b63e449cb43299b89e81d0d94f))
+
 ## [0.1.26](https://github.com/krezh/roder/compare/0.1.25...0.1.26) (2026-07-16)
 
 

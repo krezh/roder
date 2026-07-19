@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.28](https://github.com/krezh/roder/compare/0.1.27...0.1.28) (2026-07-19)
+
+
+### Bug Fixes
+
+* **cargo:** update rust crate futures (0.3.32 ➔ 0.3.33) ([#96](https://github.com/krezh/roder/issues/96)) ([2bf08af](https://github.com/krezh/roder/commit/2bf08af744dd7fd3e3c32fc68eaeaedd3c15a0ab))
+* **cargo:** update rust crate serde (1.0.228 ➔ 1.0.229) ([#99](https://github.com/krezh/roder/issues/99)) ([2ab7868](https://github.com/krezh/roder/commit/2ab7868d2cfe5924ac49154c406d4cf717425908))
+* **cargo:** update rust crate thiserror (2.0.18 ➔ 2.0.19) ([#98](https://github.com/krezh/roder/issues/98)) ([46ecdf0](https://github.com/krezh/roder/commit/46ecdf0dee0bb74222c054b7639c8310243289c9))
+* **chart:** pin image digest ([06cf0d6](https://github.com/krezh/roder/commit/06cf0d6eb61a014f1da9b3f847be442c1e5367e1))
+
 ## [0.1.27](https://github.com/krezh/roder/compare/0.1.26...0.1.27) (2026-07-18)
 
 

@@ -10,7 +10,7 @@ use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::Json;
+use axum::{Extension, Json};
 use roder_core::{
     ObjectDetail, TalosCapabilities, TalosConfigDiff, TalosConfigDifference, TalosConfigPeerDiff,
 };
@@ -19,7 +19,7 @@ use serde::Deserialize;
 use tokio_stream::StreamExt;
 
 use super::action::ActionRequest;
-use super::{backend, backend_or_return, bad_gateway};
+use super::bad_gateway;
 use crate::server::AppState;
 
 fn talos_error(e: roder_talos::TalosError) -> Response {
@@ -39,7 +39,7 @@ pub struct TalosNodeQuery {
     node: String,
 }
 
-fn request_groups(state: &AppState, headers: &HeaderMap) -> Option<Vec<String>> {
+pub(crate) fn request_groups(state: &AppState, headers: &HeaderMap) -> Option<Vec<String>> {
     if state.config.dev_mode {
         return Some(Vec::new());
     }
@@ -93,6 +93,7 @@ fn is_control_plane(detail: &ObjectDetail) -> bool {
 /// Read-only machine status through Talos's native in-cluster API service.
 pub async fn talos_node(
     State(state): State<AppState>,
+    Extension(backend): Extension<Arc<Backend>>,
     headers: HeaderMap,
     Query(q): Query<TalosNodeQuery>,
 ) -> Response {
@@ -106,7 +107,6 @@ pub async fn talos_node(
     if !capabilities.read {
         return StatusCode::FORBIDDEN.into_response();
     }
-    let backend = backend_or_return!(state);
     let (_, detail) = match visible_node(&backend, &q.node).await {
         Ok(node) => node,
         Err(response) => return response,
@@ -133,6 +133,7 @@ pub async fn talos_node(
 /// Redacted machine-configuration differences against the other Talos nodes.
 pub async fn talos_config_diff(
     State(state): State<AppState>,
+    Extension(backend): Extension<Arc<Backend>>,
     headers: HeaderMap,
     Query(q): Query<TalosNodeQuery>,
 ) -> Response {
@@ -145,7 +146,6 @@ pub async fn talos_config_diff(
     let Some(talos) = state.talos.as_ref() else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let backend = backend_or_return!(state);
     if let Err(response) = visible_node(&backend, &q.node).await {
         return response;
     }
@@ -231,6 +231,7 @@ fn config_display_value(value: Option<&roder_talos::ConfigField>) -> Option<Stri
 /// Live kernel ring buffer from a Talos node as SSE.
 pub async fn talos_dmesg(
     State(state): State<AppState>,
+    Extension(backend): Extension<Arc<Backend>>,
     headers: HeaderMap,
     Query(q): Query<TalosNodeQuery>,
 ) -> Response {
@@ -243,7 +244,6 @@ pub async fn talos_dmesg(
     if !talos_capabilities(&state, &headers).read {
         return StatusCode::FORBIDDEN.into_response();
     }
-    let backend = backend_or_return!(state);
     if let Err(response) = visible_node(&backend, &q.node).await {
         return response;
     }
@@ -282,6 +282,7 @@ pub(crate) async fn talos_mutation(
     headers: &HeaderMap,
     owner: &str,
     req: &ActionRequest,
+    backend: Arc<Backend>,
 ) -> Option<Response> {
     if !matches!(
         req.action.as_str(),
@@ -311,10 +312,6 @@ pub(crate) async fn talos_mutation(
         Some(options)
     } else {
         None
-    };
-    let backend = match backend(state).await {
-        Ok(b) => b,
-        Err(r) => return Some(r),
     };
     let (node_key, detail) = match visible_node(&backend, node).await {
         Ok(node) => node,

@@ -29,8 +29,16 @@ pub struct ServerConfig {
     pub talos_actions_enabled: bool,
     pub talos_config_groups: Vec<String>,
     pub talos_config_enabled: bool,
+    /// Empty means any authenticated user may read Alertmanager alerts.
+    pub alerts_groups: Vec<String>,
     /// Downward-API node name; coordinated power actions reject their own host.
     pub pod_node_name: Option<String>,
+    /// Max concurrent per-user backends before the soft LRU cap starts evicting
+    /// idle ones (RODER_MAX_USER_BACKENDS, default 200). Soft: never rejects a user.
+    pub max_user_backends: usize,
+    /// Idle timeout before a per-user backend with no active SSE subscribers is
+    /// reaped (RODER_BACKEND_IDLE_SECS, default 1200 = 20 min).
+    pub backend_idle_secs: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -62,7 +70,10 @@ impl ServerConfig {
         let talos_actions_enabled = env_bool("RODER_TALOS_ACTIONS_ENABLED");
         let talos_config_groups = env_groups("RODER_TALOS_CONFIG_GROUPS");
         let talos_config_enabled = env_bool("RODER_TALOS_CONFIG_ENABLED");
+        let alerts_groups = env_groups("RODER_ALERTS_GROUPS");
         let pod_node_name = std::env::var("RODER_POD_NODE_NAME").ok();
+        let max_user_backends = env_usize("RODER_MAX_USER_BACKENDS", 200);
+        let backend_idle_secs = env_u64("RODER_BACKEND_IDLE_SECS", 1200);
 
         if dev_mode {
             return Ok(Self {
@@ -76,7 +87,10 @@ impl ServerConfig {
                 talos_actions_enabled,
                 talos_config_groups,
                 talos_config_enabled,
+                alerts_groups,
                 pod_node_name,
+                max_user_backends,
+                backend_idle_secs,
             });
         }
 
@@ -105,7 +119,10 @@ impl ServerConfig {
             talos_actions_enabled,
             talos_config_groups,
             talos_config_enabled,
+            alerts_groups,
             pod_node_name,
+            max_user_backends,
+            backend_idle_secs,
         })
     }
 
@@ -132,6 +149,10 @@ impl ServerConfig {
     pub fn can_read_talos_config(&self, groups: &[String]) -> bool {
         self.talos_config_enabled
             && (self.dev_mode || has_any_group(groups, &self.talos_config_groups))
+    }
+
+    pub fn can_read_alerts(&self, groups: &[String]) -> bool {
+        self.dev_mode || self.alerts_groups.is_empty() || has_any_group(groups, &self.alerts_groups)
     }
 
     /// Convert to the `roder_auth` config (panics if called in dev mode).
@@ -208,6 +229,20 @@ fn has_any_group(actual: &[String], allowed: &[String]) -> bool {
     !allowed.is_empty() && actual.iter().any(|group| allowed.contains(group))
 }
 
+fn env_usize(key: &str, default: usize) -> usize {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
+}
+
+fn env_u64(key: &str, default: u64) -> u64 {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,7 +297,10 @@ mod tests {
             "RODER_TALOS_ACTIONS_ENABLED",
             "RODER_TALOS_CONFIG_GROUPS",
             "RODER_TALOS_CONFIG_ENABLED",
+            "RODER_ALERTS_GROUPS",
             "RODER_POD_NODE_NAME",
+            "RODER_MAX_USER_BACKENDS",
+            "RODER_BACKEND_IDLE_SECS",
         ]);
         g.unset("RODER_DEV_MODE");
         g.set("RODER_BASE_URL", "https://roder.example.com");
@@ -279,7 +317,10 @@ mod tests {
         g.unset("RODER_TALOS_ACTIONS_ENABLED");
         g.unset("RODER_TALOS_CONFIG_GROUPS");
         g.unset("RODER_TALOS_CONFIG_ENABLED");
+        g.unset("RODER_ALERTS_GROUPS");
         g.unset("RODER_POD_NODE_NAME");
+        g.unset("RODER_MAX_USER_BACKENDS");
+        g.unset("RODER_BACKEND_IDLE_SECS");
         g
     }
 
@@ -489,6 +530,45 @@ mod tests {
 
     #[test]
     #[serial]
+    fn alerts_groups_restrict_read_access() {
+        let g = prod_env();
+        g.set("RODER_ALERTS_GROUPS", "platform,alerts-readers");
+        let cfg = ServerConfig::from_env().unwrap();
+        assert!(cfg.can_read_alerts(&["platform".into()]));
+        assert!(!cfg.can_read_alerts(&["developers".into()]));
+    }
+
+    #[test]
+    #[serial]
+    fn alerts_groups_unset_is_open() {
+        let g = prod_env();
+        g.unset("RODER_ALERTS_GROUPS");
+        let cfg = ServerConfig::from_env().unwrap();
+        assert!(cfg.can_read_alerts(&[]));
+        assert!(cfg.can_read_alerts(&["anyone".into()]));
+    }
+
+    #[test]
+    #[serial]
+    fn alerts_groups_dev_mode_always_allows() {
+        let g = EnvGuard::new(&[
+            "RODER_DEV_MODE",
+            "RODER_OIDC_ISSUER_URL",
+            "RODER_OIDC_CLIENT_ID",
+            "RODER_OIDC_CLIENT_SECRET",
+            "RODER_ALERTS_GROUPS",
+        ]);
+        g.set("RODER_DEV_MODE", "1");
+        g.unset("RODER_OIDC_ISSUER_URL");
+        g.unset("RODER_OIDC_CLIENT_ID");
+        g.unset("RODER_OIDC_CLIENT_SECRET");
+        g.set("RODER_ALERTS_GROUPS", "platform");
+        let cfg = ServerConfig::from_env().unwrap();
+        assert!(cfg.can_read_alerts(&["developers".into()]));
+    }
+
+    #[test]
+    #[serial]
     fn talos_operator_requires_switch_and_group() {
         let g = prod_env();
         g.set("RODER_TALOS_OPERATOR_GROUPS", "platform-operators");
@@ -537,6 +617,63 @@ mod tests {
         assert_eq!(o.issuer_url, "https://login.example.com");
         assert_eq!(o.client_id, "my-client");
         assert_eq!(o.client_secret, "my-secret");
+    }
+
+    // -------- per-user backend registry knobs --------
+
+    #[test]
+    #[serial]
+    fn from_env_defaults_backend_registry_knobs() {
+        let g = prod_env();
+        g.unset("RODER_MAX_USER_BACKENDS");
+        g.unset("RODER_BACKEND_IDLE_SECS");
+        let cfg = ServerConfig::from_env().unwrap();
+        assert_eq!(cfg.max_user_backends, 200);
+        assert_eq!(cfg.backend_idle_secs, 1200);
+    }
+
+    #[test]
+    #[serial]
+    fn from_env_parses_backend_registry_knobs() {
+        let g = prod_env();
+        g.set("RODER_MAX_USER_BACKENDS", "50");
+        g.set("RODER_BACKEND_IDLE_SECS", "600");
+        let cfg = ServerConfig::from_env().unwrap();
+        assert_eq!(cfg.max_user_backends, 50);
+        assert_eq!(cfg.backend_idle_secs, 600);
+    }
+
+    #[test]
+    #[serial]
+    fn from_env_invalid_backend_registry_knobs_fall_back_to_default() {
+        let g = prod_env();
+        g.set("RODER_MAX_USER_BACKENDS", "not-a-number");
+        g.set("RODER_BACKEND_IDLE_SECS", "not-a-number");
+        let cfg = ServerConfig::from_env().unwrap();
+        assert_eq!(cfg.max_user_backends, 200);
+        assert_eq!(cfg.backend_idle_secs, 1200);
+    }
+
+    #[test]
+    #[serial]
+    fn from_env_dev_mode_defaults_backend_registry_knobs() {
+        let g = EnvGuard::new(&[
+            "RODER_DEV_MODE",
+            "RODER_OIDC_ISSUER_URL",
+            "RODER_OIDC_CLIENT_ID",
+            "RODER_OIDC_CLIENT_SECRET",
+            "RODER_MAX_USER_BACKENDS",
+            "RODER_BACKEND_IDLE_SECS",
+        ]);
+        g.set("RODER_DEV_MODE", "1");
+        g.unset("RODER_OIDC_ISSUER_URL");
+        g.unset("RODER_OIDC_CLIENT_ID");
+        g.unset("RODER_OIDC_CLIENT_SECRET");
+        g.unset("RODER_MAX_USER_BACKENDS");
+        g.unset("RODER_BACKEND_IDLE_SECS");
+        let cfg = ServerConfig::from_env().unwrap();
+        assert_eq!(cfg.max_user_backends, 200);
+        assert_eq!(cfg.backend_idle_secs, 1200);
     }
 
     // -------- secure_cookies / oidc_config --------

@@ -1,13 +1,15 @@
 //! Generic per-resource read endpoints: a single object's detail, its
 //! ownership tree, and what the current identity is allowed to do to it.
 
-use axum::extract::{Query, State};
+use std::sync::Arc;
+
+use axum::extract::Query;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
+use axum::{Extension, Json};
+use roder_k8s::Backend;
 use serde::Deserialize;
 
-use super::{backend, backend_or_return, bad_gateway, ns_filter};
-use crate::server::AppState;
+use super::{bad_gateway, ns_filter};
 
 #[derive(Deserialize)]
 pub struct DetailQuery {
@@ -16,8 +18,10 @@ pub struct DetailQuery {
     name: String,
 }
 
-pub async fn detail(State(state): State<AppState>, Query(q): Query<DetailQuery>) -> Response {
-    let b = backend_or_return!(state);
+pub async fn detail(
+    Extension(b): Extension<Arc<Backend>>,
+    Query(q): Query<DetailQuery>,
+) -> Response {
     let ns = ns_filter(&q.namespace);
     match b.detail(&q.key, ns, &q.name).await {
         Ok(d) => Json(d).into_response(),
@@ -35,10 +39,9 @@ pub struct ResourceTreeQuery {
 /// Full recursive ownership tree for a Kustomization/HelmRelease, resolved
 /// server-side in one shot (see `Backend::resource_tree`).
 pub async fn resource_tree(
-    State(state): State<AppState>,
+    Extension(b): Extension<Arc<Backend>>,
     Query(q): Query<ResourceTreeQuery>,
 ) -> Response {
-    let b = backend_or_return!(state);
     let ns = ns_filter(&q.namespace);
     match b.resource_tree(&q.key, ns, &q.name).await {
         Ok(tree) => Json(tree).into_response(),
@@ -53,8 +56,10 @@ pub struct PermQuery {
 }
 
 /// Which mutations the current identity may perform (drives button visibility).
-pub async fn permissions(State(state): State<AppState>, Query(q): Query<PermQuery>) -> Response {
-    let b = backend_or_return!(state);
+pub async fn permissions(
+    Extension(b): Extension<Arc<Backend>>,
+    Query(q): Query<PermQuery>,
+) -> Response {
     let ns = ns_filter(&q.namespace);
     let patch = b.can("patch", &q.key, ns).await;
     let delete = b.can("delete", &q.key, ns).await;
@@ -69,10 +74,9 @@ pub struct AccessReviewQuery {
 /// RBAC access review: which verbs the current identity may perform across
 /// every known resource kind, given OIDC passthrough.
 pub async fn access_review(
-    State(state): State<AppState>,
+    Extension(b): Extension<Arc<Backend>>,
     Query(q): Query<AccessReviewQuery>,
 ) -> Response {
-    let b = backend_or_return!(state);
     let ns = ns_filter(&q.namespace);
     Json(b.access_review(ns).await).into_response()
 }

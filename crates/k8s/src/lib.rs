@@ -14,6 +14,7 @@ mod informers;
 mod metrics;
 mod printer_columns;
 mod project;
+mod shared;
 
 #[cfg(test)]
 mod test_alloc;
@@ -23,3 +24,4 @@ pub use backend::{Backend, DrainSession};
 pub use client::{ClusterAccess, K8sError};
 pub use informers::WatchHandle;
 pub use kube::api::{AttachedProcess, TerminalSize};
+pub use shared::SharedCluster;

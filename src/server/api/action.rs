@@ -2,14 +2,17 @@
 //! `action`. Talos-specific actions are handled by `talos::talos_mutation`;
 //! everything else is a generic per-resource-kind mutation.
 
+use std::sync::Arc;
+
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::Json;
+use axum::{Extension, Json};
+use roder_k8s::Backend;
 use serde::Deserialize;
 
 use super::talos::talos_mutation;
-use super::{backend, backend_or_return, bad_gateway, ns_filter, request_caller};
+use super::{bad_gateway, ns_filter, request_caller};
 use crate::server::drain_jobs::CancelResult;
 use crate::server::AppState;
 
@@ -32,6 +35,7 @@ pub struct ActionRequest {
 /// Single mutation endpoint dispatching by `action`.
 pub async fn action(
     State(state): State<AppState>,
+    Extension(b): Extension<Arc<Backend>>,
     headers: HeaderMap,
     Json(req): Json<ActionRequest>,
 ) -> Response {
@@ -72,11 +76,9 @@ pub async fn action(
         None
     };
 
-    if let Some(response) = talos_mutation(&state, &headers, &caller.owner, &req).await {
+    if let Some(response) = talos_mutation(&state, &headers, &caller.owner, &req, b.clone()).await {
         return response;
     }
-
-    let b = backend_or_return!(state);
 
     // `apply` and `sanitize` don't operate on a named resource.
     let res = if req.action == "apply" {
@@ -179,7 +181,7 @@ pub async fn action(
 mod tests {
     use super::*;
     use crate::server::handlers::fixtures::{
-        fake_tokens, prod_state_without_provider, sealed_cookie_header,
+        fake_tokens, prod_state_without_provider, sealed_cookie_header, test_backend,
     };
 
     fn request(action: &str) -> ActionRequest {
@@ -214,6 +216,7 @@ mod tests {
 
         let response = action(
             State(state.clone()),
+            Extension(test_backend()),
             sealed_cookie_header(&owner),
             Json(cancel),
         )
@@ -230,7 +233,13 @@ mod tests {
         foreign.identity.subject = "owner-b".into();
         let mut cancel = request("drain-cancel");
         cancel.job = Some(second.id);
-        let response = action(State(state), sealed_cookie_header(&foreign), Json(cancel)).await;
+        let response = action(
+            State(state),
+            Extension(test_backend()),
+            sealed_cookie_header(&foreign),
+            Json(cancel),
+        )
+        .await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
         assert!(!second_flag.load(std::sync::atomic::Ordering::Relaxed));
     }
@@ -248,7 +257,13 @@ mod tests {
         let mut cancel = request("drain-cancel");
         cancel.job = Some(handle.id);
 
-        let response = action(State(state), sealed_cookie_header(&owner), Json(cancel)).await;
+        let response = action(
+            State(state),
+            Extension(test_backend()),
+            sealed_cookie_header(&owner),
+            Json(cancel),
+        )
+        .await;
         assert_eq!(response.status(), StatusCode::CONFLICT);
     }
 
@@ -264,7 +279,13 @@ mod tests {
             ..Default::default()
         });
 
-        let response = action(State(state), sealed_cookie_header(&tokens), Json(drain)).await;
+        let response = action(
+            State(state),
+            Extension(test_backend()),
+            sealed_cookie_header(&tokens),
+            Json(drain),
+        )
+        .await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 }

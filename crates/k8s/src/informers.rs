@@ -129,6 +129,20 @@ struct Active {
     reproject: Arc<Notify>,
 }
 
+/// Aborts the underlying watch task when this entry is dropped. Dropping a
+/// `tokio::task::JoinHandle` on its own does NOT stop the task — tokio just
+/// detaches it, leaving it running against the user's client forever. This
+/// makes removal from `InformerRegistry::active` (idle reaper) and the whole
+/// registry dropping (see the `Weak`-holding background loops in
+/// [`spawn_reaper`]/[`spawn_reproject`]/[`spawn_columns_watch`]) actually free
+/// the watch. `abort()` is idempotent, so an explicit `entry.handle.abort()`
+/// elsewhere before drop is harmless.
+impl Drop for Active {
+    fn drop(&mut self) {
+        self.handle.abort();
+    }
+}
+
 /// What a caller gets when subscribing to a live list: the current contents plus
 /// a receiver for subsequent deltas.
 pub struct WatchHandle {
@@ -141,36 +155,88 @@ pub struct WatchHandle {
     pub columns: Headers,
 }
 
+/// Shared cluster-metadata + metrics enrichment layer, owned once per cluster
+/// (by the SA-credentialed access) regardless of how many per-user
+/// `InformerRegistry`s are watching. Holds the pod-usage/metrics-history/PVC-usage
+/// caches and runs the periodic scrapes that fill them, so N users watching the
+/// same cluster still costs one metrics-server scrape and one kubelet scan, not N.
+pub struct Enrichment {
+    cluster: Arc<ClusterAccess>,
+    /// Shared pod usage cache (current + previous), refreshed once for all pod informers.
+    pub pod_usage: Arc<RwLock<UsageWithTrend>>,
+    /// Time-series metrics history for pods, used for graphs.
+    pub metrics_history: Arc<RwLock<MetricsHistory>>,
+    /// Shared PVC filesystem usage cache, refreshed once for all PVC informers.
+    pub pvc_usage: Arc<RwLock<PvcUsageMap>>,
+}
+
+impl Enrichment {
+    /// Start the shared cache + spawn the scrape loops once, driven by the
+    /// SA `cluster`. Per-user `InformerRegistry`s only read these caches.
+    pub fn new(cluster: Arc<ClusterAccess>) -> Arc<Self> {
+        let enrichment = Arc::new(Self {
+            cluster,
+            pod_usage: Arc::new(RwLock::new(HashMap::new())),
+            metrics_history: Arc::new(RwLock::new(HashMap::new())),
+            pvc_usage: Arc::new(RwLock::new(PvcUsageMap::default())),
+        });
+        spawn_metrics_scrape(enrichment.clone());
+        spawn_pvc_usage_scrape(enrichment.clone());
+        enrichment
+    }
+
+    /// Get the metrics history for a specific pod (namespace/name).
+    pub async fn pod_metrics_history(
+        &self,
+        namespace: &str,
+        name: &str,
+    ) -> Option<Vec<MetricsPoint>> {
+        let key = format!("{namespace}/{name}");
+        let history = self.metrics_history.read().await;
+        history.get(&key).map(|h| h.iter().copied().collect())
+    }
+}
+
 /// Registry of shared informers. One watch per (resource, namespace) is kept on
 /// the API server regardless of how many UI clients subscribe — that is the
 /// mechanism that keeps roder kind to etcd.
 pub struct InformerRegistry {
     cluster: Arc<ClusterAccess>,
     active: Mutex<HashMap<WatchKey, Active>>,
-    /// Shared pod usage cache (current + previous), refreshed once for all pod informers.
-    pod_usage: Arc<RwLock<UsageWithTrend>>,
-    /// Time-series metrics history for pods, used for graphs.
-    metrics_history: Arc<RwLock<MetricsHistory>>,
-    /// Shared PVC filesystem usage cache, refreshed once for all PVC informers.
-    pvc_usage: Arc<RwLock<PvcUsageMap>>,
-    /// CRD-declared printer columns, indexed by (group, kind). Hot-swapped by
+    /// Shared metrics/PVC caches, injected — one `Enrichment` (and its scrape
+    /// loops) serves every per-user registry watching the same cluster.
+    enrich: Arc<Enrichment>,
+    /// CRD-declared printer columns, indexed by (group, kind). Injected/shared
+    /// so every per-user registry sees the same hot-swapped columns; swapped by
     /// [`InformerRegistry::refresh_columns`] when CRDs change.
-    columns: ArcSwap<ColumnMap>,
+    columns: Arc<ArcSwap<ColumnMap>>,
 }
 
 impl InformerRegistry {
-    pub fn new(cluster: Arc<ClusterAccess>, columns: Arc<ColumnMap>) -> Arc<Self> {
+    /// `columns_rx` is a [`SharedCluster::subscribe_columns`](crate::shared::SharedCluster::subscribe_columns)
+    /// receiver: fired whenever the shared CRD watch swaps in freshly-rebuilt
+    /// columns, so this registry re-projects its own active informers against
+    /// them without waiting for its next subscribe.
+    pub fn new(
+        cluster: Arc<ClusterAccess>,
+        enrich: Arc<Enrichment>,
+        columns: Arc<ArcSwap<ColumnMap>>,
+        columns_rx: broadcast::Receiver<()>,
+    ) -> Arc<Self> {
         let registry = Arc::new(Self {
             cluster,
             active: Mutex::new(HashMap::new()),
-            pod_usage: Arc::new(RwLock::new(HashMap::new())),
-            metrics_history: Arc::new(RwLock::new(HashMap::new())),
-            pvc_usage: Arc::new(RwLock::new(PvcUsageMap::default())),
-            columns: ArcSwap::new(columns),
+            enrich,
+            columns,
         });
-        spawn_reaper(registry.clone());
-        spawn_metrics_refresh(registry.clone());
-        spawn_pvc_usage_refresh(registry.clone());
+        // The 3 background loops hold only `Weak` — the registry's sole strong
+        // owner is `Backend` (see `crates/k8s/src/backend/mod.rs`), so dropping
+        // a `Backend` actually frees this registry, its `active` watch tasks
+        // (see `impl Drop for Active`), and the user's `ClusterAccess`
+        // connection pool, instead of leaking them forever.
+        spawn_reaper(Arc::downgrade(&registry));
+        spawn_reproject(Arc::downgrade(&registry));
+        spawn_columns_watch(Arc::downgrade(&registry), columns_rx);
         registry
     }
 
@@ -203,8 +269,8 @@ impl InformerRegistry {
                 namespaced,
                 key.namespace.clone(),
                 selector,
-                self.pod_usage.clone(),
-                self.pvc_usage.clone(),
+                self.enrich.pod_usage.clone(),
+                self.enrich.pvc_usage.clone(),
                 crd,
             )
         });
@@ -221,10 +287,14 @@ impl InformerRegistry {
         }
     }
 
-    /// Swap in a freshly-loaded printer-column map (e.g. after a CRD was
-    /// installed or changed) and, for every active informer whose columns
-    /// actually changed, swap its columns and poke it to re-list + re-project.
+    /// For every active informer whose columns actually changed against
+    /// `new_columns`, swap its columns and poke it to re-list + re-project.
     /// The connected clients keep their streams and just receive a new snapshot.
+    ///
+    /// Does NOT store `new_columns` into `self.columns`: that `ArcSwap` is the
+    /// same shared instance owned and written by `SharedCluster` (see
+    /// [`InformerRegistry::new`]), so the shared layer is the sole writer —
+    /// this only reprojects each active informer against what's already there.
     pub async fn refresh_columns(&self, new_columns: Arc<ColumnMap>) {
         // Collect the pokes under the lock (no awaits), then they fire on the
         // informer tasks asynchronously.
@@ -240,8 +310,20 @@ impl InformerRegistry {
             entry.headers.store(Arc::new(new_headers));
             entry.reproject.notify_one();
         }
-        // Store after comparing so the comparison saw the old per-informer state.
-        self.columns.store(new_columns);
+    }
+
+    /// Whether any active informer currently has a live SSE subscriber
+    /// (broadcast receiver). Used by the per-subject `BackendRegistry`'s idle
+    /// reaper/soft-cap eviction (roder's server crate) to decide whether a
+    /// subject's whole `Backend` can be dropped: even if the subject hasn't
+    /// issued a new HTTP request in a while, an open dashboard tab still
+    /// streaming a live view must not be evicted out from under it.
+    pub async fn has_active_subscribers(&self) -> bool {
+        self.active
+            .lock()
+            .await
+            .values()
+            .any(|e| e.tx.receiver_count() > 0)
     }
 
     /// Serve an object from a live informer cache (no apiserver round-trip) when one
@@ -277,17 +359,6 @@ impl InformerRegistry {
         let uid = by_name.read().await.get(&lookup).cloned()?;
         let objs = objects.read().await;
         objs.get(&uid).cloned()
-    }
-
-    /// Get the metrics history for a specific pod (namespace/name).
-    pub async fn pod_metrics_history(
-        &self,
-        namespace: &str,
-        name: &str,
-    ) -> Option<Vec<MetricsPoint>> {
-        let key = format!("{}/{}", namespace, name);
-        let history = self.metrics_history.read().await;
-        history.get(&key).map(|h| h.iter().copied().collect())
     }
 }
 
@@ -462,6 +533,20 @@ fn start_informer(
                                 let _ = task_tx.send(WatchEvent::Deleted { uid: row.uid });
                             }
                             Err(e) => {
+                                // A 403 means the subject genuinely lacks RBAC for
+                                // this kind/namespace (this is expected under token
+                                // passthrough) — retrying, rebuilt client or not,
+                                // can never succeed and would just hammer the
+                                // apiserver forever. Tell this user's stream once
+                                // and end the task; the idle reaper cleans up the
+                                // `Active` entry once its subscribers drop off.
+                                if is_forbidden_error(&e) {
+                                    tracing::debug!("watch forbidden (403) for {group}/{kind}; stopping: {e}");
+                                    let _ = task_tx.send(WatchEvent::Forbidden {
+                                        message: e.to_string(),
+                                    });
+                                    return;
+                                }
                                 // A 401 means the token rotated: the watcher would
                                 // keep retrying with the stale client forever, so
                                 // break to rebuild with the hot-swapped one. Every
@@ -534,11 +619,14 @@ fn start_informer(
 
 /// Background task: stop informers that have had no subscribers for a while, so
 /// we don't hold watches for views nobody is looking at.
-fn spawn_reaper(registry: Arc<InformerRegistry>) {
+fn spawn_reaper(registry: std::sync::Weak<InformerRegistry>) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(15));
         loop {
             tick.tick().await;
+            let Some(registry) = registry.upgrade() else {
+                break;
+            };
 
             // Phase 1: Snapshot (key, idle_since arc, receiver count) while
             // holding the Mutex for the minimum time — no inner awaits here.
@@ -573,8 +661,9 @@ fn spawn_reaper(registry: Arc<InformerRegistry>) {
             if !to_remove.is_empty() {
                 let mut active = registry.active.lock().await;
                 for key in to_remove {
-                    if let Some(entry) = active.remove(&key) {
-                        entry.handle.abort();
+                    // `Active`'s `Drop` impl aborts `handle` — no need to do
+                    // it explicitly here.
+                    if active.remove(&key).is_some() {
                         tracing::debug!("evicted idle informer {}", key.resource_key);
                     }
                 }
@@ -583,23 +672,225 @@ fn spawn_reaper(registry: Arc<InformerRegistry>) {
     });
 }
 
-/// Whether a watcher error is an authentication failure (HTTP 401), which means
-/// the bearer token has rotated and the watch must be rebuilt with the
-/// hot-swapped client. Walks the error source chain and matches on the status
-/// text so it stays robust across `kube`'s error-enum shape changes. A 403
-/// (RBAC) is deliberately *not* treated as auth-rotation: rebuilding wouldn't
-/// help, so we let the watcher keep retrying.
-fn is_auth_error(e: &watcher::Error) -> bool {
+/// Background task: re-project this registry's active pod/PVC informers from
+/// the shared `Enrichment` caches every 15s, and re-broadcast any row that
+/// changed. This is the per-user counterpart of the (now cache-only) scrape
+/// loops on `Enrichment` — one scrape fills the shared cache, and each
+/// per-user registry re-projects its own subscribers' rows from it on its own
+/// timer, so N users watching the same pod still cost one metrics-server
+/// scrape but each get their own broadcast stream.
+fn spawn_reproject(registry: std::sync::Weak<InformerRegistry>) {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(15));
+        loop {
+            tick.tick().await;
+            let Some(registry) = registry.upgrade() else {
+                break;
+            };
+            reproject_once(&registry).await;
+        }
+    });
+}
+
+/// Background task: on each notification from the shared CRD watch (see
+/// [`InformerRegistry::new`]'s `columns_rx`), re-run [`InformerRegistry::refresh_columns`]
+/// with the (already-swapped-in) shared columns, so this registry's active
+/// informers reflow live along with every other per-user registry on the
+/// cluster. A lagged receiver (registry busy, several rebuilds coalesced)
+/// still catches up to the latest columns on the next tick, so it's skipped
+/// rather than treated as an error; only a closed sender (the `SharedCluster`
+/// is gone) ends the loop.
+fn spawn_columns_watch(
+    registry: std::sync::Weak<InformerRegistry>,
+    mut columns_rx: broadcast::Receiver<()>,
+) {
+    tokio::spawn(async move {
+        // `columns_rx.recv()` can block indefinitely when no CRD changes
+        // occur, so a 30s liveness tick is raced alongside it purely so this
+        // loop still notices — and exits — once the registry (held only
+        // `Weak` here) has been dropped, rather than blocking on `recv()`
+        // forever after the last real notification.
+        let mut liveness = tokio::time::interval(Duration::from_secs(30));
+        loop {
+            tokio::select! {
+                recv = columns_rx.recv() => {
+                    match recv {
+                        Err(broadcast::error::RecvError::Closed) => break,
+                        // Lagged: fall through and do a catch-up refresh below.
+                        Err(broadcast::error::RecvError::Lagged(_)) | Ok(()) => {}
+                    }
+                }
+                _ = liveness.tick() => {}
+            }
+            let Some(registry) = registry.upgrade() else {
+                break;
+            };
+            registry.refresh_columns(registry.columns.load_full()).await;
+        }
+    });
+}
+
+/// A snapshot of the Arc handles a single active informer needs for
+/// re-projection, taken while `InformerRegistry::active` is locked so the
+/// lock can be dropped before any inner-lock awaits (see [`reproject_once`]).
+struct ReprojectTarget {
+    tx: broadcast::Sender<WatchEvent>,
+    objects: Arc<RwLock<HashMap<String, DynamicObject>>>,
+    rows: Arc<RwLock<HashMap<String, ResourceRow>>>,
+    is_pod: bool,
+    is_pvc: bool,
+}
+
+/// One tick of per-user re-projection: re-derive pod/PVC rows from the shared
+/// `Enrichment` caches and re-broadcast whichever changed.
+///
+/// Phased locking mirrors `spawn_reaper` ("holding the Mutex for the minimum
+/// time — no inner awaits here") and `cached_object` (clone the Arc handles
+/// under the lock, drop it, THEN await the inner RwLocks): `active` is only
+/// ever held long enough to clone handles into a `Vec`, never across an
+/// await, so this never blocks `subscribe()`, `refresh_columns()`, or
+/// `cached_object()`. The `pod_usage`/`pvc_usage` read guards are similarly
+/// held only briefly, per entry, rather than for the whole tick, so a
+/// concurrent scrape-loop write is blocked for at most one entry's reproject,
+/// not the whole registry's.
+async fn reproject_once(registry: &InformerRegistry) {
+    // Phase 1: snapshot the entries that actually need re-projecting (pod/PVC
+    // informers with at least one live subscriber) while holding the Mutex
+    // for the minimum time — no inner awaits here.
+    let entries: Vec<ReprojectTarget> = {
+        let active = registry.active.lock().await;
+        active
+            .values()
+            .filter(|e| (e.is_pod || e.is_pvc) && e.tx.receiver_count() > 0)
+            .map(|e| ReprojectTarget {
+                tx: e.tx.clone(),
+                objects: e.objects.clone(),
+                rows: e.rows.clone(),
+                is_pod: e.is_pod,
+                is_pvc: e.is_pvc,
+            })
+            .collect()
+    };
+
+    // Phase 2: outside the Mutex, briefly read the shared cache per entry and
+    // reproject/broadcast changed rows — the `pod_usage`/`pvc_usage` read
+    // guard is only held for one entry's reproject call, not the whole loop.
+    for entry in entries {
+        if entry.is_pod {
+            let usage = registry.enrich.pod_usage.read().await;
+            reproject_entry(&entry.tx, &entry.objects, &entry.rows, |obj| {
+                project_row("", "Pod", obj, usage_for(obj, &usage), None, &[])
+            })
+            .await;
+        } else if entry.is_pvc {
+            let pvc = registry.enrich.pvc_usage.read().await;
+            reproject_entry(&entry.tx, &entry.objects, &entry.rows, |obj| {
+                project_row(
+                    "",
+                    "PersistentVolumeClaim",
+                    obj,
+                    None,
+                    pvc_usage_for(obj, &pvc),
+                    &[],
+                )
+            })
+            .await;
+        }
+    }
+}
+
+#[cfg(test)]
+impl Active {
+    /// Build a minimal pod `Active` entry for tests, seeded with one cached
+    /// object + matching row, so `reproject_once` can be driven deterministically
+    /// without starting a real informer task.
+    fn test_pod(
+        tx: broadcast::Sender<WatchEvent>,
+        objects: HashMap<String, DynamicObject>,
+        rows: HashMap<String, ResourceRow>,
+    ) -> Self {
+        Active {
+            tx,
+            rows: Arc::new(RwLock::new(rows)),
+            handle: tokio::spawn(async {}),
+            idle_since: Arc::new(RwLock::new(None)),
+            is_pod: true,
+            is_pvc: false,
+            resource_key: "/v1/Pod".to_string(),
+            namespace: Some("ns".to_string()),
+            group: String::new(),
+            kind: "Pod".to_string(),
+            objects: Arc::new(RwLock::new(objects)),
+            by_name: Arc::new(RwLock::new(HashMap::new())),
+            crd: Arc::new(ArcSwap::from_pointee(Vec::new())),
+            headers: Arc::new(ArcSwap::from_pointee(Vec::new())),
+            reproject: Arc::new(Notify::new()),
+        }
+    }
+}
+
+/// Re-project every cached object in `objects` through `project`, updating
+/// the live row cache and broadcasting only the rows that actually changed.
+async fn reproject_entry(
+    tx: &broadcast::Sender<WatchEvent>,
+    objects: &RwLock<HashMap<String, DynamicObject>>,
+    rows: &RwLock<HashMap<String, ResourceRow>>,
+    project: impl Fn(&DynamicObject) -> ResourceRow,
+) {
+    let objs = objects.read().await;
+    let mut rows = rows.write().await;
+    for (uid, obj) in objs.iter() {
+        let new_row = project(obj);
+        if rows.get(uid) != Some(&new_row) {
+            rows.insert(uid.clone(), new_row.clone());
+            let _ = tx.send(WatchEvent::Applied { row: new_row });
+        }
+    }
+}
+
+/// Walks an error's source chain, stringifying each link, and reports whether
+/// any of them contains one of `needles`. Shared core for [`is_auth_error`]
+/// and [`is_forbidden_error`] so both stay robust against `kube`'s error-enum
+/// shape changes in the same way. Delegates to [`matches_status_str`] once the
+/// chain is stringified, so that pure string-matching logic is unit-testable
+/// without constructing a real `watcher::Error`.
+fn matches_status(e: &watcher::Error, needles: &[&str]) -> bool {
     use std::error::Error;
     let mut src: Option<&dyn Error> = Some(e);
     while let Some(err) = src {
-        let s = err.to_string();
-        if s.contains("Unauthorized") || s.contains("401") {
+        if matches_status_str(&err.to_string(), needles) {
             return true;
         }
         src = err.source();
     }
     false
+}
+
+/// Pure string-matching core of [`matches_status`]: does `s` contain any of
+/// `needles`? Extracted so the status-matching behaviour can be unit tested
+/// directly on plain strings, without needing to construct a real
+/// `watcher::Error` source chain.
+fn matches_status_str(s: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| s.contains(needle))
+}
+
+/// Whether a watcher error is an authentication failure (HTTP 401), which means
+/// the bearer token has rotated and the watch must be rebuilt with the
+/// hot-swapped client. Walks the error source chain and matches on the status
+/// text so it stays robust across `kube`'s error-enum shape changes. A 403
+/// (RBAC) is handled separately by [`is_forbidden_error`]: rebuilding wouldn't
+/// help there, so the watch is stopped instead of retried.
+fn is_auth_error(e: &watcher::Error) -> bool {
+    matches_status(e, &["Unauthorized", "401"])
+}
+
+/// Whether a watcher error is an authorization failure (HTTP 403): under token
+/// passthrough this means the subject genuinely lacks RBAC for this
+/// kind/namespace, so retrying (with or without a rebuilt client) can never
+/// succeed. Callers should surface this to the user once and stop the watch,
+/// rather than let it self-heal/retry forever.
+fn is_forbidden_error(e: &watcher::Error) -> bool {
+    matches_status(e, &["Forbidden", "403"])
 }
 
 /// Backoff before retrying or rebuilding a watch stream: 1, 2, 4, 8, 16, 30s
@@ -642,15 +933,17 @@ fn enrichments(
     )
 }
 
-/// Background task: refresh pod usage from metrics-server and re-broadcast changed
-/// pod rows so CPU/mem stay live between watch events. One fetch serves every pod
-/// informer. No-op when metrics-server isn't installed.
-fn spawn_metrics_refresh(registry: Arc<InformerRegistry>) {
+/// Background task: refresh pod usage from metrics-server. One fetch serves every
+/// pod informer across every per-user registry sharing this `Enrichment`. No-op
+/// when metrics-server isn't installed. Cache-only — re-projecting cached rows
+/// into each per-user registry's broadcast streams is done by a per-user timer
+/// (see the per-registry re-project loop), not here.
+fn spawn_metrics_scrape(enrichment: Arc<Enrichment>) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(15));
         loop {
             tick.tick().await;
-            let client = (*registry.cluster.client()).clone();
+            let client = (*enrichment.cluster.client()).clone();
             let fresh = crate::metrics::pod_usage(&client).await;
             if fresh.is_empty() {
                 continue;
@@ -664,108 +957,369 @@ fn spawn_metrics_refresh(registry: Arc<InformerRegistry>) {
 
             // Preserve previous samples for trend detection, then merge new data.
             // Hold the lock for the entire update to avoid race conditions.
-            {
-                let mut usage = registry.pod_usage.write().await;
-                let mut history = registry.metrics_history.write().await;
+            let mut usage = enrichment.pod_usage.write().await;
+            let mut history = enrichment.metrics_history.write().await;
 
-                // Increment miss counter for all existing entries; reset below
-                // for pods that appear in this scrape.
-                for entry in usage.values_mut() {
-                    entry.misses = entry.misses.saturating_add(1);
-                    entry.prev_cpu = Some(entry.cpu);
-                    entry.prev_mem = Some(entry.mem);
-                }
-                // Update current values for fresh entries and record history
-                for (k, (cpu, mem)) in &fresh {
-                    let entry = usage.entry(k.clone()).or_default();
-                    entry.misses = 0; // seen this scrape — reset
-                    entry.cpu = *cpu;
-                    entry.mem = *mem;
-                    // For new entries, set prev to current (no trend on first sample)
-                    if !entry.has_prev() {
-                        entry.prev_cpu = Some(*cpu);
-                        entry.prev_mem = Some(*mem);
-                    }
-
-                    // Record metrics history
-                    let pod_history = history.entry(k.clone()).or_insert_with(VecDeque::new);
-                    pod_history.push_back(MetricsPoint {
-                        timestamp,
-                        cpu: *cpu,
-                        mem: *mem,
-                    });
-                    // Keep only the last MAX_HISTORY_POINTS
-                    while pod_history.len() > MAX_HISTORY_POINTS {
-                        pod_history.pop_front();
-                    }
-                }
-                // Evict entries absent for >3 consecutive scrapes (~45s). A single
-                // partial response (e.g. one node temporarily unreachable) only
-                // increments the miss counter, preserving history across transient gaps.
-                usage.retain(|_, v| v.misses <= 3);
-                history.retain(|k, _| usage.contains_key(k));
+            // Increment miss counter for all existing entries; reset below
+            // for pods that appear in this scrape.
+            for entry in usage.values_mut() {
+                entry.misses = entry.misses.saturating_add(1);
+                entry.prev_cpu = Some(entry.cpu);
+                entry.prev_mem = Some(entry.mem);
             }
-
-            let usage = registry.pod_usage.read().await;
-            let active = registry.active.lock().await;
-            for entry in active.values() {
-                // Only re-project pod informers that someone is actually watching.
-                if !entry.is_pod || entry.tx.receiver_count() == 0 {
-                    continue;
+            // Update current values for fresh entries and record history
+            for (k, (cpu, mem)) in &fresh {
+                let entry = usage.entry(k.clone()).or_default();
+                entry.misses = 0; // seen this scrape — reset
+                entry.cpu = *cpu;
+                entry.mem = *mem;
+                // For new entries, set prev to current (no trend on first sample)
+                if !entry.has_prev() {
+                    entry.prev_cpu = Some(*cpu);
+                    entry.prev_mem = Some(*mem);
                 }
-                let objs = entry.objects.read().await;
-                let mut rows = entry.rows.write().await;
-                for (uid, obj) in objs.iter() {
-                    let new_row = project_row("", "Pod", obj, usage_for(obj, &usage), None, &[]);
-                    if rows.get(uid) != Some(&new_row) {
-                        rows.insert(uid.clone(), new_row.clone());
-                        let _ = entry.tx.send(WatchEvent::Applied { row: new_row });
-                    }
+
+                // Record metrics history
+                let pod_history = history.entry(k.clone()).or_insert_with(VecDeque::new);
+                pod_history.push_back(MetricsPoint {
+                    timestamp,
+                    cpu: *cpu,
+                    mem: *mem,
+                });
+                // Keep only the last MAX_HISTORY_POINTS
+                while pod_history.len() > MAX_HISTORY_POINTS {
+                    pod_history.pop_front();
                 }
             }
+            // Evict entries absent for >3 consecutive scrapes (~45s). A single
+            // partial response (e.g. one node temporarily unreachable) only
+            // increments the miss counter, preserving history across transient gaps.
+            usage.retain(|_, v| v.misses <= 3);
+            history.retain(|k, _| usage.contains_key(k));
         }
     });
 }
 
 /// Background task: refresh PVC filesystem usage from each kubelet's
-/// `/proxy/stats/summary` and re-broadcast changed PVC rows so the % column
-/// stays live between watch events. No-op when RBAC lacks `nodes/proxy`.
-fn spawn_pvc_usage_refresh(registry: Arc<InformerRegistry>) {
+/// `/proxy/stats/summary`. No-op when RBAC lacks `nodes/proxy`. Cache-only — see
+/// [`spawn_metrics_scrape`] for why re-projection is not done here.
+fn spawn_pvc_usage_scrape(enrichment: Arc<Enrichment>) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(30));
         loop {
             tick.tick().await;
-            let client = (*registry.cluster.client()).clone();
+            let client = (*enrichment.cluster.client()).clone();
             let fresh = crate::metrics::pvc_usage(&client).await;
 
             // Always replace the cache; the kubelet scan is authoritative
             // about which PVCs are currently mounted and how full they are.
-            *registry.pvc_usage.write().await = fresh;
-
-            // Re-project any active PVC informer so the % column updates.
-            let pvc_cache = registry.pvc_usage.read().await;
-            let active = registry.active.lock().await;
-            for entry in active.values() {
-                if !entry.is_pvc || entry.tx.receiver_count() == 0 {
-                    continue;
-                }
-                let objs = entry.objects.read().await;
-                let mut rows = entry.rows.write().await;
-                for (uid, obj) in objs.iter() {
-                    let new_row = project_row(
-                        "",
-                        "PersistentVolumeClaim",
-                        obj,
-                        None,
-                        pvc_usage_for(obj, &pvc_cache),
-                        &[],
-                    );
-                    if rows.get(uid) != Some(&new_row) {
-                        rows.insert(uid.clone(), new_row.clone());
-                        let _ = entry.tx.send(WatchEvent::Applied { row: new_row });
-                    }
-                }
-            }
+            *enrichment.pvc_usage.write().await = fresh;
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn enrichment_starts_with_empty_caches() {
+        // A ClusterAccess we never actually hit — scrape loops no-op on empty/unreachable.
+        let cluster = crate::client::ClusterAccess::for_test();
+        let e = Enrichment::new(cluster);
+        assert!(e.pod_usage.read().await.is_empty());
+        assert!(e.pvc_usage.read().await.is_empty());
+        assert!(e.pod_metrics_history("ns", "pod").await.is_none());
+    }
+
+    /// A `columns_changed` notification (the `SharedCluster` counterpart, sent
+    /// after a CRD-driven columns rebuild) makes the registry re-derive an
+    /// active informer's headers from the freshly-swapped `ColumnMap` — this
+    /// is the live column-reflow wiring, exercised end to end via the
+    /// broadcast channel rather than by calling `refresh_columns` directly.
+    #[tokio::test]
+    async fn columns_changed_notification_reflows_active_informer_headers() {
+        use kube::core::ApiResource;
+        let cluster = crate::client::ClusterAccess::for_test();
+        let enrich = Enrichment::new(cluster.clone());
+        let columns: Arc<ArcSwap<ColumnMap>> =
+            Arc::new(ArcSwap::from_pointee(ColumnMap::default()));
+        let (columns_tx, columns_rx) = broadcast::channel::<()>(4);
+        let registry = InformerRegistry::new(cluster, enrich, columns.clone(), columns_rx);
+
+        let ar = ApiResource {
+            group: "example.com".into(),
+            version: "v1".into(),
+            api_version: "example.com/v1".into(),
+            kind: "Widget".into(),
+            plural: "widgets".into(),
+        };
+        let handle = registry
+            .subscribe(&ar, "example.com", "Widget", true, Some("ns".into()), None)
+            .await;
+        let headers_before = (**handle.columns.load()).clone();
+
+        // Swap in a ColumnMap that declares a printer column for this CRD kind,
+        // then notify — mirroring what `spawn_crd_watch_shared` does after a
+        // rebuild: store the new columns, then broadcast `()`.
+        let mut new_map = ColumnMap::default();
+        new_map.insert(
+            ("example.com".to_string(), "Widget".to_string()),
+            vec![PrinterCol {
+                name: "Phase".to_string(),
+                json_path: "$.status.phase".to_string(),
+                col_type: "string".to_string(),
+            }],
+        );
+        columns.store(Arc::new(new_map));
+        columns_tx.send(()).expect("registry is subscribed");
+
+        // The reflow happens on a background task; poll briefly instead of a
+        // fixed sleep so the test isn't flaky under load.
+        let mut headers_after = headers_before.clone();
+        for _ in 0..50 {
+            headers_after = (**handle.columns.load()).clone();
+            if headers_after != headers_before {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(
+            headers_after,
+            vec!["Phase".to_string()],
+            "active informer's headers should reflect the newly-swapped CRD column"
+        );
+    }
+
+    #[tokio::test]
+    async fn distinct_user_registries_track_subscriptions_independently() {
+        use kube::core::ApiResource;
+        let enrich = Enrichment::new(crate::client::ClusterAccess::for_test());
+        let columns: Arc<ArcSwap<ColumnMap>> =
+            Arc::new(ArcSwap::from_pointee(ColumnMap::default()));
+        let (columns_tx, _) = broadcast::channel::<()>(4);
+
+        let reg_a = InformerRegistry::new(
+            crate::client::ClusterAccess::for_test(),
+            enrich.clone(),
+            columns.clone(),
+            columns_tx.subscribe(),
+        );
+        let reg_b = InformerRegistry::new(
+            crate::client::ClusterAccess::for_test(),
+            enrich.clone(),
+            columns.clone(),
+            columns_tx.subscribe(),
+        );
+
+        let ar = ApiResource {
+            group: "".into(),
+            version: "v1".into(),
+            api_version: "v1".into(),
+            kind: "ConfigMap".into(),
+            plural: "configmaps".into(),
+        };
+        let ha = reg_a
+            .subscribe(&ar, "", "ConfigMap", true, Some("ns".into()), None)
+            .await;
+        let hb = reg_b
+            .subscribe(&ar, "", "ConfigMap", true, Some("ns".into()), None)
+            .await;
+
+        // Independent broadcast channels: dropping A's receiver doesn't affect B.
+        drop(ha);
+        assert!(hb.rows.read().await.is_empty()); // no cross-registry state
+    }
+
+    /// Build a minimal cached pod `DynamicObject` + its initial (usage-less)
+    /// projected row, keyed by `uid`.
+    fn test_pod_object(uid: &str, name: &str, namespace: &str) -> (DynamicObject, ResourceRow) {
+        let pod: DynamicObject = serde_json::from_value(serde_json::json!({
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "name": name,
+                "namespace": namespace,
+                "uid": uid,
+            },
+            "spec": {},
+            "status": {},
+        }))
+        .expect("valid pod manifest");
+        let row = project_row("", "Pod", &pod, None, None, &[]);
+        (pod, row)
+    }
+
+    #[tokio::test]
+    async fn reproject_once_rebroadcasts_only_on_change() {
+        let cluster = crate::client::ClusterAccess::for_test();
+        let enrich = Enrichment::new(cluster.clone());
+        let columns: Arc<ArcSwap<ColumnMap>> =
+            Arc::new(ArcSwap::from_pointee(ColumnMap::default()));
+        let (_columns_tx, columns_rx) = broadcast::channel::<()>(4);
+        let registry = InformerRegistry::new(cluster, enrich.clone(), columns, columns_rx);
+
+        let (pod, row) = test_pod_object("uid-1", "pod1", "ns");
+        let uid = row.uid.clone();
+
+        let (tx, mut rx) = broadcast::channel(16);
+        let entry = Active::test_pod(
+            tx,
+            HashMap::from([(uid.clone(), pod)]),
+            HashMap::from([(uid.clone(), row)]),
+        );
+        let key = WatchKey {
+            resource_key: "/v1/Pod".to_string(),
+            namespace: Some("ns".to_string()),
+            selector: None,
+        };
+        registry.active.lock().await.insert(key, entry);
+
+        // No subscribers other than `rx` are watching yet, so before any usage
+        // is seeded the initial CPU cell is "n/a" (asserted implicitly below
+        // via the change it becomes once usage lands).
+
+        // Seed usage that will change the projected CPU cell.
+        registry.enrich.pod_usage.write().await.insert(
+            "ns/pod1".to_string(),
+            UsageEntry {
+                cpu: 0.5,
+                mem: 100.0 * 1024.0 * 1024.0,
+                ..Default::default()
+            },
+        );
+
+        reproject_once(&registry).await;
+
+        let event = rx
+            .try_recv()
+            .expect("row changed by usage — should broadcast");
+        match event {
+            WatchEvent::Applied { row } => {
+                assert_eq!(row.uid, uid);
+                assert_eq!(row.cells[3], "500", "CPU cell should reflect seeded usage");
+            }
+            other => panic!("expected Applied, got {other:?}"),
+        }
+
+        // No further change: a second tick with identical usage must not
+        // re-broadcast (change-detection).
+        reproject_once(&registry).await;
+        assert!(
+            matches!(
+                rx.try_recv(),
+                Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+            ),
+            "unchanged usage must not trigger another broadcast"
+        );
+    }
+
+    /// Task 7.5: the registry's 3 background loops (reaper/reproject/columns-watch)
+    /// must hold `Weak<InformerRegistry>`, not `Arc`, or dropping the last strong
+    /// `Arc` (held by `Backend`) never frees the registry — leaking the user's
+    /// `ClusterAccess` connection pool and every active watch task forever.
+    #[tokio::test]
+    async fn dropping_registry_frees_it_no_strong_ref_cycle() {
+        let cluster = crate::client::ClusterAccess::for_test();
+        let enrich = Enrichment::new(cluster.clone());
+        let columns: Arc<ArcSwap<ColumnMap>> =
+            Arc::new(ArcSwap::from_pointee(ColumnMap::default()));
+        let (_columns_tx, columns_rx) = broadcast::channel::<()>(4);
+        let registry = InformerRegistry::new(cluster, enrich, columns, columns_rx);
+
+        let weak = Arc::downgrade(&registry);
+        drop(registry);
+
+        // Give any mid-tick upgrade a moment to release, then assert no strong
+        // refs remain.
+        tokio::task::yield_now().await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            weak.upgrade().is_none(),
+            "background loops must hold Weak, not Arc — registry leaked"
+        );
+    }
+
+    /// Task 7.5: `Active`'s `Drop` impl must abort its watch task — a bare
+    /// `JoinHandle` drop detaches the task in tokio rather than stopping it,
+    /// which would leave the watch running against the user's client forever
+    /// after the entry is removed (idle reaper) or the whole registry drops.
+    #[tokio::test]
+    async fn active_drop_aborts_its_watch_task() {
+        let (tx, _rx) = broadcast::channel(4);
+        let handle = tokio::spawn(async {
+            loop {
+                tokio::time::sleep(Duration::from_secs(3600)).await;
+            }
+        });
+        let active = Active {
+            tx,
+            rows: Arc::new(RwLock::new(HashMap::new())),
+            handle,
+            idle_since: Arc::new(RwLock::new(None)),
+            is_pod: false,
+            is_pvc: false,
+            resource_key: "/v1/Pod".to_string(),
+            namespace: None,
+            group: String::new(),
+            kind: "Pod".to_string(),
+            objects: Arc::new(RwLock::new(HashMap::new())),
+            by_name: Arc::new(RwLock::new(HashMap::new())),
+            crd: Arc::new(ArcSwap::from_pointee(Vec::new())),
+            headers: Arc::new(ArcSwap::from_pointee(Vec::new())),
+            reproject: Arc::new(Notify::new()),
+        };
+        // We can't hold `active.handle` after moving `active` into drop, so
+        // grab a second handle via `abort_handle` before dropping.
+        let abort_handle = active.handle.abort_handle();
+        drop(active);
+        tokio::task::yield_now().await;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(
+            abort_handle.is_finished(),
+            "dropping Active must abort its watch task"
+        );
+    }
+
+    /// Task 11: the pure string-walk core that both `is_auth_error` and
+    /// `is_forbidden_error` are built on. Exercised directly on plain strings
+    /// since constructing a real `watcher::Error` source chain isn't practical
+    /// in a unit test.
+    #[test]
+    fn forbidden_error_is_detected() {
+        let forbidden_needles = ["Forbidden", "403"];
+        assert!(matches_status_str(
+            "ApiError: pods is forbidden: 403",
+            &forbidden_needles
+        ));
+        assert!(!matches_status_str(
+            "connection refused",
+            &forbidden_needles
+        ));
+    }
+
+    #[test]
+    fn auth_error_is_detected() {
+        let auth_needles = ["Unauthorized", "401"];
+        assert!(matches_status_str("ApiError: Unauthorized", &auth_needles));
+        assert!(matches_status_str(
+            "ApiError: request failed: 401",
+            &auth_needles
+        ));
+        assert!(!matches_status_str("connection refused", &auth_needles));
+    }
+
+    #[test]
+    fn matches_status_str_is_needle_disjoint() {
+        // A forbidden-style message must not match the auth needles and
+        // vice versa — the two error paths must not accidentally overlap.
+        assert!(!matches_status_str(
+            "pods is forbidden: 403",
+            &["Unauthorized", "401"]
+        ));
+        assert!(!matches_status_str(
+            "Unauthorized: 401",
+            &["Forbidden", "403"]
+        ));
+    }
 }

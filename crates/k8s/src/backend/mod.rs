@@ -1,6 +1,9 @@
-//! The server-side façade over a connected cluster: connection/catalog bootstrap,
-//! object detail/watch subscription, and the mutation/read entry points used by
-//! `src/server`. Each concern beyond that core lives in its own submodule, all as
+//! The per-user façade over a connected cluster: the user's token-passthrough
+//! `ClusterAccess`, a per-user `InformerRegistry`, and per-user small caches
+//! (overview, `can`, log-dedup). Discovery/catalog/CRD printer columns/metrics
+//! enrichment are NOT owned here — they live once per cluster on
+//! [`crate::shared::SharedCluster`] and are shared by every user's `Backend`.
+//! Each concern beyond that core lives in its own submodule, all as
 //! additional `impl Backend` blocks on the one struct defined here: [`overview`]
 //! (dashboard), [`mutations`] (delete/scale/restart/apply), [`flux`] (Flux-specific
 //! reconcile actions), [`logs`] (pod/workload log streaming), [`exec`] (interactive
@@ -9,21 +12,16 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
-use arc_swap::ArcSwap;
-use futures::StreamExt;
 use k8s_openapi::api::core::v1::{Event, Namespace};
-use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
 use kube::api::{Api, DynamicObject, ListParams, Patch, PatchParams};
-use kube::core::PartialObjectMeta;
-use kube::runtime::watcher;
 use roder_core::{ClusterOverview, MetricsPoint, ObjectDetail, ObjectEvent, ResourceKind};
 
 use crate::client::{make_api, ClusterAccess, K8sError};
-use crate::discovery::{build_catalog, CatalogEntry};
+use crate::discovery::CatalogEntry;
 use crate::informers::{InformerRegistry, WatchHandle};
 use crate::project::ts_string;
+use crate::shared::SharedCluster;
 
 mod drain;
 pub use drain::DrainSession;
@@ -37,31 +35,17 @@ mod permissions;
 mod sanitize;
 mod tree;
 
-/// The resource catalog, hot-swapped when CRDs change so newly-installed
-/// operators appear (and removed ones disappear) without restarting roder.
-struct CatalogData {
-    entries: Vec<CatalogEntry>,
-    by_key: HashMap<String, CatalogEntry>,
-}
-
-impl CatalogData {
-    fn new(entries: Vec<CatalogEntry>) -> Self {
-        let by_key = entries
-            .iter()
-            .map(|e| (e.kind.key.clone(), e.clone()))
-            .collect();
-        Self { entries, by_key }
-    }
-}
-
 type CanCacheKey = (String, String, Option<String>);
 
-/// The server-side façade over a connected cluster: the token-passthrough client,
-/// the discovered resource catalog, and the shared-informer registry.
+/// The per-user façade over a connected cluster: the user's token-passthrough
+/// client, its own informer registry, and small per-user caches. Catalog,
+/// CRD printer columns, and metrics/PVC enrichment are read from `shared`.
 pub struct Backend {
+    /// The USER's token-passthrough client (RBAC is the calling user's identity).
     cluster: Arc<ClusterAccess>,
-    /// Hot-swappable catalog (entries + by-key index), rebuilt by the CRD watch.
-    catalog: Arc<ArcSwap<CatalogData>>,
+    /// The cluster's SA-owned catalog/columns/enrichment, shared with every
+    /// other user's `Backend` on this cluster.
+    shared: Arc<SharedCluster>,
     registry: Arc<InformerRegistry>,
     /// Short-lived cache so rapid (re)connects don't each re-LIST the cluster.
     /// RwLock allows concurrent reads when the cache is fresh.
@@ -76,31 +60,22 @@ pub struct Backend {
 }
 
 impl Backend {
-    pub async fn connect_with_token(id_token: &str) -> Result<Self, K8sError> {
+    /// Connect as the given user (OIDC ID token) against a cluster whose
+    /// discovery/columns/enrichment are already running on `shared`.
+    pub async fn connect_with_token(
+        id_token: &str,
+        shared: Arc<SharedCluster>,
+    ) -> Result<Self, K8sError> {
         let cluster = Arc::new(ClusterAccess::connect_with_token(id_token).await?);
-        Self::build(cluster).await
-    }
-
-    pub async fn connect_with_default() -> Result<Self, K8sError> {
-        let cluster = Arc::new(ClusterAccess::connect_with_default().await?);
-        Self::build(cluster).await
-    }
-
-    async fn build(cluster: Arc<ClusterAccess>) -> Result<Self, K8sError> {
-        let client = cluster.client();
-        // Harvest CRD-declared printer columns; shared by the catalog (headers)
-        // and the informers (cell projection). Empty if CRDs aren't listable.
-        let columns = Arc::new(crate::printer_columns::load(&client).await);
-        let entries = build_catalog(&client, &columns).await?;
-        let catalog = Arc::new(ArcSwap::from_pointee(CatalogData::new(entries)));
-        let registry = InformerRegistry::new(cluster.clone(), columns);
-        // Keep the catalog + columns live: watch CRDs and rebuild on change, so
-        // new operators show up and changed printer columns reflow without a
-        // restart (active tables re-render in place).
-        spawn_crd_watch(cluster.clone(), registry.clone(), catalog.clone());
+        let registry = InformerRegistry::new(
+            cluster.clone(),
+            shared.enrichment(),
+            shared.columns(),
+            shared.subscribe_columns(),
+        );
         Ok(Self {
             cluster,
-            catalog,
+            shared,
             registry,
             overview_cache: tokio::sync::RwLock::new(None),
             can_cache: tokio::sync::RwLock::new(HashMap::new()),
@@ -108,9 +83,62 @@ impl Backend {
         })
     }
 
+    /// Connect using the inferred kubeconfig/in-cluster default credentials
+    /// (no OIDC token). Used only for the dev-mode backend, where auth is
+    /// bypassed entirely and there is no per-user bearer token to pass
+    /// through.
+    pub async fn connect_with_default(shared: Arc<SharedCluster>) -> Result<Self, K8sError> {
+        let cluster = Arc::new(ClusterAccess::connect_with_default().await?);
+        let registry = InformerRegistry::new(
+            cluster.clone(),
+            shared.enrichment(),
+            shared.columns(),
+            shared.subscribe_columns(),
+        );
+        Ok(Self {
+            cluster,
+            shared,
+            registry,
+            overview_cache: tokio::sync::RwLock::new(None),
+            can_cache: tokio::sync::RwLock::new(HashMap::new()),
+            log_seen: tokio::sync::RwLock::new(HashMap::new()),
+        })
+    }
+
+    /// Build a `Backend` from already-connected parts, for tests that don't
+    /// need real cluster I/O. `pub` (not `#[cfg(test)]`) so the `roder` server
+    /// crate's own tests (e.g. `server::backends`) can build one across the
+    /// crate boundary — `cfg(test)` is per-crate and wouldn't be visible there.
+    #[doc(hidden)]
+    pub fn from_parts_for_test(cluster: Arc<ClusterAccess>, shared: Arc<SharedCluster>) -> Self {
+        let registry = InformerRegistry::new(
+            cluster.clone(),
+            shared.enrichment(),
+            shared.columns(),
+            shared.subscribe_columns(),
+        );
+        Self {
+            cluster,
+            shared,
+            registry,
+            overview_cache: tokio::sync::RwLock::new(None),
+            can_cache: tokio::sync::RwLock::new(HashMap::new()),
+            log_seen: tokio::sync::RwLock::new(HashMap::new()),
+        }
+    }
+
     /// Swap in a refreshed ID token (called by the refresh task).
     pub fn set_token(&self, id_token: &str) -> Result<(), K8sError> {
         self.cluster.set_token(id_token)
+    }
+
+    /// Whether this user currently has any live SSE subscribers on any of
+    /// their active informers. Used by `BackendRegistry`'s idle-eviction
+    /// reaper and soft LRU cap: a subject with an open, actively-streaming
+    /// dashboard tab must never be evicted, regardless of how long it's been
+    /// since their last HTTP request.
+    pub async fn has_active_subscribers(&self) -> bool {
+        self.registry.has_active_subscribers().await
     }
 
     /// The current `kube::Client` (a cheap clone of the hot-swappable inner Arc).
@@ -125,12 +153,7 @@ impl Backend {
 
     /// The browsable resource catalog as surfaced to the UI.
     pub fn kinds(&self) -> Vec<ResourceKind> {
-        self.catalog
-            .load()
-            .entries
-            .iter()
-            .map(|e| e.kind.clone())
-            .collect()
+        self.shared.kinds()
     }
 
     pub async fn namespaces(&self) -> Result<Vec<String>, K8sError> {
@@ -258,7 +281,8 @@ impl Backend {
         name: &str,
     ) -> Result<Vec<MetricsPoint>, K8sError> {
         Ok(self
-            .registry
+            .shared
+            .enrichment()
             .pod_metrics_history(namespace, name)
             .await
             .unwrap_or_default())
@@ -267,25 +291,14 @@ impl Backend {
     /// Look up a catalog entry by key. Returns an owned clone because the catalog
     /// is hot-swappable (the `ArcSwap` guard is only valid transiently).
     fn entry(&self, key: &str) -> Result<CatalogEntry, K8sError> {
-        self.catalog
-            .load()
-            .by_key
-            .get(key)
-            .cloned()
-            .ok_or_else(|| K8sError::Api(format!("unknown resource kind: {key}")))
+        self.shared.entry(key)
     }
 
     /// Resolve a Flux sourceRef's `kind` (e.g. "GitRepository") to a catalog
     /// entry, without needing its `apiVersion` — the same way Flux's own
     /// controllers resolve sourceRef generically across `source.toolkit.fluxcd.io`.
     fn entry_by_kind(&self, kind: &str) -> Result<CatalogEntry, K8sError> {
-        self.catalog
-            .load()
-            .entries
-            .iter()
-            .find(|e| e.kind.group.ends_with("fluxcd.io") && e.kind.kind == kind)
-            .cloned()
-            .ok_or_else(|| K8sError::Api(format!("no Flux source kind found: {kind}")))
+        self.shared.entry_by_kind(kind)
     }
 }
 
@@ -300,77 +313,16 @@ fn now_rfc3339() -> String {
         .unwrap_or_default()
 }
 
-/// Re-discover the catalog and re-harvest CRD printer columns, swapping both in
-/// and asking the registry to re-project any active informer whose columns
-/// changed. Best-effort: a failed rebuild leaves the previous catalog in place.
-async fn rebuild_catalog(
-    cluster: &Arc<ClusterAccess>,
-    registry: &Arc<InformerRegistry>,
-    catalog: &Arc<ArcSwap<CatalogData>>,
-) {
-    let client = (*cluster.client()).clone();
-    let columns = Arc::new(crate::printer_columns::load(&client).await);
-    match build_catalog(&client, &columns).await {
-        Ok(entries) => {
-            catalog.store(Arc::new(CatalogData::new(entries)));
-            registry.refresh_columns(columns).await;
-            tracing::debug!("catalog + printer columns refreshed after CRD change");
-        }
-        Err(e) => tracing::debug!("catalog refresh skipped: {e}"),
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client::ClusterAccess;
+    use crate::shared::SharedCluster;
 
-/// Watch `CustomResourceDefinition`s and rebuild the catalog/columns on change,
-/// so new operators appear and changed printer columns reflow live — no restart.
-/// Events are debounced (operators often churn CRDs in bursts) into one rebuild.
-fn spawn_crd_watch(
-    cluster: Arc<ClusterAccess>,
-    registry: Arc<InformerRegistry>,
-    catalog: Arc<ArcSwap<CatalogData>>,
-) {
-    tokio::spawn(async move {
-        let mut backoff_attempt = 0;
-        loop {
-            let client = (*cluster.client()).clone();
-            let api: Api<PartialObjectMeta<CustomResourceDefinition>> = Api::all(client);
-            // Metadata-only watch: we just need to know a CRD changed, not its
-            // (potentially megabyte) schema — so this never deserializes the
-            // heavy CRD bodies. The actual column harvest is `printer_columns::load`.
-            let stream = watcher::watcher(api, watcher::Config::default());
-            futures::pin_mut!(stream);
-            while let Some(event) = stream.next().await {
-                match event {
-                    Err(e) => {
-                        tracing::debug!("CRD watch error (self-healing): {e}");
-                        let delay = crate::informers::rebuild_backoff(backoff_attempt);
-                        backoff_attempt = backoff_attempt.saturating_add(1);
-                        tokio::time::sleep(delay).await;
-                        continue;
-                    }
-                    // `Init` is emitted before the LIST request, so it does not
-                    // prove connectivity. Any other event does.
-                    Ok(watcher::Event::Init) => {}
-                    Ok(_) => backoff_attempt = 0,
-                }
-                // Coalesce a burst of CRD events: keep draining until the stream
-                // goes quiet for 2s, then rebuild once.
-                loop {
-                    match tokio::time::timeout(Duration::from_secs(2), stream.next()).await {
-                        Ok(Some(Err(e))) => {
-                            tracing::debug!("CRD watch error (self-healing): {e}");
-                            let delay = crate::informers::rebuild_backoff(backoff_attempt);
-                            backoff_attempt = backoff_attempt.saturating_add(1);
-                            tokio::time::sleep(delay).await;
-                        }
-                        Ok(Some(Ok(watcher::Event::Init))) => {}
-                        Ok(Some(Ok(_))) => backoff_attempt = 0,
-                        Ok(None) | Err(_) => break,
-                    }
-                }
-                rebuild_catalog(&cluster, &registry, &catalog).await;
-            }
-            // Stream ended; pause before rebuilding the CRD watch.
-            tokio::time::sleep(Duration::from_secs(5)).await;
-        }
-    });
+    #[tokio::test]
+    async fn backend_delegates_kinds_to_shared() {
+        let shared = SharedCluster::for_test();
+        let backend = Backend::from_parts_for_test(ClusterAccess::for_test(), shared.clone());
+        assert_eq!(backend.kinds().len(), shared.kinds().len());
+    }
 }

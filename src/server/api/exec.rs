@@ -4,14 +4,11 @@
 
 use std::sync::Arc;
 
-use axum::extract::{Query, State};
+use axum::extract::Query;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
+use axum::{Extension, Json};
 use roder_k8s::Backend;
 use serde::Deserialize;
-
-use super::{backend, backend_or_return};
-use crate::server::AppState;
 
 #[derive(Deserialize)]
 pub struct ExecQuery {
@@ -24,8 +21,10 @@ pub struct ExecQuery {
 
 /// Injects a `nicolaka/netshoot` ephemeral container into a pod and waits for
 /// it to reach Running, then returns `{"container": "<name>"}`.
-pub async fn debug_shell(State(state): State<AppState>, Query(q): Query<ExecQuery>) -> Response {
-    let b = backend_or_return!(state);
+pub async fn debug_shell(
+    Extension(b): Extension<Arc<Backend>>,
+    Query(q): Query<ExecQuery>,
+) -> Response {
     match b.inject_debug_container(&q.namespace, &q.pod).await {
         Ok(container) => Json(serde_json::json!({ "container": container })).into_response(),
         Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -40,10 +39,9 @@ pub struct NodeShellQuery {
 /// Creates a privileged debug pod on `node` and waits for it to reach
 /// Running, then returns `{"namespace": .., "pod": ..}` for use with `/api/exec`.
 pub async fn node_shell_create(
-    State(state): State<AppState>,
+    Extension(b): Extension<Arc<Backend>>,
     Query(q): Query<NodeShellQuery>,
 ) -> Response {
-    let b = backend_or_return!(state);
     match b.create_node_shell(&q.node).await {
         Ok((namespace, pod)) => {
             Json(serde_json::json!({ "namespace": namespace, "pod": pod })).into_response()
@@ -54,11 +52,10 @@ pub async fn node_shell_create(
 
 /// WebSocket endpoint that proxies stdin/stdout for an interactive pod shell.
 pub async fn exec_ws(
-    State(state): State<AppState>,
+    Extension(b): Extension<Arc<Backend>>,
     Query(q): Query<ExecQuery>,
     ws: axum::extract::ws::WebSocketUpgrade,
 ) -> Response {
-    let b = backend_or_return!(state);
     ws.on_upgrade(move |socket| exec_session(socket, b, q))
 }
 

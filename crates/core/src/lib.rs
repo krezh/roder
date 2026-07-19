@@ -180,6 +180,11 @@ pub enum WatchEvent {
     Applied { row: ResourceRow },
     /// A row was removed (by uid).
     Deleted { uid: String },
+    /// The watch hit an HTTP 403 (RBAC forbids this subject from watching this
+    /// kind/namespace under token passthrough). Sent once, after which the
+    /// informer stops retrying — the client should treat the stream as ended
+    /// rather than expect further events.
+    Forbidden { message: String },
 }
 
 /// Tagged SSE event for a multiplexed workspace watch stream.

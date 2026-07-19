@@ -38,7 +38,10 @@ pub(crate) mod fixtures {
             talos_actions_enabled: false,
             talos_config_groups: vec![],
             talos_config_enabled: false,
+            alerts_groups: vec![],
             pod_node_name: None,
+            max_user_backends: 200,
+            backend_idle_secs: 1200,
         })
     }
 
@@ -60,21 +63,28 @@ pub(crate) mod fixtures {
             talos_actions_enabled: false,
             talos_config_groups: vec![],
             talos_config_enabled: false,
+            alerts_groups: vec![],
             pod_node_name: None,
+            max_user_backends: 200,
+            backend_idle_secs: 1200,
         })
     }
 
     pub(crate) fn empty_state(config: Arc<ServerConfig>) -> AppState {
+        let shared = roder_k8s::SharedCluster::for_test();
         AppState {
             leptos_options: empty_leptos_options(),
             asset_version: Arc::from("test-version"),
-            config,
             provider: None,
-            backend: Arc::new(RwLock::new(None)),
-            current: Arc::new(RwLock::new(None)),
-            refresh_lock: Arc::new(Mutex::new(())),
-            backend_build_lock: Arc::new(Mutex::new(())),
             alerts: Arc::new(RwLock::new(None)),
+            backends: Arc::new(crate::server::backends::BackendRegistry::new(
+                shared.clone(),
+                None,
+                config.max_user_backends,
+                std::time::Duration::from_secs(config.backend_idle_secs),
+            )),
+            config,
+            shared,
             talos: None,
             talos_action_lock: Arc::new(Mutex::new(())),
             drain_jobs: Arc::new(crate::server::drain_jobs::DrainJobs::default()),
@@ -90,6 +100,16 @@ pub(crate) mod fixtures {
     /// need the OIDC exchange just pass through with `provider: None`).
     pub(crate) fn prod_state_without_provider() -> AppState {
         empty_state(prod_config())
+    }
+
+    /// A test `Arc<Backend>` (no live cluster I/O), for handler unit tests that
+    /// now take the backend via an `Extension<Arc<Backend>>` extractor instead
+    /// of resolving it from `AppState`.
+    pub(crate) fn test_backend() -> Arc<roder_k8s::Backend> {
+        Arc::new(roder_k8s::Backend::from_parts_for_test(
+            roder_k8s::ClusterAccess::for_test(),
+            roder_k8s::SharedCluster::for_test(),
+        ))
     }
 
     /// A `Cookie:` header carrying a validly-sealed session for `tokens`.

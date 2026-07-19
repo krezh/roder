@@ -104,7 +104,8 @@ impl Backend {
     pub async fn flux_reconcile_all(&self, namespace: Option<&str>) -> Result<usize, K8sError> {
         let client = self.client();
         let ts = now_rfc3339();
-        let catalog = self.catalog.load();
+        let catalog_store = self.shared.catalog();
+        let catalog = catalog_store.load();
         let futs = catalog
             .entries
             .iter()

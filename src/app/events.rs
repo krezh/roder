@@ -243,5 +243,12 @@ pub(crate) fn apply_event(
                 std::time::Duration::from_millis(500),
             );
         }
+        WatchEvent::Forbidden { message } => {
+            // The server has already stopped this informer's retry loop and
+            // won't send anything further on this stream — surfacing this in
+            // the UI (rather than a silent stall) is a follow-up. For now,
+            // just log so it's visible in the browser console.
+            leptos::logging::warn!("watch forbidden: {message}");
+        }
     }
 }

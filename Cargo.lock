@@ -3744,6 +3744,7 @@ dependencies = [
  "kube",
  "reqwest 0.12.28",
  "roder-core",
+ "rustls",
  "serde",
  "serde_json",
  "serde_yaml",

@@ -2,15 +2,22 @@
 
 use std::convert::Infallible;
 
-use axum::extract::{Query, State};
+use std::sync::Arc;
+
+use axum::extract::Query;
+use axum::http::StatusCode;
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::Json;
+use axum::{Extension, Json};
+use roder_k8s::Backend;
 use serde::Deserialize;
 use tokio_stream::StreamExt;
 
-use super::{backend, backend_or_return, bad_gateway};
-use crate::server::AppState;
+use super::bad_gateway;
+
+/// The catalog key for pods, used to RBAC-gate the metrics-history lookup
+/// against the caller's own `get pods` access (see `metrics_history`).
+const POD_KEY: &str = "/v1/Pod";
 
 #[derive(Deserialize)]
 pub struct LogQuery {
@@ -24,8 +31,7 @@ pub struct LogQuery {
 }
 
 /// Live pod logs as SSE (follows the log stream).
-pub async fn logs(State(state): State<AppState>, Query(q): Query<LogQuery>) -> Response {
-    let b = backend_or_return!(state);
+pub async fn logs(Extension(b): Extension<Arc<Backend>>, Query(q): Query<LogQuery>) -> Response {
     let (res, follow) = if let Some(pod) = q.pod.as_deref() {
         // Follow anything not yet in a terminal phase; a pod that's still starting
         // (Pending/ContainerCreating) may produce its first log line, or crash, at
@@ -77,13 +83,53 @@ pub struct MetricsQuery {
 }
 
 /// Get historical metrics data for a pod (CPU and memory over time).
+///
+/// Unlike every other enrichment path, this serves from the shared
+/// SA-scraped metrics cache keyed by arbitrary namespace/name, rather than
+/// decorating an object the caller's own watch already returned — so it
+/// needs its own RBAC gate: only a caller who can `get` the pod itself may
+/// read its metrics history.
 pub async fn metrics_history(
-    State(state): State<AppState>,
+    Extension(b): Extension<Arc<Backend>>,
     Query(q): Query<MetricsQuery>,
 ) -> Response {
-    let b = backend_or_return!(state);
+    if !b.can("get", POD_KEY, Some(&q.namespace)).await {
+        return StatusCode::FORBIDDEN.into_response();
+    }
     match b.pod_metrics_history(&q.namespace, &q.name).await {
         Ok(history) => Json(history).into_response(),
         Err(e) => bad_gateway(e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::server::handlers::fixtures::test_backend;
+
+    // Fix #1 (final whole-branch review): `metrics_history` reads from the
+    // shared SA-scraped metrics cache keyed by arbitrary namespace/name,
+    // bypassing the caller's own watch — so it must RBAC-gate on `get pods`
+    // in the request's namespace using the caller's own token, or a
+    // namespace-scoped user could read metrics for pods they can't `get`.
+    //
+    // `test_backend()`'s `SharedCluster::for_test()` has an empty catalog, so
+    // `Backend::can`'s own catalog lookup (`self.entry(key)`, before it ever
+    // reaches the SSAR call) fails and `can` short-circuits to `false` —
+    // never actually round-tripping a SelfSubjectAccessReview. That still
+    // proves the contract this test cares about (the handler 403s whenever
+    // `can` returns `false`, regardless of *why*), but neither the real
+    // SSAR-allow nor SSAR-deny network path is exercised here. Driving either
+    // would need a populated catalog plus a real/mocked apiserver returning a
+    // `SelfSubjectAccessReview` status, which this crate has no test seam for
+    // yet; see the review report for that coverage gap.
+    #[tokio::test]
+    async fn metrics_history_is_forbidden_without_pod_get_access() {
+        let q = MetricsQuery {
+            namespace: "other-team".into(),
+            name: "some-pod".into(),
+        };
+        let resp = metrics_history(Extension(test_backend()), Query(q)).await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     }
 }

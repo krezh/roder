@@ -90,6 +90,28 @@ impl ClusterAccess {
     }
 }
 
+impl ClusterAccess {
+    /// A ClusterAccess pointing at an unreachable loopback apiserver, for unit
+    /// tests that exercise registry/backend bookkeeping without real I/O.
+    /// `pub` (not `#[cfg(test)]`) so `SharedCluster::for_test` — used by the
+    /// `roder` server crate's own test fixtures — can build one across the
+    /// crate boundary (`cfg(test)` is per-crate and wouldn't be visible there).
+    #[doc(hidden)]
+    pub fn for_test() -> Arc<Self> {
+        // Tests don't run main()'s provider install, and the server crate's test
+        // binary links both ring and aws-lc-rs — pick ring explicitly so building a
+        // test client doesn't panic on provider ambiguity. Idempotent across calls.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let mut base = Config::new("https://127.0.0.1:1".parse().unwrap());
+        base.default_namespace = "default".into();
+        let client = Client::try_from(base.clone()).expect("build test client");
+        Arc::new(Self {
+            base,
+            current: ArcSwap::from_pointee(client),
+        })
+    }
+}
+
 /// Build a dynamic `Api` scoped correctly for a kind: all-namespaces for a
 /// cluster-scoped kind or when no namespace is given, otherwise namespaced.
 pub(crate) fn make_api(

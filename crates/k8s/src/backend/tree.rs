@@ -293,7 +293,8 @@ impl Backend {
         namespace: Option<String>,
         version: Option<String>,
     ) -> ChildRef {
-        let catalog = self.catalog.load();
+        let catalog_store = self.shared.catalog();
+        let catalog = catalog_store.load();
         let entry = match &version {
             Some(v) => {
                 let candidate = ResourceKind::make_key(&group, v, &kind);

@@ -107,9 +107,10 @@ async fn main() {
         let sigterm = tokio::signal::unix::SignalKind::terminate();
         tokio::signal::unix::signal(sigterm).unwrap().recv().await;
         tracing::info!("SIGTERM received — shutting down");
-        // Drop the backend (informers + watchers) so long-lived SSE connections
-        // can drain; the runtime will cancel remaining tasks on `main` exit.
-        state.backend.write().await.take();
+        // Drop all per-user backends (informers + watchers) so long-lived SSE
+        // connections can drain; the runtime will cancel remaining tasks on
+        // `main` exit.
+        state.backends.clear().await;
     };
 
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();

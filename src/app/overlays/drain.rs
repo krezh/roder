@@ -4,12 +4,12 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use leptos::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use roder_core::ActiveDrainJob;
 use roder_core::{
     DrainBlocker, DrainEvent, DrainEventKind, DrainOptions, DRAIN_GRACE_PERIOD_MAX_SECS,
     DRAIN_TIMEOUT_MAX_SECS, DRAIN_TIMEOUT_MIN_SECS,
 };
-#[cfg(target_arch = "wasm32")]
-use roder_core::ActiveDrainJob;
 
 use crate::app::overlays::toast::{
     show_progress_toast, show_toast, show_toast_detail, update_progress_toast, Toast, ToastKind,

@@ -315,6 +315,19 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                                     s.insert(merged_key);
                                 });
                             }
+                            // The server has already stopped this kind's
+                            // informer; per-kind UI surfacing is a follow-up.
+                            Forbidden { message } => {
+                                apply_event(
+                                    kr,
+                                    ent,
+                                    rm,
+                                    None,
+                                    Forbidden {
+                                        message: message.clone(),
+                                    },
+                                );
+                            }
                         }
                     }
                 });

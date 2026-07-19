@@ -12,7 +12,6 @@ use super::super::session::{
     cookie_value, open_pending, open_session, seal_pending, seal_session, set_cookie, PendingLogin,
     LOGIN_COOKIE, SESSION_COOKIE,
 };
-use super::middleware::ensure_backend;
 use crate::server::AppState;
 
 /// Liveness/readiness — always public.
@@ -91,7 +90,10 @@ pub async fn callback(
                 .await
             {
                 Ok(tokens) => {
-                    if !ensure_backend(&state, &tokens.id_token).await {
+                    // Establish (and validate cluster reachability for) this
+                    // subject's own backend up front, so a hard connect failure
+                    // is reported immediately rather than on the first API call.
+                    if state.backends.resolve(&tokens).await.is_err() {
                         return (
                             StatusCode::BAD_GATEWAY,
                             "connected to OIDC but failed to reach the cluster",
@@ -99,7 +101,6 @@ pub async fn callback(
                             .into_response();
                     }
                     let sealed = seal_session(&tokens, &key);
-                    *state.current.write().await = Some(tokens);
 
                     let secure = state.config.secure_cookies();
                     (
@@ -129,8 +130,17 @@ pub async fn callback(
 /// Clear the live session and the cookie, then redirect. If `signout_redirect_url`
 /// is configured the browser is sent there (so the OIDC provider can end the SSO
 /// session too); otherwise falls back to `/auth/login`.
-pub async fn logout(State(state): State<AppState>, _headers: HeaderMap) -> Response {
-    *state.current.write().await = None;
+pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    // Drop the caller's own cached backend (shedding their informers/watches).
+    // Recover the subject from the session cookie; if we can't, we still clear
+    // the cookie and redirect below.
+    if let Some(key) = state.config.session_key {
+        if let Some(cookie) = cookie_value(&headers, SESSION_COOKIE) {
+            if let Some(tokens) = open_session(&cookie, &key) {
+                state.backends.evict(&tokens.identity.subject).await;
+            }
+        }
+    }
     let cookie = set_cookie(SESSION_COOKIE, "", state.config.secure_cookies(), 0);
     let dest = state
         .config
@@ -141,8 +151,8 @@ pub async fn logout(State(state): State<AppState>, _headers: HeaderMap) -> Respo
 }
 
 /// Who am I — used by the UI to show the signed-in identity. `require_auth` has
-/// already validated/refreshed the session, so the identity is in `current`;
-/// fall back to decrypting the cookie directly just in case.
+/// already validated/refreshed the session, so the identity comes straight from
+/// the sealed session cookie.
 pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if state.config.dev_mode {
         return Json(Identity {
@@ -154,9 +164,6 @@ pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Response {
         .into_response();
     }
 
-    if let Some(tokens) = state.current.read().await.as_ref() {
-        return Json(tokens.identity.clone()).into_response();
-    }
     match (
         state.config.session_key,
         cookie_value(&headers, SESSION_COOKIE),
@@ -313,12 +320,16 @@ mod tests {
     // -------- logout --------
 
     #[tokio::test]
-    async fn logout_clears_session_cookie_and_redirects_to_login() {
+    async fn logout_clears_session_cookie_and_evicts_the_backend() {
         let state = prod_state_without_provider();
-        // Plant a live session so we can verify it's cleared.
-        *state.current.write().await = Some(fake_tokens());
+        // Establish this subject's cached backend so we can verify logout evicts it.
+        let mut tokens = fake_tokens();
+        tokens.identity.subject = "logout-subject".into();
+        state.backends.resolve(&tokens).await.unwrap();
+        assert_eq!(state.backends.len().await, 1);
 
-        let res = logout(State(state.clone()), HeaderMap::new()).await;
+        // Logout recovers the subject from the (sealed) session cookie.
+        let res = logout(State(state.clone()), sealed_cookie_header(&tokens)).await;
         assert_eq!(res.status(), StatusCode::SEE_OTHER);
         assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/auth/login");
 
@@ -335,8 +346,8 @@ mod tests {
         );
         assert!(cookies[0].contains("Max-Age=0"));
 
-        // The live session must be gone.
-        assert!(state.current.read().await.is_none());
+        // The cached backend for this subject must be gone.
+        assert_eq!(state.backends.len().await, 0);
     }
 
     #[tokio::test]

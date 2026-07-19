@@ -191,6 +191,17 @@ pub(crate) fn MobileSearchList() -> impl IntoView {
                                     s.insert(merged_key);
                                 });
                             }
+                            WatchEvent::Forbidden { message } => {
+                                apply_event(
+                                    kr,
+                                    ent,
+                                    rm,
+                                    None,
+                                    WatchEvent::Forbidden {
+                                        message: message.clone(),
+                                    },
+                                );
+                            }
                         }
                     }
                 });

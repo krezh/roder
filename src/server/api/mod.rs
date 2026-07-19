@@ -1,11 +1,13 @@
 //! HTTP API handlers, grouped by concern. Each submodule owns one route
 //! group; this module only holds what's genuinely shared across all of them.
-
-use std::sync::Arc;
+//!
+//! Per-user backend access: `require_auth` resolves the caller's own
+//! `Arc<Backend>` and inserts it into the request extensions, so handlers
+//! take it via an `Extension<Arc<Backend>>` extractor rather than reading a
+//! single shared backend off `AppState`.
 
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use roder_k8s::Backend;
 
 use super::AppState;
 
@@ -26,28 +28,6 @@ pub use misc::{alerts, features, health, namespaces, overview, resources};
 pub use resource_reads::{access_review, detail, permissions, resource_tree};
 pub use talos::{talos_config_diff, talos_dmesg, talos_node};
 pub use watch::{watch, watch_multi};
-
-/// Resolve the connected backend or a 503 if login/connection hasn't happened.
-pub(crate) async fn backend(state: &AppState) -> Result<Arc<Backend>, Response> {
-    state.backend.read().await.clone().ok_or_else(|| {
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "not connected to a cluster yet",
-        )
-            .into_response()
-    })
-}
-
-/// Bind the connected backend or early-return its 503 response.
-macro_rules! backend_or_return {
-    ($state:expr) => {
-        match backend(&$state).await {
-            Ok(b) => b,
-            Err(r) => return r,
-        }
-    };
-}
-pub(crate) use backend_or_return;
 
 /// Stable ownership and human-readable audit identities for a request.
 pub(crate) struct RequestCaller {
@@ -92,15 +72,15 @@ mod tests {
         dev_state, fake_tokens, prod_state_without_provider, sealed_cookie_header,
     };
 
-    #[test]
-    fn dev_caller_uses_dev_for_owner_and_audit() {
+    #[tokio::test]
+    async fn dev_caller_uses_dev_for_owner_and_audit() {
         let caller = request_caller(&dev_state(), &HeaderMap::new()).unwrap();
         assert_eq!(caller.owner, "dev");
         assert_eq!(caller.audit, "dev");
     }
 
-    #[test]
-    fn production_caller_uses_subject_for_owner_and_email_for_audit() {
+    #[tokio::test]
+    async fn production_caller_uses_subject_for_owner_and_email_for_audit() {
         let state = prod_state_without_provider();
         let mut tokens = fake_tokens();
         tokens.identity.subject = "stable-subject".into();
@@ -111,8 +91,8 @@ mod tests {
         assert_eq!(caller.audit, "person@example.com");
     }
 
-    #[test]
-    fn production_caller_falls_back_to_subject_for_audit() {
+    #[tokio::test]
+    async fn production_caller_falls_back_to_subject_for_audit() {
         let state = prod_state_without_provider();
         let mut tokens = fake_tokens();
         tokens.identity.subject = "stable-subject".into();

@@ -4,17 +4,21 @@
 
 use std::convert::Infallible;
 
+use std::sync::Arc;
+
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
+use axum::Extension;
 use futures::stream::select_all;
 use roder_core::{MultiWatchEvent, WatchEvent};
+use roder_k8s::Backend;
 use serde::Deserialize;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 
-use super::{backend, backend_or_return, bad_gateway};
+use super::bad_gateway;
 use crate::server::AppState;
 
 #[derive(Deserialize)]
@@ -27,8 +31,11 @@ pub struct WatchQuery {
 
 /// Live resource list as Server-Sent Events: a `snapshot` followed by `applied` /
 /// `deleted` deltas, all fed from a single shared informer (etcd-kind).
-pub async fn watch(State(state): State<AppState>, Query(q): Query<WatchQuery>) -> Response {
-    let b = backend_or_return!(state);
+pub async fn watch(
+    State(state): State<AppState>,
+    Extension(b): Extension<Arc<Backend>>,
+    Query(q): Query<WatchQuery>,
+) -> Response {
     let ns = q.namespace.filter(|s| !s.is_empty());
     let selector = q.selector.filter(|s| !s.is_empty());
     let handle = match b.subscribe(&q.key, ns, selector).await {
@@ -85,10 +92,9 @@ pub struct MultiWatchQuery {
 /// streams, so all panes share a single browser connection.
 pub async fn watch_multi(
     State(state): State<AppState>,
+    Extension(b): Extension<Arc<Backend>>,
     Query(q): Query<MultiWatchQuery>,
 ) -> Response {
-    let b = backend_or_return!(state);
-
     let pane_specs: Vec<(String, Option<String>)> = q
         .panes
         .split(',')

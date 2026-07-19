@@ -167,7 +167,8 @@ impl Backend {
     /// dashboard overview doesn't accumulate per-kind latency.
     async fn rollup(&self, category: Category) -> HealthRollup {
         let client = self.client();
-        let catalog = self.catalog.load();
+        let catalog_store = self.shared.catalog();
+        let catalog = catalog_store.load();
         let futs = catalog
             .entries
             .iter()

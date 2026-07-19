@@ -151,7 +151,10 @@ fn measure(shell: &web_sys::HtmlDivElement) -> (f64, f64) {
     let prev_h = style.get_property_value("height").unwrap_or_default();
     let _ = style.set_property("width", "max-content");
     let _ = style.set_property("height", "auto");
-    let size = (f64::from(shell.offset_width()), f64::from(shell.offset_height()));
+    let size = (
+        f64::from(shell.offset_width()),
+        f64::from(shell.offset_height()),
+    );
     if prev_w.is_empty() {
         let _ = style.remove_property("width");
     } else {
@@ -176,7 +179,10 @@ fn open_menu(shell_ref: NodeRef<leptos::html::Div>) {
     let Some(shell) = shell_ref.get_untracked() else {
         return;
     };
-    let from = (f64::from(shell.offset_width()), f64::from(shell.offset_height()));
+    let from = (
+        f64::from(shell.offset_width()),
+        f64::from(shell.offset_height()),
+    );
     let to = measure(&shell);
     let style = web_sys::HtmlElement::style(&shell);
     let _ = style.set_property("width", &format!("{}px", from.0));

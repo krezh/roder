@@ -27,6 +27,15 @@ app.kubernetes.io/name: {{ include "roder.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
+{{- define "roder.image" -}}
+{{- $tag := .Values.image.tag | default .Chart.AppVersion -}}
+{{- if .Values.image.digest -}}
+{{- printf "%s:%s@%s" .Values.image.repository $tag .Values.image.digest -}}
+{{- else -}}
+{{- printf "%s:%s" .Values.image.repository $tag -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "roder.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create -}}
 {{- default (include "roder.fullname" .) .Values.serviceAccount.name -}}

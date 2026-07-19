@@ -1,17 +1,5 @@
 # TODO
 
-## Talos Linux Integration
-
-- [x] Initial in-cluster integration: node version, service health, mounts, and network counters
-- [x] Node service status actions and richer health details
-- [x] dmesg / kernel log viewer
-- [x] Disk inventory
-- [x] Disk I/O statistics
-- [x] Network interface addresses and link state
-- [x] Per-node Talos version + machine config fingerprint
-- [x] Machine config diff (show what diverged, not just the fingerprint)
-- [x] Action: reboot / shutdown a node
-
 ## Workloads
 
 - Rollout history + rollback to revision, pause/resume

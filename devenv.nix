@@ -7,6 +7,7 @@
     pkgs.infisical
     pkgs.heaptrack
     pkgs.cargo-leptos
+    pkgs.kubernetes-helm
   ];
 
   claude.code.enable = true;
@@ -95,6 +96,14 @@
 
     "test:cargo" = {
       exec = "cargo test --workspace --features ssr";
+      before = [ "devenv:enterTest" ];
+    };
+
+    "test:helm" = {
+      exec = ''
+        helm lint helm
+        helm template roder helm >/dev/null
+      '';
       before = [ "devenv:enterTest" ];
     };
 

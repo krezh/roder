@@ -5,13 +5,19 @@
     enabled: true,
   },
   lockFileMaintenance: {
-    enabled: false,
+    enabled: true,
     schedule: ["after 1am and before 2am"],
     automerge: true,
     automergeType: "pr",
     ignoreTests: false,
   },
   packageRules: [
+    {
+      matchManagers: ["cargo"],
+      automerge: true,
+      automergeType: "pr",
+      ignoreTests: false,
+    },
     {
       matchPackageNames: [
         "wasm-bindgen",

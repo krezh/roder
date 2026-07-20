@@ -1,7 +1,8 @@
-# roder is a single-user, in-cluster GUI. It keeps a per-pod informer cache, so
-# each replica opens its own set of watches against the API server. Running ONE
-# replica keeps exactly one watch per active resource type on etcd — raising this
-# duplicates those watches and is rarely what you want for a personal tool.
+# roder keeps per-user informer caches in-process, so each replica opens its own
+# set of watches against the API server. Running ONE replica keeps one watch per
+# active (user, resource) on etcd — raising this duplicates those watches across
+# replicas and is rarely what you want. (Sessions are stateless, so a single
+# replica still tolerates restarts; set RODER_SESSION_KEY so they survive.)
 replicaCount: 1
 
 image:
@@ -44,16 +45,36 @@ talos:
     readerGroups: []
   # The Talos ServiceAccount role(s) roder's ServiceAccount requests — this is
   # the single knob controlling what roder can actually do against Talos. Must
-  # be set explicitly; e.g. os:reader for read-only, or os:admin (Talos has no
-  # intermediate role) to also permit the mutations/config visibility gated by
-  # actions/config above.
+  # be set explicitly; e.g. os:reader for read-only, os:operator or os:admin
   roles: []
 
-# ClusterRole + binding for roder's ServiceAccount, granting the read-only
-# cluster metadata roder needs at startup: API discovery and read/watch on CRDs
-# (to harvest additionalPrinterColumns once, up front, instead of on first
-# login). Object data is still read with each user's passthrough OIDC token —
-# this ServiceAccount never reads user data. Disable if you manage RBAC yourself.
+# Alertmanager alerts panel (cluster-wide alerts, fetched by roder's SA).
+alertmanager:
+  # In-cluster Alertmanager URL — sets RODER_ALERTMANAGER_URL. Empty disables
+  # the panel. Example:
+  #   http://alertmanager-operated.monitoring.svc.cluster.local:9093
+  url: ""
+  # Who may read Alertmanager alerts. Empty = any authenticated user. Enforced
+  # by roder via RODER_ALERTS_GROUPS. Restrict this if cluster-wide alert text
+  # (namespaces/pods a tenant can't otherwise see) should not be visible to all.
+  readerGroups: []
+
+# Per-user backend registry tuning (multi-user token passthrough). Both have
+# sensible in-app defaults; override only if needed.
+backends:
+  # Max concurrent per-user backends before the soft LRU cap evicts idle ones.
+  # The cap never rejects a user; it bounds resident memory + API-server streams.
+  maxUserBackends: 200
+  # Idle seconds before a user's backend with no active streams is reaped.
+  backendIdleSecs: 1200
+
+# ClusterRole + binding for roder's ServiceAccount. Grants API discovery and
+# read/watch on CRDs (to harvest additionalPrinterColumns up front), plus the
+# shared, cluster-wide enrichment reads roder performs as this ServiceAccount:
+# pod metrics (metrics.k8s.io/pods) and node listing + kubelet stats (nodes,
+# nodes/proxy) for PVC usage. All per-user OBJECT data is still read with each
+# user's passthrough OIDC token, never this ServiceAccount. Disable if you
+# manage RBAC yourself.
 rbac:
   create: true
 
@@ -94,17 +115,27 @@ env: []
 podAnnotations: {}
 podLabels: {}
 
+# Pod- and container-level hardening. Defaults satisfy the Pod Security
+# Standards "restricted" profile (non-root, no privilege escalation, all
+# capabilities dropped, RuntimeDefault seccomp, read-only root filesystem).
 podSecurityContext:
   runAsNonRoot: true
   runAsUser: 1000
+  runAsGroup: 1000
   fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
 
 securityContext:
+  runAsNonRoot: true
   allowPrivilegeEscalation: false
+  privileged: false
+  readOnlyRootFilesystem: true
   capabilities:
     drop:
       - ALL
-  readOnlyRootFilesystem: true
+  seccompProfile:
+    type: RuntimeDefault
 
 service:
   type: ClusterIP

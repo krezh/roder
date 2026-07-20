@@ -53,6 +53,16 @@ spec:
             - name: RODER_TALOS_CONFIG_GROUPS
               value: {{ toJson .Values.talos.config.readerGroups | quote }}
             {{- end }}
+            {{- with .Values.alertmanager.url }}
+            - name: RODER_ALERTMANAGER_URL
+              value: {{ . | quote }}
+            {{- end }}
+            - name: RODER_ALERTS_GROUPS
+              value: {{ toJson .Values.alertmanager.readerGroups | quote }}
+            - name: RODER_MAX_USER_BACKENDS
+              value: {{ .Values.backends.maxUserBackends | quote }}
+            - name: RODER_BACKEND_IDLE_SECS
+              value: {{ .Values.backends.backendIdleSecs | quote }}
             {{- with .Values.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

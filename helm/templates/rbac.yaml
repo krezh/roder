@@ -10,11 +10,25 @@ rules:
   - nonResourceURLs: ["/apis", "/apis/*", "/api", "/api/*"]
     verbs: ["get"]
   # Read CRDs to harvest additionalPrinterColumns once at startup and watch for
-  # changes. This is cluster *metadata* only — object data is read with each
-  # user's passthrough OIDC token, never with this ServiceAccount.
+  # changes. Cluster *metadata* only.
   - apiGroups: ["apiextensions.k8s.io"]
     resources: ["customresourcedefinitions"]
     verbs: ["get", "list", "watch"]
+  # Shared enrichment read by THIS ServiceAccount, not the user's token: a
+  # single cluster-wide scrape shared across all users (so it cannot be
+  # per-user). User object data — list/get/watch, mutations, exec, logs — is
+  # still read ONLY with each user's passthrough OIDC token.
+  #   pod CPU/memory from metrics-server (the pod-list CPU/MEM columns):
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  #   PVC %-used: list nodes, then proxy to each kubelet's /stats/summary:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["nodes/proxy"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

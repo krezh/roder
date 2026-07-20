@@ -38,6 +38,25 @@
         }
       },
       "additionalProperties": false
+    },
+    "alertmanager": {
+      "type": "object",
+      "properties": {
+        "url": { "type": "string" },
+        "readerGroups": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "backends": {
+      "type": "object",
+      "properties": {
+        "maxUserBackends": { "type": "integer", "minimum": 1 },
+        "backendIdleSecs": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
     }
   }
 }

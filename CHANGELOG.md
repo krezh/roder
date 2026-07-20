@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.1.29](https://github.com/krezh/roder/compare/0.1.28...0.1.29) (2026-07-20)
+
+
+### Features
+
+* **helm:** SA RBAC for shared enrichment, alertmanager URL, hardened security ([b41bf6d](https://github.com/krezh/roder/commit/b41bf6df32409f818db6f039d8a67a7ed9f1f6d4))
+* multi-user cluster access via token passthrough ([522feec](https://github.com/krezh/roder/commit/522feecf41445efa22fb959de0c179b18fde85d7))
+
+
+### Bug Fixes
+
+* **cargo:** update rust crate serde_json (1.0.150 ➔ 1.0.151) ([#100](https://github.com/krezh/roder/issues/100)) ([6b9b453](https://github.com/krezh/roder/commit/6b9b4535387be6996c49933560f109dfcb65baab))
+* **cargo:** update rust crate time (0.3.53 ➔ 0.3.54) ([#101](https://github.com/krezh/roder/issues/101)) ([14c3836](https://github.com/krezh/roder/commit/14c38368bb6518b3449470df689b91902b8a501b))
+* **style:** use accent color for user identifier ([0f70f1f](https://github.com/krezh/roder/commit/0f70f1f2180df2d865a14734de897aa1d0566609))
+
+
+### Continuous Integration
+
+* **renovate:** enable automerge ([5e9ed0f](https://github.com/krezh/roder/commit/5e9ed0f97728705c060c1834550bdf909f5de5b1))
+* run independent test steps in parallel ([dffb639](https://github.com/krezh/roder/commit/dffb6393fff85768f0f12696fe0be0fff50ddad6))
+
 ## [0.1.28](https://github.com/krezh/roder/compare/0.1.27...0.1.28) (2026-07-19)
 
 

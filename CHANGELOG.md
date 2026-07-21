@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.34](https://github.com/krezh/roder/compare/0.1.33...0.1.34) (2026-07-21)
+
+
+### Bug Fixes
+
+* **drain:** allow graceful proxy termination ([0f69b0d](https://github.com/krezh/roder/commit/0f69b0d8cbb595e929ff7d40f97685e98b9069ab))
+* **drain:** wait indefinitely by default ([d6dabd2](https://github.com/krezh/roder/commit/d6dabd2354ea28458f919de1d5ac9092cdea4e7c))
+
 ## [0.1.33](https://github.com/krezh/roder/compare/0.1.32...0.1.33) (2026-07-21)
 
 

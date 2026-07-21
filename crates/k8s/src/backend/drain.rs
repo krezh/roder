@@ -91,9 +91,17 @@ impl DrainSession {
         let pods = pod_api.list(&lp).await.map_err(api_err)?;
 
         let mut summary = DrainSummary::default();
-        let deadline = Instant::now()
-            .checked_add(Duration::from_secs(options.timeout_secs))
-            .ok_or_else(|| K8sError::Api("drain timeout exceeds the supported range".into()))?;
+        let deadline = if options.timeout_secs == 0 {
+            None
+        } else {
+            Some(
+                Instant::now()
+                    .checked_add(Duration::from_secs(options.timeout_secs))
+                    .ok_or_else(|| {
+                        K8sError::Api("drain timeout exceeds the supported range".into())
+                    })?,
+            )
+        };
         summary.skipped = skipped_pod_count(&pods.items);
 
         let blockers: Vec<_> = pods
@@ -130,14 +138,17 @@ impl DrainSession {
 
             let mut last_err = String::new();
             let mut ok = false;
-            while Instant::now() < deadline {
+            while deadline.is_none_or(|deadline| Instant::now() < deadline) {
                 if cancel.load(Ordering::Relaxed) {
                     return Ok(summary);
                 }
-                let remaining = deadline.saturating_duration_since(Instant::now());
-                match tokio::time::timeout(remaining, self.remove_pod(&ns, &pod_name, options))
-                    .await
-                {
+                let removal = if let Some(deadline) = deadline {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    tokio::time::timeout(remaining, self.remove_pod(&ns, &pod_name, options)).await
+                } else {
+                    Ok(self.remove_pod(&ns, &pod_name, options).await)
+                };
+                match removal {
                     Ok(Ok(())) => {
                         ok = true;
                         break;
@@ -147,8 +158,9 @@ impl DrainSession {
                         if cancel.load(Ordering::Relaxed) {
                             return Ok(summary);
                         }
-                        let sleep_for =
-                            RETRY_DELAY.min(deadline.saturating_duration_since(Instant::now()));
+                        let sleep_for = deadline.map_or(RETRY_DELAY, |deadline| {
+                            RETRY_DELAY.min(deadline.saturating_duration_since(Instant::now()))
+                        });
                         tokio::time::sleep(sleep_for).await;
                         if cancel.load(Ordering::Relaxed) {
                             return Ok(summary);
@@ -184,21 +196,27 @@ impl DrainSession {
 
         // Existing workload pods already terminating are skipped for eviction
         // (and counted as skipped) but still must disappear before power-off.
-        while !terminating.is_empty() && Instant::now() < deadline {
+        while !terminating.is_empty() && deadline.is_none_or(|deadline| Instant::now() < deadline) {
             if cancel.load(Ordering::Relaxed) {
                 return Ok(summary);
             }
-            let budget = deadline.saturating_duration_since(Instant::now());
-            let remaining = match tokio::time::timeout(budget, pod_api.list(&lp)).await {
-                Ok(result) => result.map_err(api_err)?,
-                Err(_) => break,
+            let remaining = if let Some(deadline) = deadline {
+                let budget = deadline.saturating_duration_since(Instant::now());
+                match tokio::time::timeout(budget, pod_api.list(&lp)).await {
+                    Ok(result) => result.map_err(api_err)?,
+                    Err(_) => break,
+                }
+            } else {
+                pod_api.list(&lp).await.map_err(api_err)?
             };
             let remaining = remaining_terminating_pods(&remaining.items, &terminating);
             if remaining.is_empty() {
                 return Ok(summary);
             }
             let _ = events.send(DrainEventKind::WaitingTermination { pods: remaining });
-            let sleep_for = RETRY_DELAY.min(deadline.saturating_duration_since(Instant::now()));
+            let sleep_for = deadline.map_or(RETRY_DELAY, |deadline| {
+                RETRY_DELAY.min(deadline.saturating_duration_since(Instant::now()))
+            });
             tokio::time::sleep(sleep_for).await;
             if cancel.load(Ordering::Relaxed) {
                 return Ok(summary);

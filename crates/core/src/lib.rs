@@ -456,7 +456,8 @@ pub struct DrainSummary {
 }
 
 /// Minimum overall drain timeout accepted by [`DrainOptions::validate`].
-pub const DRAIN_TIMEOUT_MIN_SECS: u64 = 1;
+/// Zero disables the timeout, matching `kubectl drain`.
+pub const DRAIN_TIMEOUT_MIN_SECS: u64 = 0;
 /// Maximum overall drain timeout accepted by [`DrainOptions::validate`].
 pub const DRAIN_TIMEOUT_MAX_SECS: u64 = 3_600;
 /// Maximum pod termination grace period accepted by [`DrainOptions::validate`].
@@ -479,6 +480,7 @@ pub struct DrainOptions {
     /// Per-pod termination grace period override in seconds (`--grace-period`).
     pub grace_period: Option<u32>,
     /// Overall wall-clock budget for eviction + termination (`--timeout`).
+    /// Zero waits indefinitely.
     pub timeout_secs: u64,
 }
 
@@ -490,7 +492,7 @@ impl Default for DrainOptions {
             ignore_daemonsets: true,
             disable_eviction: false,
             grace_period: None,
-            timeout_secs: 300,
+            timeout_secs: 0,
         }
     }
 }
@@ -498,8 +500,8 @@ impl Default for DrainOptions {
 impl DrainOptions {
     /// Validate user-controlled duration fields against the shared drain bounds.
     pub fn validate(&self) -> Result<(), &'static str> {
-        if !(DRAIN_TIMEOUT_MIN_SECS..=DRAIN_TIMEOUT_MAX_SECS).contains(&self.timeout_secs) {
-            return Err("timeout must be between 1 and 3600 seconds");
+        if self.timeout_secs > DRAIN_TIMEOUT_MAX_SECS {
+            return Err("timeout must not exceed 3600 seconds");
         }
         if self
             .grace_period
@@ -658,7 +660,7 @@ mod tests {
         let o = DrainOptions::default();
         assert!(!o.force && !o.delete_emptydir_data && !o.disable_eviction);
         assert!(o.ignore_daemonsets);
-        assert_eq!(o.timeout_secs, 300);
+        assert_eq!(o.timeout_secs, 0);
         assert_eq!(o.grace_period, None);
         // An empty JSON object deserializes to the same defaults.
         let from_empty: DrainOptions = serde_json::from_str("{}").unwrap();
@@ -676,16 +678,10 @@ mod tests {
         options.timeout_secs = DRAIN_TIMEOUT_MAX_SECS;
         assert_eq!(options.validate(), Ok(()));
 
-        options.timeout_secs = DRAIN_TIMEOUT_MIN_SECS - 1;
-        assert_eq!(
-            options.validate(),
-            Err("timeout must be between 1 and 3600 seconds")
-        );
-
         options.timeout_secs = DRAIN_TIMEOUT_MAX_SECS + 1;
         assert_eq!(
             options.validate(),
-            Err("timeout must be between 1 and 3600 seconds")
+            Err("timeout must not exceed 3600 seconds")
         );
     }
 

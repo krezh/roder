@@ -223,8 +223,8 @@ fn DrainForm(
                                 on:input=move |e| grace.set(event_target_value(&e)) />
                         </label>
                         <label class="drain-num">
-                            <span>"Timeout"</span>
-                            <input type="number" min="1" max="3600"
+                            <span>"Timeout (0 = none)"</span>
+                            <input type="number" min="0" max="3600"
                                 prop:value=move || timeout.get()
                                 on:input=move |e| timeout.set(event_target_value(&e)) />
                         </label>
@@ -926,10 +926,7 @@ mod tests {
             parse_drain_limits("999999", "999999"),
             (Some(DRAIN_GRACE_PERIOD_MAX_SECS), DRAIN_TIMEOUT_MAX_SECS)
         );
-        assert_eq!(
-            parse_drain_limits("0", "0"),
-            (Some(0), DRAIN_TIMEOUT_MIN_SECS)
-        );
+        assert_eq!(parse_drain_limits("0", "0"), (Some(0), 0));
     }
 
     #[test]

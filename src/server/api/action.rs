@@ -312,7 +312,7 @@ mod tests {
         drain.key = Some("nodes.v1.".into());
         drain.name = Some("node-a".into());
         drain.options = Some(roder_core::DrainOptions {
-            timeout_secs: 0,
+            timeout_secs: roder_core::DRAIN_TIMEOUT_MAX_SECS + 1,
             ..Default::default()
         });
 

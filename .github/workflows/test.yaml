@@ -16,7 +16,6 @@ jobs:
   check:
     name: cargo check
     runs-on: ubuntu-latest
-    environment: prod
     permissions:
       contents: read
     steps:
@@ -36,7 +35,6 @@ jobs:
   test:
     name: cargo test
     runs-on: ubuntu-latest
-    environment: prod
     permissions:
       contents: read
     steps:
@@ -55,7 +53,6 @@ jobs:
   lint-ssr:
     name: clippy (ssr)
     runs-on: ubuntu-latest
-    environment: prod
     permissions:
       contents: read
     steps:
@@ -74,7 +71,6 @@ jobs:
   lint-hydrate:
     name: clippy (hydrate)
     runs-on: ubuntu-latest
-    environment: prod
     permissions:
       contents: read
     steps:
@@ -95,7 +91,6 @@ jobs:
   helm:
     name: helm lint
     runs-on: ubuntu-latest
-    environment: prod
     permissions:
       contents: read
     steps:

@@ -4,6 +4,10 @@ on:
   release:
     types: [published]
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
     name: Build & push container image
@@ -24,13 +28,44 @@ jobs:
 
       - name: Resolve wasm-bindgen version
         id: wb
+        shell: bash
         run: |
-          WB_VERSION=$(grep -E '^wasm-bindgen[[:space:]]*=[[:space:]]*"=' Cargo.toml \
-            | sed -E 's/.*"=([0-9.]+)".*/\1/')
+          WB_VERSION="$(
+            awk -F'"' '
+              /^wasm-bindgen[[:space:]]*=/ {
+                version=$2
+                sub(/^=/, "", version)
+                print version
+                exit
+              }
+            ' Cargo.toml
+          )"
+
+          test -n "${WB_VERSION}"
           echo "value=${WB_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
+        id: setup-buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Cache Docker build mounts
+        id: cache-mounts
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: cache-mount
+          key: buildkit-cargo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: buildkit-cargo-${{ runner.os }}-
+
+      - name: Restore Docker build mounts
+        uses: reproducible-containers/buildkit-cache-dance@5422eac04292c961a382e0f584ea0f03ad9da723 # v3.4.0
+        with:
+          builder: ${{ steps.setup-buildx.outputs.name }}
+          cache-map: |
+            {
+              "cache-mount/cargo-registry": "/usr/local/cargo/registry",
+              "cache-mount/target": "/app/target"
+            }
+          skip-extraction: ${{ steps.cache-mounts.outputs.cache-hit }}
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
@@ -51,8 +86,8 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/roder:${{ steps.version.outputs.version }}
             ghcr.io/${{ github.repository_owner }}/roder:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=roder-release
+          cache-to: type=gha,scope=roder-release,mode=max
           labels: |
             org.opencontainers.image.created=${{ github.event.release.published_at }}
             org.opencontainers.image.title=roder
@@ -77,7 +112,7 @@ jobs:
           registry: ghcr.io
           registry_username: ${{ github.actor }}
           registry_password: ${{ secrets.GITHUB_TOKEN }}
-          update_dependencies: true
+          update_dependencies: false
 
       - name: Update Release with Helm Chart Info
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2

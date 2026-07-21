@@ -1,5 +1,5 @@
 [registries.crates-io]
-protocol = "git"
+protocol = "sparse"
 
 [env]
 # talos-api-rs ships generated tonic bindings, but otherwise regenerates them

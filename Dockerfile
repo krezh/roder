@@ -3,23 +3,20 @@
 # ---- build ----------------------------------------------------------------
 FROM ghcr.io/rust-lang/rust:1.97.1-trixie@sha256:9a2cd304a852f05d3352f75bc2775242371c0169a72dbb40d5d881379d571989 AS build
 
-# cargo-leptos + the wasm target.
+ARG WB_VERSION
+
+# Build tools and the wasm target are installed before source is copied so
+# application changes do not invalidate these layers.
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     rustup target add wasm32-unknown-unknown
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     cargo install cargo-leptos --locked
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    test -n "${WB_VERSION}" && \
+    cargo install wasm-bindgen-cli --version "${WB_VERSION}" --locked
 
-RUN wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq &&\
-    chmod +x /usr/local/bin/yq
 WORKDIR /app
 COPY . .
-
-# Derive the wasm-bindgen CLI version directly from Cargo.lock so it always
-# matches the compiled crate.
-# The shim the CLI emits and the wasm the crate produces must be identical
-RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
-    WB=$(yq .workspace.dependencies.wasm-bindgen Cargo.toml) \
-    && cargo install -f wasm-bindgen-cli --version "$WB"
 
 # RELEASE=true  → optimised release binary
 # RELEASE=false → debug binary

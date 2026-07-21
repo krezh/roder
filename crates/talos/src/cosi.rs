@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::request::targeted;
+use crate::request::targeted_single;
 use crate::TalosError;
 use tonic::codegen::http::uri::PathAndQuery;
 use tonic::transport::Channel;
@@ -62,7 +62,7 @@ pub(crate) async fn list(
     namespace: &str,
     resource_type: &str,
 ) -> Result<Vec<CosiResource>, TalosError> {
-    let request = targeted(
+    let request = targeted_single(
         node,
         ListRequest {
             namespace: namespace.into(),

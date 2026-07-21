@@ -15,6 +15,17 @@ use crate::Backend;
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(10);
 const NODES_METADATA_KEY: &str = "nodes";
+const NODE_METADATA_KEY: &str = "node";
+
+pub(crate) fn targeted_single<T>(node: &str, body: T) -> Result<Request<T>, TalosError> {
+    let value: MetadataValue<_> = node
+        .parse()
+        .map_err(|_| TalosError::Config(format!("invalid node target {node:?}")))?;
+    let mut request = Request::new(body);
+    request.set_timeout(RPC_TIMEOUT);
+    request.metadata_mut().insert(NODE_METADATA_KEY, value);
+    Ok(request)
+}
 
 pub(crate) fn targeted<T>(node: &str, body: T) -> Result<Request<T>, TalosError> {
     targeted_with_timeout(node, body, RPC_TIMEOUT)
@@ -102,6 +113,13 @@ mod tests {
         let request = targeted("worker-1", ()).unwrap();
         assert_eq!(request.metadata().get("nodes").unwrap(), "worker-1");
         assert!(request.metadata().get("x-talos-node").is_none());
+    }
+
+    #[test]
+    fn single_target_request_uses_one_to_one_proxying() {
+        let request = targeted_single("worker-1", ()).unwrap();
+        assert_eq!(request.metadata().get("node").unwrap(), "worker-1");
+        assert!(request.metadata().get("nodes").is_none());
     }
 
     #[test]

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.33](https://github.com/krezh/roder/compare/0.1.32...0.1.33) (2026-07-21)
+
+
+### Bug Fixes
+
+* **talos:** use one-to-one proxying for COSI requests ([24bf2c8](https://github.com/krezh/roder/commit/24bf2c8e29e4db427601c2cadf47c2d60ecb2a04))
+
 ## [0.1.32](https://github.com/krezh/roder/compare/0.1.31...0.1.32) (2026-07-21)
 
 

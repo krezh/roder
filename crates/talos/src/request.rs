@@ -1,5 +1,5 @@
 //! Low-level gRPC request helpers shared by every Machine API call: targeting
-//! a specific node via the `x-talos-node` metadata header, and interpreting
+//! a specific node via the `nodes` metadata header, and interpreting
 //! the per-node status embedded in a proxied response.
 
 use std::time::Duration;
@@ -14,6 +14,7 @@ use crate::error::TalosError;
 use crate::Backend;
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(10);
+const NODES_METADATA_KEY: &str = "nodes";
 
 pub(crate) fn targeted<T>(node: &str, body: T) -> Result<Request<T>, TalosError> {
     targeted_with_timeout(node, body, RPC_TIMEOUT)
@@ -24,7 +25,7 @@ pub(crate) fn targeted_unbounded<T>(node: &str, body: T) -> Result<Request<T>, T
         .parse()
         .map_err(|_| TalosError::Config(format!("invalid node target {node:?}")))?;
     let mut request = Request::new(body);
-    request.metadata_mut().insert("x-talos-node", value);
+    request.metadata_mut().insert(NODES_METADATA_KEY, value);
     Ok(request)
 }
 
@@ -38,7 +39,7 @@ pub(crate) fn targeted_with_timeout<T>(
         .map_err(|_| TalosError::Config(format!("invalid node target {node:?}")))?;
     let mut request = Request::new(body);
     request.set_timeout(timeout);
-    request.metadata_mut().insert("x-talos-node", value);
+    request.metadata_mut().insert(NODES_METADATA_KEY, value);
     Ok(request)
 }
 
@@ -85,7 +86,7 @@ impl Backend {
             .map_err(|_| TalosError::Config(format!("invalid node target {node:?}")))?;
         let mut request = Request::new(());
         request.set_timeout(RPC_TIMEOUT);
-        request.metadata_mut().insert("x-talos-node", value);
+        request.metadata_mut().insert(NODES_METADATA_KEY, value);
         Ok(call(MachineServiceClient::new(channel.clone()), request)
             .await?
             .into_inner())
@@ -99,7 +100,8 @@ mod tests {
     #[test]
     fn targeted_request_sets_node_metadata() {
         let request = targeted("worker-1", ()).unwrap();
-        assert_eq!(request.metadata().get("x-talos-node").unwrap(), "worker-1");
+        assert_eq!(request.metadata().get("nodes").unwrap(), "worker-1");
+        assert!(request.metadata().get("x-talos-node").is_none());
     }
 
     #[test]

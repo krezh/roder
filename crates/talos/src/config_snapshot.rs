@@ -35,8 +35,21 @@ impl Backend {
         let config = resources.into_iter().next().ok_or_else(|| {
             TalosError::Upstream("machine configuration resource is empty".into())
         })?;
-        Ok(config_snapshot(&config.spec))
+        let spec = machine_config_document(&config.spec).ok_or_else(|| {
+            TalosError::Upstream("machine configuration document is missing".into())
+        })?;
+        Ok(config_snapshot(spec))
     }
+}
+
+fn machine_config_document(spec: &serde_json::Value) -> Option<&serde_json::Value> {
+    let documents = spec
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_else(|| std::slice::from_ref(spec));
+    documents
+        .iter()
+        .find(|document| document.get("machine").is_some() || document.get("cluster").is_some())
 }
 
 fn config_snapshot(config: &serde_json::Value) -> ConfigSnapshot {
@@ -155,5 +168,16 @@ mod tests {
         ));
         assert_ne!(first.fingerprint, second.fingerprint);
         assert!(!format!("{first:?}").contains("secret-a"));
+    }
+
+    #[test]
+    fn finds_machine_config_in_multi_document_resource() {
+        let spec = serde_json::json!([
+            { "apiVersion": "v1alpha1", "kind": "ExtensionServiceConfig" },
+            { "machine": { "type": "worker" }, "cluster": { "clusterName": "prod" } }
+        ]);
+
+        let config = machine_config_document(&spec).unwrap();
+        assert_eq!(config.pointer("/machine/type").unwrap(), "worker");
     }
 }

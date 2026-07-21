@@ -98,11 +98,46 @@ pub(crate) async fn list(
                 TalosError::Upstream(format!("invalid COSI resource YAML: {error}"))
             })?;
         if let serde_json::Value::String(nested_yaml) = value {
-            value = serde_yaml::from_str(&nested_yaml).map_err(|error| {
-                TalosError::Upstream(format!("invalid nested COSI resource YAML: {error}"))
-            })?;
+            value = parse_nested_yaml(&nested_yaml)?;
         }
         resources.push(CosiResource { id, spec: value });
     }
     Ok(resources)
+}
+
+fn parse_nested_yaml(yaml: &str) -> Result<serde_json::Value, TalosError> {
+    let documents = serde_yaml::Deserializer::from_str(yaml)
+        .map(|document| {
+            serde::Deserialize::deserialize(document).map_err(|error| {
+                TalosError::Upstream(format!("invalid nested COSI resource YAML: {error}"))
+            })
+        })
+        .collect::<Result<Vec<serde_json::Value>, _>>()?;
+
+    match documents.len() {
+        0 => Ok(serde_json::Value::Null),
+        1 => Ok(documents
+            .into_iter()
+            .next()
+            .expect("document count checked")),
+        _ => Ok(serde_json::Value::Array(documents)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nested_multi_document_yaml_is_preserved() {
+        let value = parse_nested_yaml(
+            "machine:\n  type: worker\n---\napiVersion: v1alpha1\nkind: ExtensionServiceConfig\n",
+        )
+        .unwrap();
+
+        let documents = value.as_array().unwrap();
+        assert_eq!(documents.len(), 2);
+        assert_eq!(documents[0].pointer("/machine/type").unwrap(), "worker");
+        assert_eq!(documents[1].get("kind").unwrap(), "ExtensionServiceConfig");
+    }
 }

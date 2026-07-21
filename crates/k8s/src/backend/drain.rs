@@ -1,6 +1,6 @@
 //! Node drain: cordon + evict every evictable pod on the node, mirroring
-//! `kubectl drain`'s default behaviour (skip DaemonSet-owned and mirror pods,
-//! respect PodDisruptionBudgets with a short retry).
+//! `kubectl drain`'s default behaviour (DaemonSet-owned pods block unless
+//! explicitly ignored, mirror pods are skipped, and PDB rejections are retried).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -9,7 +9,7 @@ use k8s_openapi::api::core::v1::{Node, Pod};
 use kube::api::{Api, ListParams, Patch, PatchParams};
 use roder_core::{DrainBlocker, DrainEventKind, DrainOptions, DrainSummary};
 
-use super::{api_err, Backend};
+use super::{api_err, classify_kube_error, ApiErrorDisposition, Backend};
 use crate::client::K8sError;
 
 const RETRY_DELAY: Duration = Duration::from_secs(2);
@@ -155,6 +155,14 @@ impl DrainSession {
                     }
                     Ok(Err(e)) => {
                         last_err = e.to_string();
+                        match classify_kube_error(&e) {
+                            ApiErrorDisposition::NotFound => {
+                                ok = true;
+                                break;
+                            }
+                            ApiErrorDisposition::Permanent => break,
+                            ApiErrorDisposition::Retryable => {}
+                        }
                         if cancel.load(Ordering::Relaxed) {
                             return Ok(summary);
                         }
@@ -238,21 +246,21 @@ impl DrainSession {
         ns: &str,
         name: &str,
         options: &DrainOptions,
-    ) -> Result<(), K8sError> {
+    ) -> Result<(), kube::Error> {
         let api: Api<Pod> = Api::namespaced(self.client.clone(), ns);
         let dp = kube::api::DeleteParams {
             grace_period_seconds: options.grace_period,
             ..Default::default()
         };
         if options.disable_eviction {
-            api.delete(name, &dp).await.map_err(api_err)?;
+            api.delete(name, &dp).await?;
             return Ok(());
         }
         let ep = kube::api::EvictParams {
             delete_options: Some(dp),
             ..Default::default()
         };
-        api.evict(name, &ep).await.map_err(api_err)?;
+        api.evict(name, &ep).await?;
         Ok(())
     }
 
@@ -285,8 +293,10 @@ impl DrainSession {
         while std::time::Instant::now() < deadline {
             let node = match nodes.get(name).await {
                 Ok(node) => node,
-                Err(_) => {
-                    saw_not_ready = true;
+                Err(error) => {
+                    if classify_kube_error(&error) == ApiErrorDisposition::Permanent {
+                        return Err(api_err(error));
+                    }
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                     continue;
                 }
@@ -551,8 +561,10 @@ mod tests {
         assert_eq!(blockers.len(), 1);
         assert_eq!(blockers[0].clearable_by, "ignore_daemonsets");
 
-        // Default options ignore DaemonSets.
-        assert!(drain_blockers(&pod, &DrainOptions::default()).is_empty());
+        assert_eq!(
+            drain_blockers(&pod, &DrainOptions::default())[0].clearable_by,
+            "ignore_daemonsets"
+        );
     }
 
     #[test]
@@ -724,5 +736,25 @@ mod tests {
         .unwrap();
 
         assert_eq!(skipped_pod_count(&pods), 4);
+    }
+
+    #[test]
+    fn drain_error_status_classification_is_selective() {
+        use super::super::{classify_kube_error, classify_status, ApiErrorDisposition};
+
+        assert_eq!(classify_status(404), ApiErrorDisposition::NotFound);
+        assert_eq!(classify_status(429), ApiErrorDisposition::Retryable);
+        assert_eq!(classify_status(500), ApiErrorDisposition::Retryable);
+        assert_eq!(classify_status(503), ApiErrorDisposition::Retryable);
+        assert_eq!(classify_status(400), ApiErrorDisposition::Permanent);
+        assert_eq!(classify_status(401), ApiErrorDisposition::Permanent);
+        assert_eq!(classify_status(403), ApiErrorDisposition::Permanent);
+        assert_eq!(classify_status(422), ApiErrorDisposition::Permanent);
+
+        let transport = kube::Error::Service(Box::new(std::io::Error::other("connection reset")));
+        assert_eq!(
+            classify_kube_error(&transport),
+            ApiErrorDisposition::Retryable
+        );
     }
 }

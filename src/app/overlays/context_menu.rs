@@ -8,8 +8,9 @@ use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::overlays::toast::{show_toast, show_toast_detail, Toast, ToastKind};
 use crate::app::state::{
     open_logs, Catalog, CtxMenu, DetailTarget, DrainOpen, DrainTarget, ExecOpen, ExecTarget,
-    LogPods, LogTarget, TableRows, TableSelected, TreeOpen,
+    LogPods, LogTarget, TableRows, TableSelected, TableTargets, TreeOpen,
 };
+use crate::app::table_logic::{resolve_action_targets, targets_all};
 use crate::app::util::clipboard::copy_to_clipboard;
 use crate::app::util::format::parse_key;
 use crate::app::util::predicate::KindKind;
@@ -29,6 +30,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
     // Provided at App level; ResourceView fills in the Option on mount.
     let table_selected = expect_context::<TableSelected>().0;
     let table_rows = expect_context::<TableRows>().0;
+    let table_targets = expect_context::<TableTargets>().0;
     let toast = expect_context::<RwSignal<Option<Toast>>>();
 
     let (snapshot, closing, do_close) = super::use_option_overlay(ctx);
@@ -90,48 +92,63 @@ pub(crate) fn ContextMenu() -> impl IntoView {
 
     view! {
         {move || snapshot.get().map(|m| {
-            let (group, kind) = parse_key(&m.target.key);
-            let kk = KindKind::new(&group, &kind);
-            let is_pod = kk.is_pod();
-            let is_workload = kk.is_workload();
-            let is_scalable = kk.is_scalable();
-            let is_flux = kk.is_flux();
-            let is_helmrelease = kk.is_helmrelease();
-            let is_kustomization = kk.is_kustomization();
-            let has_source_ref = kk.has_source_ref();
-            let is_eso = kk.is_eso();
-            let is_cronjob = kk.is_cronjob();
-            let is_node = kk.is_node();
             // When the right-clicked row is part of a multi-selection, all
             // bulk-capable actions fire on every selected row.
             let rows_opt = table_rows.get_value();
-            let target_uids: Vec<String> = match (table_selected.get_value(), rows_opt) {
-                (Some(sel), Some(_)) => {
-                    let uids = sel.get_untracked();
-                    if uids.len() > 1 && uids.contains(&m.uid) {
-                        uids.into_iter().collect()
-                    } else {
-                        vec![m.uid.clone()]
-                    }
-                }
-                _ => vec![m.uid.clone()],
+            let selected = table_selected.get_value().map(|signal| signal.get_untracked());
+            let empty_rows = Default::default();
+            let empty_targets = Default::default();
+            let resolved = match (rows_opt, table_targets.get_value()) {
+                (Some(rows), Some(row_targets)) => rows.with_untracked(|rows| {
+                    row_targets.with_untracked(|row_targets| {
+                        resolve_action_targets(
+                            &m.uid,
+                            &m.target,
+                            selected.as_ref(),
+                            rows,
+                            row_targets,
+                        )
+                    })
+                }),
+                (Some(rows), None) => rows.with_untracked(|rows| {
+                    resolve_action_targets(
+                        &m.uid,
+                        &m.target,
+                        selected.as_ref(),
+                        rows,
+                        &empty_targets,
+                    )
+                }),
+                (None, Some(row_targets)) => row_targets.with_untracked(|row_targets| {
+                    resolve_action_targets(
+                        &m.uid,
+                        &m.target,
+                        selected.as_ref(),
+                        &empty_rows,
+                        row_targets,
+                    )
+                }),
+                (None, None) => resolve_action_targets(
+                    &m.uid,
+                    &m.target,
+                    selected.as_ref(),
+                    &empty_rows,
+                    &empty_targets,
+                ),
             };
-            let targets: Vec<DetailTarget> = match rows_opt {
-                Some(rows) => {
-                    let ts: Vec<DetailTarget> = rows.with_untracked(|rm| {
-                        target_uids.iter()
-                            .filter_map(|uid| rm.get(uid).map(|r| DetailTarget {
-                                key: m.target.key.clone(),
-                                namespace: r.namespace.clone(),
-                                name: r.name.clone(),
-                            }))
-                            .collect()
-                    });
-                    if ts.is_empty() { vec![m.target.clone()] } else { ts }
-                }
-                None => vec![m.target.clone()],
-            };
+            let target_uids = resolved.uids;
+            let targets = resolved.targets;
             let is_bulk = targets.len() > 1;
+            let is_pod = targets_all(&targets, |kind| kind.is_pod());
+            let is_workload = targets_all(&targets, |kind| kind.is_workload());
+            let is_scalable = targets_all(&targets, |kind| kind.is_scalable());
+            let is_flux = targets_all(&targets, |kind| kind.is_flux());
+            let is_helmrelease = targets_all(&targets, |kind| kind.is_helmrelease());
+            let is_kustomization = targets_all(&targets, |kind| kind.is_kustomization());
+            let has_source_ref = targets_all(&targets, |kind| kind.has_source_ref());
+            let is_eso = targets_all(&targets, |kind| kind.is_eso());
+            let is_cronjob = targets_all(&targets, |kind| kind.is_cronjob());
+            let is_node = targets_all(&targets, |kind| kind.is_node());
             // `RowStatus::Warn` is reserved for the suspended case in the Flux
             // projector (see `ready_message_cells`), so it doubles as the signal
             // for which of Suspend/Resume to show. `None` (mixed selection, or
@@ -159,13 +176,16 @@ pub(crate) fn ContextMenu() -> impl IntoView {
 
             let open = { let t = m.target.clone(); move |_| { detail.set(Some(t.clone())); do_close(); } };
             let open_tree = { let t = m.target.clone(); move |_| { tree_open.set(Some(t.clone())); do_close(); } };
-            let has_logs = is_pod || is_workload || kk.is_job();
+            let has_logs = targets_all(&targets, |kind| {
+                kind.is_pod() || kind.is_workload() || kind.is_job()
+            });
             let logs = {
                 let ts = targets.clone();
-                let agg = !is_pod;
                 move |_| {
                     for t in &ts {
-                        open_logs(log_pods, LogTarget::from_detail(t, agg));
+                        let (group, kind) = parse_key(&t.key);
+                        let aggregate = !KindKind::new(&group, &kind).is_pod();
+                        open_logs(log_pods, LogTarget::from_detail(t, aggregate));
                     }
                     if let Some(sel) = table_selected.get_value() { sel.set(Default::default()); }
                     do_close();
@@ -328,17 +348,24 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                                 node_shell: false,
                             }));
                             leptos::task::spawn_local(async move {
-                                let url = format!(
-                                    "/api/debug-shell?namespace={}&pod={}",
-                                    crate::data::percent_encode(&ns),
-                                    crate::data::percent_encode(&pod),
-                                );
-                                // Guard: don't touch exec_open if the user dismissed the overlay
-                                // while the request was in flight (pending cleared or signal gone).
                                 let still_pending = || {
-                                    exec_open.get_untracked().map(|t| t.pending).unwrap_or(false)
+                                    exec_open.get_untracked().is_some_and(|target| {
+                                        target.pending
+                                            && !target.node_shell
+                                            && target.namespace == ns
+                                            && target.pod == pod
+                                    })
                                 };
-                                match crate::data::fetch_json::<serde_json::Value>(&url).await {
+                                let body = serde_json::json!({
+                                    "namespace": ns,
+                                    "pod": pod,
+                                });
+                                match crate::data::post_json::<serde_json::Value>(
+                                    "/api/debug-shell",
+                                    &body,
+                                )
+                                .await
+                                {
                                     Ok(resp) => {
                                         if still_pending() {
                                             if let Some(ctr) = resp.get("container").and_then(|c| c.as_str()) {
@@ -377,16 +404,20 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                                 node_shell: true,
                             }));
                             leptos::task::spawn_local(async move {
-                                let url = format!(
-                                    "/api/node-shell?node={}",
-                                    crate::data::percent_encode(&node),
-                                );
-                                // Guard: don't touch exec_open if the user dismissed the
-                                // overlay while the request was in flight.
                                 let still_pending = || {
-                                    exec_open.get_untracked().map(|t| t.pending).unwrap_or(false)
+                                    exec_open.get_untracked().is_some_and(|target| {
+                                        target.pending
+                                            && target.node_shell
+                                            && target.pod == node
+                                    })
                                 };
-                                match crate::data::fetch_json::<serde_json::Value>(&url).await {
+                                let body = serde_json::json!({ "node": node });
+                                match crate::data::post_json::<serde_json::Value>(
+                                    "/api/node-shell",
+                                    &body,
+                                )
+                                .await
+                                {
                                     Ok(resp) => {
                                         if still_pending() {
                                             let ns = resp.get("namespace").and_then(|v| v.as_str());

@@ -5,28 +5,22 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use leptos::prelude::*;
-use roder_core::{ResourceKind, ResourceRow, WatchEvent};
+use roder_core::{ResourceKind, WatchEvent};
 
-use crate::app::events::{apply_event, fire_action};
+use crate::app::events::fire_action;
 use crate::app::hooks::{use_table_state, Coalescer};
 use crate::app::mobile::bulk_bar::MobileBulkBar;
 use crate::app::mobile::row_card::{use_select_mode, CardFields, MobileRowCard};
 use crate::app::overlays::toast::Toast;
+use crate::app::search_state::{self, MergedRow};
 use crate::app::state::{
     open_logs, Catalog, ConnectionState, Connectivity, CtxMenu, DetailTarget, LogPods, LogTarget,
-    MultiKindSearch, OnlyProblems, ResourceFilter, TableRows, TableSelected, Tick,
+    MultiKindSearch, OnlyProblems, ResourceFilter, TableRows, TableSelected, TableTargets, Tick,
 };
 use crate::app::table_logic;
 #[cfg(target_arch = "wasm32")]
 use crate::app::util::history::history_back;
 use crate::data;
-
-/// A row paired with its resource kind, same shape as the desktop's `MergedRow`.
-#[derive(Clone, PartialEq)]
-struct MergedRow {
-    kind: Arc<ResourceKind>,
-    row: ResourceRow,
-}
 
 #[component]
 pub(crate) fn MobileSearchList() -> impl IntoView {
@@ -40,14 +34,18 @@ pub(crate) fn MobileSearchList() -> impl IntoView {
     let catalog = expect_context::<Catalog>().0;
 
     let t = use_table_state();
+    let action_targets = RwSignal::new(HashMap::<String, DetailTarget>::new());
 
     let sv_sel = expect_context::<TableSelected>().0;
     let sv_rows = expect_context::<TableRows>().0;
+    let sv_targets = expect_context::<TableTargets>().0;
     sv_sel.set_value(Some(t.selected));
     sv_rows.set_value(Some(t.rows));
+    sv_targets.set_value(Some(action_targets));
     on_cleanup(move || {
         sv_sel.set_value(None);
         sv_rows.set_value(None);
+        sv_targets.set_value(None);
     });
 
     let merged_rows: RwSignal<HashMap<String, MergedRow>> = RwSignal::new(Default::default());
@@ -57,6 +55,20 @@ pub(crate) fn MobileSearchList() -> impl IntoView {
             rows_for_ctx.set(
                 m.iter()
                     .map(|(k, mr)| (k.clone(), mr.row.clone()))
+                    .collect(),
+            );
+            action_targets.set(
+                m.iter()
+                    .map(|(key, mr)| {
+                        (
+                            key.clone(),
+                            DetailTarget {
+                                key: mr.kind.key.clone(),
+                                namespace: mr.row.namespace.clone(),
+                                name: mr.row.name.clone(),
+                            },
+                        )
+                    })
                     .collect(),
             );
         });
@@ -109,100 +121,26 @@ pub(crate) fn MobileSearchList() -> impl IntoView {
 
         let conn = use_context::<ConnectionState>().map(|c| c.0);
         for kind in &kinds {
-            let kind_key = kind.key.clone();
             let url = data::watch_url(
-                &kind_key,
+                &kind.key,
                 query.namespaces.first().map(String::as_str),
                 query.selector.as_deref(),
             );
             let entering = t.entering;
             let removing = t.removing;
             let kind_arc = kind.clone();
-            let kind_rows = RwSignal::new(HashMap::<String, ResourceRow>::new());
-            let prefix = format!("{}/", kind_key);
             let reconnect: RwSignal<u32> = RwSignal::new(0);
             Effect::new(move |_prev: Option<Option<data::SseHandle>>| {
                 reconnect.track();
                 let ka = kind_arc.clone();
                 let url = url.clone();
-                let kr = kind_rows;
                 let mr = merged_rows;
                 let ent = entering;
                 let rm = removing;
-                let pfx = prefix.clone();
                 let probe_url = url.clone();
                 let coalescer = Coalescer::new(move |batch: Vec<WatchEvent>| {
                     for ev in batch {
-                        match ev {
-                            WatchEvent::Snapshot { columns, rows: r } => {
-                                apply_event(
-                                    kr,
-                                    ent,
-                                    rm,
-                                    None,
-                                    WatchEvent::Snapshot {
-                                        columns,
-                                        rows: r.clone(),
-                                    },
-                                );
-                                mr.update(|m| {
-                                    m.retain(|k, _| !k.starts_with(&pfx));
-                                    for row in r {
-                                        let merged_key = format!("{}{}", pfx, row.uid);
-                                        m.insert(
-                                            merged_key,
-                                            MergedRow {
-                                                kind: ka.clone(),
-                                                row,
-                                            },
-                                        );
-                                    }
-                                });
-                            }
-                            WatchEvent::Applied { row } => {
-                                apply_event(
-                                    kr,
-                                    ent,
-                                    rm,
-                                    None,
-                                    WatchEvent::Applied { row: row.clone() },
-                                );
-                                let merged_key = format!("{}{}", pfx, row.uid);
-                                mr.update(|m| {
-                                    m.insert(
-                                        merged_key,
-                                        MergedRow {
-                                            kind: ka.clone(),
-                                            row,
-                                        },
-                                    );
-                                });
-                            }
-                            WatchEvent::Deleted { uid } => {
-                                apply_event(
-                                    kr,
-                                    ent,
-                                    rm,
-                                    None,
-                                    WatchEvent::Deleted { uid: uid.clone() },
-                                );
-                                let merged_key = format!("{}{}", pfx, uid);
-                                rm.update(|s| {
-                                    s.insert(merged_key);
-                                });
-                            }
-                            WatchEvent::Forbidden { message } => {
-                                apply_event(
-                                    kr,
-                                    ent,
-                                    rm,
-                                    None,
-                                    WatchEvent::Forbidden {
-                                        message: message.clone(),
-                                    },
-                                );
-                            }
-                        }
+                        search_state::apply_event(mr, ent, rm, ka.clone(), ev);
                     }
                 });
                 data::subscribe_with_error(
@@ -231,8 +169,8 @@ pub(crate) fn MobileSearchList() -> impl IntoView {
         let filter_text = resource_filter.get().to_lowercase();
         let (sort_key, asc) = t.sort.get();
         merged_rows.with(|m| {
-            table_logic::shown_uids(
-                m.values().map(|mr| &mr.row),
+            table_logic::shown_row_keys(
+                m.iter().map(|(key, mr)| (key, &mr.row)),
                 sort_key,
                 asc,
                 problems,
@@ -306,13 +244,10 @@ pub(crate) fn MobileSearchList() -> impl IntoView {
                             namespace: init.as_ref().and_then(|mr| mr.row.namespace.clone()),
                             name: init.as_ref().map(|mr| mr.row.name.clone()).unwrap_or_default(),
                         };
-                        let node_for_ctx = {
-                            let kinds = resolved_kinds.get_untracked();
-                            let node_col = kinds.first().and_then(|k| k.columns.iter().position(|c| c == "Node"));
-                            move || {
-                                let node_col = node_col?;
-                                merged.get_untracked().and_then(|mr| mr.row.cells.get(node_col).cloned())
-                            }
+                        let node_for_ctx = move || {
+                            let mr = merged.get_untracked()?;
+                            let node_col = mr.kind.columns.iter().position(|c| c == "Node")?;
+                            mr.row.cells.get(node_col).cloned()
                         };
                         let fields = Memo::new(move |_| {
                             let mr = merged.get()?;

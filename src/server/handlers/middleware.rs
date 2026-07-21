@@ -6,6 +6,7 @@ use axum::extract::{Request, State};
 use axum::http::{header, HeaderName, HeaderValue, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Redirect, Response};
+use roder_auth::Identity;
 
 use super::super::session::{
     cookie_value, open_forwarded_tokens, open_session, seal_session, set_cookie, SESSION_COOKIE,
@@ -111,6 +112,12 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
             Err(()) => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
         };
         req.extensions_mut().insert(backend);
+        req.extensions_mut().insert(Identity {
+            subject: "dev".into(),
+            email: None,
+            name: Some("dev mode".into()),
+            groups: Vec::new(),
+        });
         return next.run(req).await;
     }
 
@@ -149,36 +156,19 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
         }
     }
 
-    // These routes authorize directly from the sealed session and never need a
-    // Kubernetes backend. Avoid needless token refreshes when HA peers proxy
-    // progress/recovery requests between replicas.
-    if matches!(
-        req.uri().path(),
-        "/api/drain-active" | "/api/drain-progress"
-    ) {
-        return next.run(req).await;
-    }
-
     // Resolve (build-or-reuse, single-flighted per subject) this caller's own
     // backend, refreshing the token via the IdP on the way through if it's
     // near expiry.
-    let backend = match state.backends.resolve(&cookie_tokens).await {
-        Ok(b) => b,
+    let resolved = match state.backends.resolve(&cookie_tokens).await {
+        Ok(resolved) => resolved,
         Err(()) => return reject(),
     };
-    let subject = cookie_tokens.identity.subject.clone();
-    req.extensions_mut().insert(backend);
+    req.extensions_mut().insert(resolved.backend.clone());
+    req.extensions_mut()
+        .insert(resolved.tokens.identity.clone());
 
     let mut resp = next.run(req).await;
 
-    // `resolve` may have refreshed/rotated the token; read back the fresh set
-    // to re-seal, falling back to the cookie's own tokens if the registry
-    // entry vanished between resolve and here (e.g. raced by an eviction).
-    let fresh = state
-        .backends
-        .resolved_tokens(&subject)
-        .await
-        .unwrap_or(cookie_tokens);
     let has_forwarded_session = resp
         .headers()
         .get_all(header::SET_COOKIE)
@@ -186,7 +176,7 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
         .filter_map(|value| value.to_str().ok())
         .any(|value| value.starts_with(&format!("{SESSION_COOKIE}=")));
     if !has_forwarded_session {
-        let sealed = seal_session(&fresh, &key);
+        let sealed = seal_session(&resolved.tokens, &key);
         if let Ok(v) = HeaderValue::from_str(&set_cookie(
             SESSION_COOKIE,
             &sealed,
@@ -211,6 +201,7 @@ mod tests {
     use axum::middleware::from_fn_with_state;
     use axum::routing::get;
     use axum::Extension;
+    use axum::Json;
     use axum::Router;
     use roder_k8s::Backend;
     use std::sync::Arc;
@@ -231,6 +222,15 @@ mod tests {
                     let _ = b.kinds();
                     "ok"
                 }),
+            )
+            .route_layer(from_fn_with_state(state, require_auth))
+    }
+
+    fn make_identity_app(state: AppState) -> Router {
+        Router::new()
+            .route(
+                "/identity",
+                get(|Extension(identity): Extension<Identity>| async move { Json(identity) }),
             )
             .route_layer(from_fn_with_state(state, require_auth))
     }
@@ -338,6 +338,37 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn stale_cookie_groups_do_not_replace_resolved_identity() {
+        let state = prod_state_without_provider();
+        let mut current = fake_tokens();
+        current.identity.subject = "alice".into();
+        current.identity.groups = vec!["viewers".into()];
+        state.backends.resolve_login(&current).await.unwrap();
+
+        let mut stale = current.clone();
+        stale.identity.groups = vec!["admins".into()];
+        stale.refresh_token = Some("stale-refresh-token".into());
+        let sealed = seal_session(&stale, &TEST_KEY);
+
+        let response = make_identity_app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/identity")
+                    .header(header::COOKIE, format!("{SESSION_COOKIE}={sealed}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        let identity: Identity = serde_json::from_slice(&body).unwrap();
+        assert_eq!(identity.groups, vec!["viewers"]);
     }
 
     #[tokio::test]

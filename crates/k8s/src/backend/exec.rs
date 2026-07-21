@@ -1,5 +1,5 @@
 //! Interactive shell access: exec into a container (probing for the best
-//! available shell), injecting an ephemeral `nicolaka/netshoot` debug
+//! available shell), injecting a configured, digest-pinned debug
 //! container for pods that have nothing exec-able of their own, and standing
 //! up a privileged node-shell pod for nodes (which have no exec-able
 //! container at all — Talos ships no SSH and no host shell).
@@ -7,12 +7,15 @@
 use k8s_openapi::api::core::v1::Pod;
 use kube::api::{Api, AttachParams, DeleteParams, Patch, PatchParams, PostParams};
 
-use super::{api_err, Backend};
+use super::{api_err, classify_kube_error, ApiErrorDisposition, Backend};
 use crate::client::K8sError;
 
 /// Namespace the node-shell debug pod is created in. `default` mirrors
 /// `kubectl debug node/<name>`'s own default namespace.
 const NODE_SHELL_NAMESPACE: &str = "default";
+const DEBUG_IMAGE_ENV: &str = "RODER_DEBUG_IMAGE";
+const DEFAULT_DEBUG_IMAGE: &str =
+    "docker.io/nicolaka/netshoot@sha256:b09d9b21381f47a79b3cbcb30da25266dc17186ea00ae65e99fdc51396f48e70";
 
 impl Backend {
     /// Open an interactive exec session into a pod container. Returns an
@@ -40,9 +43,10 @@ impl Backend {
             .map_err(api_err)
     }
 
-    /// Inject a `nicolaka/netshoot` ephemeral container into `pod`, wait for it
+    /// Inject the `RODER_DEBUG_IMAGE` ephemeral container into `pod`, wait for it
     /// to reach Running, and return its name for use with [`exec`].
     pub async fn inject_debug_container(&self, ns: &str, pod: &str) -> Result<String, K8sError> {
+        let image = debug_image()?;
         let api: Api<Pod> = Api::namespaced(self.client(), ns);
 
         // Fetch current ephemeral containers; the patch replaces the whole
@@ -81,7 +85,7 @@ impl Backend {
 
         containers.push(serde_json::json!({
             "name": name,
-            "image": "nicolaka/netshoot",
+            "image": image,
             "stdin": true,
             "tty": true,
             "terminationMessagePolicy": "File"
@@ -129,11 +133,12 @@ impl Backend {
 
     /// Create a privileged pod scheduled onto `node` for host-level access,
     /// waiting for it to reach Running. Shares the host's PID/network/IPC/UTS
-    /// namespaces but keeps the `netshoot` image's own root filesystem — Talos
+    /// namespaces but keeps the debug image's own root filesystem — Talos
     /// nodes have no shell or coreutils of their own to `nsenter --mount` into,
     /// so entering the host mount namespace would leave nothing exec-able.
     /// Returns `(namespace, pod_name)` for use with [`exec_node_shell`].
     pub async fn create_node_shell(&self, node: &str) -> Result<(String, String), K8sError> {
+        let image = debug_image()?;
         let ns = NODE_SHELL_NAMESPACE;
         let api: Api<Pod> = Api::namespaced(self.client(), ns);
 
@@ -165,7 +170,7 @@ impl Backend {
                 "activeDeadlineSeconds": 3600,
                 "containers": [{
                     "name": "shell",
-                    "image": "nicolaka/netshoot",
+                    "image": image,
                     "command": ["sleep", "infinity"],
                     "stdin": true,
                     "tty": true,
@@ -181,24 +186,56 @@ impl Backend {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
         loop {
             if std::time::Instant::now() > deadline {
-                return Err(api_err(format!(
-                    "node-shell pod {name} did not start within 60s"
-                )));
+                return Err(cleanup_node_shell(
+                    &api,
+                    &name,
+                    format!("node-shell pod {name} did not start within 60s"),
+                )
+                .await);
             }
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            if let Ok(p) = api.get(&name).await {
-                let running = p
-                    .status
-                    .and_then(|s| s.container_statuses)
-                    .unwrap_or_default()
-                    .iter()
-                    .any(|cs| {
-                        cs.name == "shell"
-                            && cs.state.as_ref().and_then(|s| s.running.as_ref()).is_some()
+            match api.get(&name).await {
+                Ok(p) => {
+                    let terminal = p.status.as_ref().is_some_and(|status| {
+                        matches!(status.phase.as_deref(), Some("Failed" | "Succeeded"))
+                            || status.container_statuses.as_ref().is_some_and(|statuses| {
+                                statuses.iter().any(|cs| {
+                                    cs.name == "shell"
+                                        && cs
+                                            .state
+                                            .as_ref()
+                                            .and_then(|state| state.terminated.as_ref())
+                                            .is_some()
+                                })
+                            })
                     });
-                if running {
-                    return Ok((ns.to_string(), name));
+                    let running = p
+                        .status
+                        .and_then(|s| s.container_statuses)
+                        .unwrap_or_default()
+                        .iter()
+                        .any(|cs| {
+                            cs.name == "shell"
+                                && cs.state.as_ref().and_then(|s| s.running.as_ref()).is_some()
+                        });
+                    if terminal {
+                        return Err(cleanup_node_shell(
+                            &api,
+                            &name,
+                            format!("node-shell pod {name} terminated before becoming ready"),
+                        )
+                        .await);
+                    }
+                    if running {
+                        return Ok((ns.to_string(), name));
+                    }
                 }
+                Err(error) => match classify_kube_error(&error) {
+                    ApiErrorDisposition::Retryable => {}
+                    ApiErrorDisposition::NotFound | ApiErrorDisposition::Permanent => {
+                        return Err(cleanup_node_shell(&api, &name, error.to_string()).await);
+                    }
+                },
             }
         }
     }
@@ -233,6 +270,37 @@ impl Backend {
     }
 }
 
+fn debug_image() -> Result<String, K8sError> {
+    let image = std::env::var(DEBUG_IMAGE_ENV).unwrap_or_else(|_| DEFAULT_DEBUG_IMAGE.to_string());
+    validate_debug_image(&image)?;
+    Ok(image)
+}
+
+fn validate_debug_image(image: &str) -> Result<(), K8sError> {
+    let Some((repository, digest)) = image.rsplit_once("@sha256:") else {
+        return Err(K8sError::Api(format!(
+            "{DEBUG_IMAGE_ENV} must be pinned as <image>@sha256:<64 hex characters>"
+        )));
+    };
+    if repository.is_empty()
+        || repository.contains('@')
+        || digest.len() != 64
+        || !digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(K8sError::Api(format!(
+            "{DEBUG_IMAGE_ENV} must be pinned as <image>@sha256:<64 hex characters>"
+        )));
+    }
+    Ok(())
+}
+
+async fn cleanup_node_shell(api: &Api<Pod>, name: &str, message: String) -> K8sError {
+    if let Err(error) = api.delete(name, &DeleteParams::default()).await {
+        tracing::warn!("failed to clean up node-shell pod {name}: {error}");
+    }
+    api_err(message)
+}
+
 /// Probe the container to find the best available interactive shell.
 /// Starts each candidate with no arguments, no stdin, no TTY — the shell reads
 /// EOF and exits immediately without loading interactive configs (avoids
@@ -257,4 +325,20 @@ async fn detect_shell(api: &Api<Pod>, pod: &str, container: Option<&str>) -> Str
         }
     }
     "/bin/sh".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_debug_image;
+
+    #[test]
+    fn debug_image_requires_a_complete_sha256_digest() {
+        let digest = "a".repeat(64);
+        assert!(validate_debug_image(&format!("nicolaka/netshoot@sha256:{digest}")).is_ok());
+        assert!(validate_debug_image("nicolaka/netshoot:latest").is_err());
+        assert!(validate_debug_image("nicolaka/netshoot@sha256:abcd").is_err());
+        assert!(
+            validate_debug_image(&format!("nicolaka/netshoot@sha256:{}", "z".repeat(64))).is_err()
+        );
+    }
 }

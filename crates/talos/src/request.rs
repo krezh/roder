@@ -54,8 +54,17 @@ pub(crate) fn targeted_with_timeout<T>(
     Ok(request)
 }
 
-pub(crate) fn timestamp(ts: &prost_types::Timestamp) -> String {
-    format!("{}.{:09}Z", ts.seconds, ts.nanos)
+pub(crate) fn timestamp(ts: &prost_types::Timestamp) -> Result<String, TalosError> {
+    let nanos = u32::try_from(ts.nanos)
+        .ok()
+        .filter(|nanos| *nanos < 1_000_000_000)
+        .ok_or_else(|| TalosError::Upstream("invalid protobuf timestamp nanoseconds".into()))?;
+    let value = time::OffsetDateTime::from_unix_timestamp(ts.seconds)
+        .and_then(|value| value.replace_nanosecond(nanos))
+        .map_err(|error| TalosError::Upstream(format!("invalid protobuf timestamp: {error}")))?;
+    value
+        .format(&time::format_description::well_known::Rfc3339)
+        .map_err(|error| TalosError::Upstream(format!("failed to format timestamp: {error}")))
 }
 
 pub(crate) fn metadata_failure<'a>(
@@ -133,9 +142,19 @@ mod tests {
             timestamp(&prost_types::Timestamp {
                 seconds: 1_700_000_000,
                 nanos: 42,
-            }),
-            "1700000000.000000042Z"
+            })
+            .unwrap(),
+            "2023-11-14T22:13:20.000000042Z"
         );
+    }
+
+    #[test]
+    fn rejects_invalid_protobuf_timestamp() {
+        assert!(timestamp(&prost_types::Timestamp {
+            seconds: 0,
+            nanos: 1_000_000_000,
+        })
+        .is_err());
     }
 
     #[test]

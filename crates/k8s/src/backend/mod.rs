@@ -60,57 +60,7 @@ pub struct Backend {
 }
 
 impl Backend {
-    /// Connect as the given user (OIDC ID token) against a cluster whose
-    /// discovery/columns/enrichment are already running on `shared`.
-    pub async fn connect_with_token(
-        id_token: &str,
-        shared: Arc<SharedCluster>,
-    ) -> Result<Self, K8sError> {
-        let cluster = Arc::new(ClusterAccess::connect_with_token(id_token).await?);
-        let registry = InformerRegistry::new(
-            cluster.clone(),
-            shared.enrichment(),
-            shared.columns(),
-            shared.subscribe_columns(),
-        );
-        Ok(Self {
-            cluster,
-            shared,
-            registry,
-            overview_cache: tokio::sync::RwLock::new(None),
-            can_cache: tokio::sync::RwLock::new(HashMap::new()),
-            log_seen: tokio::sync::RwLock::new(HashMap::new()),
-        })
-    }
-
-    /// Connect using the inferred kubeconfig/in-cluster default credentials
-    /// (no OIDC token). Used only for the dev-mode backend, where auth is
-    /// bypassed entirely and there is no per-user bearer token to pass
-    /// through.
-    pub async fn connect_with_default(shared: Arc<SharedCluster>) -> Result<Self, K8sError> {
-        let cluster = Arc::new(ClusterAccess::connect_with_default().await?);
-        let registry = InformerRegistry::new(
-            cluster.clone(),
-            shared.enrichment(),
-            shared.columns(),
-            shared.subscribe_columns(),
-        );
-        Ok(Self {
-            cluster,
-            shared,
-            registry,
-            overview_cache: tokio::sync::RwLock::new(None),
-            can_cache: tokio::sync::RwLock::new(HashMap::new()),
-            log_seen: tokio::sync::RwLock::new(HashMap::new()),
-        })
-    }
-
-    /// Build a `Backend` from already-connected parts, for tests that don't
-    /// need real cluster I/O. `pub` (not `#[cfg(test)]`) so the `roder` server
-    /// crate's own tests (e.g. `server::backends`) can build one across the
-    /// crate boundary — `cfg(test)` is per-crate and wouldn't be visible there.
-    #[doc(hidden)]
-    pub fn from_parts_for_test(cluster: Arc<ClusterAccess>, shared: Arc<SharedCluster>) -> Self {
+    fn from_parts(cluster: Arc<ClusterAccess>, shared: Arc<SharedCluster>) -> Self {
         let registry = InformerRegistry::new(
             cluster.clone(),
             shared.enrichment(),
@@ -125,6 +75,34 @@ impl Backend {
             can_cache: tokio::sync::RwLock::new(HashMap::new()),
             log_seen: tokio::sync::RwLock::new(HashMap::new()),
         }
+    }
+
+    /// Connect as the given user (OIDC ID token) against a cluster whose
+    /// discovery/columns/enrichment are already running on `shared`.
+    pub async fn connect_with_token(
+        id_token: &str,
+        shared: Arc<SharedCluster>,
+    ) -> Result<Self, K8sError> {
+        let cluster = Arc::new(ClusterAccess::connect_with_token(id_token).await?);
+        Ok(Self::from_parts(cluster, shared))
+    }
+
+    /// Connect using the inferred kubeconfig/in-cluster default credentials
+    /// (no OIDC token). Used only for the dev-mode backend, where auth is
+    /// bypassed entirely and there is no per-user bearer token to pass
+    /// through.
+    pub async fn connect_with_default(shared: Arc<SharedCluster>) -> Result<Self, K8sError> {
+        let cluster = Arc::new(ClusterAccess::connect_with_default().await?);
+        Ok(Self::from_parts(cluster, shared))
+    }
+
+    /// Build a `Backend` from already-connected parts, for tests that don't
+    /// need real cluster I/O. `pub` (not `#[cfg(test)]`) so the `roder` server
+    /// crate's own tests (e.g. `server::backends`) can build one across the
+    /// crate boundary — `cfg(test)` is per-crate and wouldn't be visible there.
+    #[doc(hidden)]
+    pub fn from_parts_for_test(cluster: Arc<ClusterAccess>, shared: Arc<SharedCluster>) -> Self {
+        Self::from_parts(cluster, shared)
     }
 
     /// Swap in a refreshed ID token (called by the refresh task).
@@ -307,6 +285,29 @@ fn api_err<E: std::fmt::Display>(e: E) -> K8sError {
     K8sError::Api(e.to_string())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ApiErrorDisposition {
+    NotFound,
+    Retryable,
+    Permanent,
+}
+
+fn classify_status(code: u16) -> ApiErrorDisposition {
+    match code {
+        404 => ApiErrorDisposition::NotFound,
+        429 | 500..=599 => ApiErrorDisposition::Retryable,
+        _ => ApiErrorDisposition::Permanent,
+    }
+}
+
+fn classify_kube_error(error: &kube::Error) -> ApiErrorDisposition {
+    match error {
+        kube::Error::Api(status) => classify_status(status.code),
+        kube::Error::HyperError(_) | kube::Error::Service(_) => ApiErrorDisposition::Retryable,
+        _ => ApiErrorDisposition::Permanent,
+    }
+}
+
 fn now_rfc3339() -> String {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
@@ -320,9 +321,14 @@ mod tests {
     use crate::shared::SharedCluster;
 
     #[tokio::test]
-    async fn backend_delegates_kinds_to_shared() {
+    async fn backend_constructor_reuses_supplied_cluster_and_shared_state() {
         let shared = SharedCluster::for_test();
-        let backend = Backend::from_parts_for_test(ClusterAccess::for_test(), shared.clone());
-        assert_eq!(backend.kinds().len(), shared.kinds().len());
+        let cluster = ClusterAccess::for_test();
+        let backend = Backend::from_parts_for_test(cluster.clone(), shared.clone());
+        assert!(Arc::ptr_eq(&backend.cluster, &cluster));
+        assert!(Arc::ptr_eq(&backend.shared, &shared));
+        assert!(backend.overview_cache.read().await.is_none());
+        assert!(backend.can_cache.read().await.is_empty());
+        assert!(backend.log_seen.read().await.is_empty());
     }
 }

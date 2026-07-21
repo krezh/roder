@@ -45,35 +45,30 @@ fn replica_cells(desired: i64, ready: i64, available: i64) -> (Vec<String>, RowS
 pub(crate) fn job_cells(data: &Value) -> (Vec<String>, RowStatus) {
     let succeeded = int_at(data, &["status", "succeeded"]).unwrap_or(0);
     let desired = int_at(data, &["spec", "completions"]);
-    let failed = int_at(data, &["status", "failed"]).unwrap_or(0);
-    let (completions_str, status) = match desired {
-        Some(d) => {
-            let s = if succeeded >= d {
-                RowStatus::Ok
-            } else if failed > 0 {
-                RowStatus::Error
-            } else {
-                RowStatus::Pending
-            };
-            (format!("{succeeded}/{d}"), s)
-        }
-        // Work-queue job: spec.completions absent means "done when any pod succeeds".
-        None => {
-            let s = if succeeded > 0 {
-                RowStatus::Ok
-            } else if failed > 0 {
-                RowStatus::Error
-            } else {
-                RowStatus::Pending
-            };
-            (format!("{succeeded}"), s)
-        }
+    let condition_true = |kind: &str| {
+        data.get("status")
+            .and_then(|status| status.get("conditions"))
+            .and_then(Value::as_array)
+            .is_some_and(|conditions| {
+                conditions.iter().any(|condition| {
+                    condition.get("type").and_then(Value::as_str) == Some(kind)
+                        && condition.get("status").and_then(Value::as_str) == Some("True")
+                })
+            })
     };
-    let phase = if matches!(status, RowStatus::Ok) {
-        "Complete"
+    let complete = condition_true("Complete");
+    let failed = condition_true("Failed");
+    let (status, phase) = if complete {
+        (RowStatus::Ok, "Complete")
+    } else if failed {
+        (RowStatus::Error, "Failed")
     } else {
-        "Running"
+        (RowStatus::Pending, "Running")
     };
+    let completions_str = desired.map_or_else(
+        || succeeded.to_string(),
+        |desired| format!("{succeeded}/{desired}"),
+    );
     (vec![completions_str, phase.into()], status)
 }
 
@@ -108,7 +103,13 @@ mod tests {
 
     #[test]
     fn job_fixed_completions_done() {
-        let data = json!({"spec": {"completions": 3}, "status": {"succeeded": 3}});
+        let data = json!({
+            "spec": {"completions": 3},
+            "status": {
+                "succeeded": 3,
+                "conditions": [{"type": "Complete", "status": "True"}]
+            }
+        });
         let (cells, status) = job_cells(&data);
         assert_eq!(cells[0], "3/3");
         assert_eq!(cells[1], "Complete");
@@ -117,10 +118,26 @@ mod tests {
 
     #[test]
     fn job_fixed_completions_failed() {
-        let data = json!({"spec": {"completions": 3}, "status": {"succeeded": 1, "failed": 2}});
+        let data = json!({
+            "spec": {"completions": 3},
+            "status": {
+                "succeeded": 1,
+                "failed": 2,
+                "conditions": [{"type": "Failed", "status": "True"}]
+            }
+        });
         let (cells, status) = job_cells(&data);
         assert_eq!(cells[0], "1/3");
+        assert_eq!(cells[1], "Failed");
         assert_eq!(status, RowStatus::Error);
+    }
+
+    #[test]
+    fn job_failed_pod_count_remains_retrying() {
+        let data = json!({"spec": {"completions": 3}, "status": {"failed": 2}});
+        let (cells, status) = job_cells(&data);
+        assert_eq!(cells[1], "Running");
+        assert_eq!(status, RowStatus::Pending);
     }
 
     #[test]
@@ -135,7 +152,13 @@ mod tests {
 
     #[test]
     fn job_work_queue_done() {
-        let data = json!({"spec": {}, "status": {"succeeded": 1}});
+        let data = json!({
+            "spec": {},
+            "status": {
+                "succeeded": 1,
+                "conditions": [{"type": "Complete", "status": "True"}]
+            }
+        });
         let (cells, status) = job_cells(&data);
         assert_eq!(cells[0], "1");
         assert_eq!(cells[1], "Complete");
@@ -144,9 +167,17 @@ mod tests {
 
     #[test]
     fn job_work_queue_failed() {
-        let data = json!({"spec": {}, "status": {"succeeded": 0, "failed": 1}});
+        let data = json!({
+            "spec": {},
+            "status": {
+                "succeeded": 0,
+                "failed": 1,
+                "conditions": [{"type": "Failed", "status": "True"}]
+            }
+        });
         let (cells, status) = job_cells(&data);
         assert_eq!(cells[0], "0");
+        assert_eq!(cells[1], "Failed");
         assert_eq!(status, RowStatus::Error);
     }
 

@@ -10,6 +10,8 @@ use serde_json::Value;
 
 use super::Backend;
 
+const MAX_HELM_RELEASE_BYTES: u64 = 32 * 1024 * 1024;
+
 /// One object referenced by a Helm release's stored manifest, before catalog
 /// resolution (see `Backend::resolve_child`).
 pub(super) struct ManifestObjectRef {
@@ -26,6 +28,7 @@ impl Backend {
     pub(super) async fn helm_release_children(
         &self,
         hr: &Value,
+        semaphore: &tokio::sync::Semaphore,
     ) -> Result<Vec<ManifestObjectRef>, String> {
         let history = hr
             .get("status")
@@ -52,8 +55,7 @@ impl Backend {
 
         let secret_name = format!("sh.helm.release.v1.{rel_name}.v{revision}");
         let api: Api<Secret> = Api::namespaced(self.client(), rel_ns);
-        let secret = api
-            .get(&secret_name)
+        let secret = super::tree::with_api_permit(semaphore, api.get(&secret_name))
             .await
             .map_err(|e| format!("could not read Helm storage secret {secret_name}: {e}"))?;
         let raw = secret
@@ -77,9 +79,7 @@ fn decode_helm_manifest(raw: &[u8]) -> Result<String, String> {
     let gz = base64::engine::general_purpose::STANDARD
         .decode(raw)
         .map_err(|e| format!("invalid Helm release secret encoding: {e}"))?;
-    let mut json_bytes = Vec::new();
-    std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&gz[..]), &mut json_bytes)
-        .map_err(|e| format!("failed to decompress Helm release secret: {e}"))?;
+    let json_bytes = decompress_helm_release(&gz, MAX_HELM_RELEASE_BYTES)?;
     let release: Value = serde_json::from_slice(&json_bytes)
         .map_err(|e| format!("invalid Helm release JSON: {e}"))?;
     release
@@ -87,6 +87,22 @@ fn decode_helm_manifest(raw: &[u8]) -> Result<String, String> {
         .and_then(|m| m.as_str())
         .map(str::to_string)
         .ok_or_else(|| "Helm release has no manifest".to_string())
+}
+
+fn decompress_helm_release(gz: &[u8], limit: u64) -> Result<Vec<u8>, String> {
+    use std::io::Read as _;
+
+    let mut json_bytes = Vec::new();
+    flate2::read::GzDecoder::new(gz)
+        .take(limit + 1)
+        .read_to_end(&mut json_bytes)
+        .map_err(|e| format!("failed to decompress Helm release secret: {e}"))?;
+    if json_bytes.len() as u64 > limit {
+        return Err(format!(
+            "decompressed Helm release exceeds {limit} byte limit"
+        ));
+    }
+    Ok(json_bytes)
 }
 
 /// Split Helm's multi-document `.manifest` YAML on `---` document separator
@@ -226,5 +242,16 @@ metadata:
     #[test]
     fn decode_helm_manifest_rejects_garbage() {
         assert!(decode_helm_manifest(b"not base64 at all!!").is_err());
+    }
+
+    #[test]
+    fn helm_release_decompression_is_bounded() {
+        use std::io::Write;
+
+        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        enc.write_all(&vec![b'x'; 1025]).unwrap();
+        let gz = enc.finish().unwrap();
+        let error = decompress_helm_release(&gz, 1024).unwrap_err();
+        assert!(error.contains("exceeds 1024 byte limit"));
     }
 }

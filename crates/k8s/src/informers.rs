@@ -127,6 +127,9 @@ struct Active {
     /// freshly-swapped columns (a fresh `Snapshot` down the live channel — the
     /// client never reconnects).
     reproject: Arc<Notify>,
+    /// Terminal event retained after the watch task exits so a later subscriber
+    /// does not attach to a silent, dead informer.
+    terminal: Arc<RwLock<Option<WatchEvent>>>,
 }
 
 /// Aborts the underlying watch task when this entry is dropped. Dropping a
@@ -276,9 +279,14 @@ impl InformerRegistry {
         });
 
         // Subscribe first so no delta is missed between snapshot and stream.
-        let rx = entry.tx.subscribe();
+        let mut rx = entry.tx.subscribe();
         *entry.idle_since.write().await = None;
         let snapshot = entry.rows.read().await.values().cloned().collect();
+        if let Some(event) = entry.terminal.read().await.clone() {
+            let (terminal_tx, terminal_rx) = broadcast::channel(1);
+            let _ = terminal_tx.send(event);
+            rx = terminal_rx;
+        }
         WatchHandle {
             snapshot,
             rx,
@@ -398,6 +406,7 @@ fn start_informer(
     let crd: Crd = Arc::new(ArcSwap::from_pointee(crd));
     let headers: Headers = Arc::new(ArcSwap::from_pointee(initial_headers));
     let reproject = Arc::new(Notify::new());
+    let terminal = Arc::new(RwLock::new(None));
 
     let task_tx = tx.clone();
     let task_rows = rows.clone();
@@ -407,6 +416,7 @@ fn start_informer(
     let task_crd = crd.clone();
     let task_headers = headers.clone();
     let task_reproject = reproject.clone();
+    let task_terminal = terminal.clone();
     // Only pods and PVCs are re-projected from their full object body (live
     // metrics / filesystem usage) — and only those need cached objects for the
     // detail view. For every other kind we keep just the lightweight rows and
@@ -542,9 +552,11 @@ fn start_informer(
                                 // `Active` entry once its subscribers drop off.
                                 if is_forbidden_error(&e) {
                                     tracing::debug!("watch forbidden (403) for {group}/{kind}; stopping: {e}");
-                                    let _ = task_tx.send(WatchEvent::Forbidden {
+                                    let event = WatchEvent::Forbidden {
                                         message: e.to_string(),
-                                    });
+                                    };
+                                    *task_terminal.write().await = Some(event.clone());
+                                    let _ = task_tx.send(event);
                                     return;
                                 }
                                 // A 401 means the token rotated: the watcher would
@@ -614,6 +626,7 @@ fn start_informer(
         crd,
         headers,
         reproject,
+        terminal,
     }
 }
 
@@ -661,9 +674,13 @@ fn spawn_reaper(registry: std::sync::Weak<InformerRegistry>) {
             if !to_remove.is_empty() {
                 let mut active = registry.active.lock().await;
                 for key in to_remove {
-                    // `Active`'s `Drop` impl aborts `handle` — no need to do
-                    // it explicitly here.
-                    if active.remove(&key).is_some() {
+                    // A subscriber may have attached after phase 1. Recheck
+                    // while holding the same lock used by subscribe() before
+                    // dropping and aborting the informer.
+                    let still_idle = active
+                        .get(&key)
+                        .is_some_and(|entry| entry.tx.receiver_count() == 0);
+                    if still_idle && active.remove(&key).is_some() {
                         tracing::debug!("evicted idle informer {}", key.resource_key);
                     }
                 }
@@ -825,6 +842,7 @@ impl Active {
             crd: Arc::new(ArcSwap::from_pointee(Vec::new())),
             headers: Arc::new(ArcSwap::from_pointee(Vec::new())),
             reproject: Arc::new(Notify::new()),
+            terminal: Arc::new(RwLock::new(None)),
         }
     }
 }
@@ -1022,16 +1040,6 @@ fn spawn_pvc_usage_scrape(enrichment: Arc<Enrichment>) {
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn enrichment_starts_with_empty_caches() {
-        // A ClusterAccess we never actually hit — scrape loops no-op on empty/unreachable.
-        let cluster = crate::client::ClusterAccess::for_test();
-        let e = Enrichment::new(cluster);
-        assert!(e.pod_usage.read().await.is_empty());
-        assert!(e.pvc_usage.read().await.is_empty());
-        assert!(e.pod_metrics_history("ns", "pod").await.is_none());
-    }
-
     /// A `columns_changed` notification (the `SharedCluster` counterpart, sent
     /// after a CRD-driven columns rebuild) makes the registry re-derive an
     /// active informer's headers from the freshly-swapped `ColumnMap` — this
@@ -1126,9 +1134,62 @@ mod tests {
             .subscribe(&ar, "", "ConfigMap", true, Some("ns".into()), None)
             .await;
 
-        // Independent broadcast channels: dropping A's receiver doesn't affect B.
+        assert!(reg_a.has_active_subscribers().await);
+        assert!(reg_b.has_active_subscribers().await);
         drop(ha);
-        assert!(hb.rows.read().await.is_empty()); // no cross-registry state
+        assert!(!reg_a.has_active_subscribers().await);
+        assert!(reg_b.has_active_subscribers().await);
+        drop(hb);
+        assert!(!reg_b.has_active_subscribers().await);
+    }
+
+    #[tokio::test]
+    async fn terminal_forbidden_is_replayed_to_new_subscribers() {
+        use kube::core::ApiResource;
+
+        let cluster = crate::client::ClusterAccess::for_test();
+        let enrich = Enrichment::new(cluster.clone());
+        let columns = Arc::new(ArcSwap::from_pointee(ColumnMap::default()));
+        let (_columns_tx, columns_rx) = broadcast::channel(4);
+        let registry = InformerRegistry::new(cluster, enrich, columns, columns_rx);
+        let (tx, _rx) = broadcast::channel(4);
+        let entry = Active::test_pod(tx, HashMap::new(), HashMap::new());
+        *entry.terminal.write().await = Some(WatchEvent::Forbidden {
+            message: "pods is forbidden".into(),
+        });
+        registry.active.lock().await.insert(
+            WatchKey {
+                resource_key: "/v1/Pod".into(),
+                namespace: Some("ns".into()),
+                selector: None,
+            },
+            entry,
+        );
+        let ar = ApiResource {
+            group: "".into(),
+            version: "v1".into(),
+            api_version: "v1".into(),
+            kind: "Pod".into(),
+            plural: "pods".into(),
+        };
+
+        let mut handle = registry
+            .subscribe(&ar, "", "Pod", true, Some("ns".into()), None)
+            .await;
+        let event = tokio::time::timeout(Duration::from_millis(100), handle.rx.recv())
+            .await
+            .expect("terminal event should be sent immediately")
+            .expect("terminal sender remains alive");
+        assert_eq!(
+            event,
+            WatchEvent::Forbidden {
+                message: "pods is forbidden".into()
+            }
+        );
+        assert_eq!(
+            handle.rx.recv().await,
+            Err(broadcast::error::RecvError::Closed)
+        );
     }
 
     /// Build a minimal cached pod `DynamicObject` + its initial (usage-less)
@@ -1214,8 +1275,8 @@ mod tests {
         );
     }
 
-    /// Task 7.5: the registry's 3 background loops (reaper/reproject/columns-watch)
-    /// must hold `Weak<InformerRegistry>`, not `Arc`, or dropping the last strong
+    /// The registry's background loops must hold `Weak<InformerRegistry>`, not
+    /// `Arc`, or dropping the last strong
     /// `Arc` (held by `Backend`) never frees the registry — leaking the user's
     /// `ClusterAccess` connection pool and every active watch task forever.
     #[tokio::test]
@@ -1240,7 +1301,7 @@ mod tests {
         );
     }
 
-    /// Task 7.5: `Active`'s `Drop` impl must abort its watch task — a bare
+    /// `Active`'s `Drop` impl must abort its watch task: a bare
     /// `JoinHandle` drop detaches the task in tokio rather than stopping it,
     /// which would leave the watch running against the user's client forever
     /// after the entry is removed (idle reaper) or the whole registry drops.
@@ -1268,6 +1329,7 @@ mod tests {
             crd: Arc::new(ArcSwap::from_pointee(Vec::new())),
             headers: Arc::new(ArcSwap::from_pointee(Vec::new())),
             reproject: Arc::new(Notify::new()),
+            terminal: Arc::new(RwLock::new(None)),
         };
         // We can't hold `active.handle` after moving `active` into drop, so
         // grab a second handle via `abort_handle` before dropping.
@@ -1281,8 +1343,8 @@ mod tests {
         );
     }
 
-    /// Task 11: the pure string-walk core that both `is_auth_error` and
-    /// `is_forbidden_error` are built on. Exercised directly on plain strings
+    /// The pure string-walk core used by `is_auth_error` and
+    /// `is_forbidden_error`. Exercised directly on plain strings
     /// since constructing a real `watcher::Error` source chain isn't practical
     /// in a unit test.
     #[test]

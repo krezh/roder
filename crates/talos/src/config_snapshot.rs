@@ -137,6 +137,11 @@ fn sensitive_path(path: &str) -> bool {
         || key.contains("token")
         || key.contains("secret")
         || key.contains("password")
+        || key.contains("credential")
+        || key.contains("auth")
+        || key.contains("private")
+        || key == "psk"
+        || key.ends_with("psk")
         || key.contains("certificate")
         || key.ends_with("key")
         || key.ends_with("crt")
@@ -168,6 +173,40 @@ mod tests {
         ));
         assert_ne!(first.fingerprint, second.fingerprint);
         assert!(!format!("{first:?}").contains("secret-a"));
+    }
+
+    #[test]
+    fn config_snapshot_redacts_common_credential_names() {
+        let snapshot = config_snapshot(&serde_json::json!({
+            "machine": {
+                "network": {
+                    "credential": "credential-value",
+                    "auth": "auth-value",
+                    "wifi": { "psk": "psk-value" },
+                    "privateMaterial": "private-value"
+                }
+            }
+        }));
+        for path in [
+            "/machine/network/credential",
+            "/machine/network/auth",
+            "/machine/network/wifi/psk",
+            "/machine/network/privateMaterial",
+        ] {
+            assert!(matches!(
+                snapshot.fields.get(path),
+                Some(ConfigField::Sensitive(_))
+            ));
+        }
+        let debug = format!("{snapshot:?}");
+        for secret in [
+            "credential-value",
+            "auth-value",
+            "psk-value",
+            "private-value",
+        ] {
+            assert!(!debug.contains(secret));
+        }
     }
 
     #[test]

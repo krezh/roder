@@ -1,8 +1,7 @@
 //! The mobile replacement for the desktop's dense grid row: one card per
 //! resource. Tap opens detail (or toggles selection in Select mode);
-//! long-press opens the action sheet (mobile's equivalent of desktop's
-//! right-click context menu — see the "Long-press remap" decision in the
-//! mobile plan).
+//! long-press opens the action sheet, mobile's equivalent of the desktop
+//! context menu.
 
 use std::time::Duration;
 

@@ -1,10 +1,8 @@
 //! Server-side Kubernetes layer for roder.
 //!
-//! - M2: [`ClusterAccess`] — the token-passthrough `kube::Client` holder.
-//! - M3 (here): [`Backend`] — discovery catalog + shared-informer registry +
-//!   generic row projection + object detail. One watch per type → etcd-kind.
-//! - M4: metrics-server reads + cache-derived cluster summary.
-//! - M6: mutation executors (apply/edit/delete/scale/rollout, Flux, ESO).
+//! [`ClusterAccess`] owns the token-passthrough client, while [`Backend`]
+//! combines discovery, shared informers, row projection, metrics, object
+//! detail, and mutation executors.
 
 pub mod alertmanager;
 mod backend;

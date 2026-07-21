@@ -231,26 +231,7 @@ impl Backend {
             .await
             .map_err(api_err)?;
         let data = serde_json::to_value(&obj).map_err(api_err)?;
-        let selector = data
-            .get("spec")
-            .and_then(|s| s.get("selector"))
-            .and_then(|sel| sel.get("matchLabels"))
-            .and_then(|m| m.as_object())
-            .map(|m| {
-                m.iter()
-                    .filter_map(|(k, v)| v.as_str().map(|v| format!("{k}={v}")))
-                    .collect::<Vec<_>>()
-                    .join(",")
-            })
-            .unwrap_or_default();
-
-        // matchExpressions-only selectors (no matchLabels) yield an empty string,
-        // which kube treats as "no filter" and would list every pod in the namespace.
-        if selector.is_empty() {
-            return Err(K8sError::Api(
-                "workload uses a matchExpressions-only selector; per-workload log aggregation is not supported for this resource".into(),
-            ));
-        }
+        let selector = workload_label_selector(&data).map_err(K8sError::Api)?;
 
         let api: Api<Pod> = Api::namespaced(self.client(), ns);
         let pods = api
@@ -292,6 +273,84 @@ impl Backend {
         }
         Ok(Box::pin(futures::stream::select_all(streams)))
     }
+}
+
+fn workload_label_selector(data: &serde_json::Value) -> Result<String, String> {
+    let selector = data
+        .get("spec")
+        .and_then(|spec| spec.get("selector"))
+        .ok_or_else(|| "workload has no label selector".to_string())?;
+    let mut requirements = Vec::new();
+
+    if let Some(labels) = selector
+        .get("matchLabels")
+        .and_then(|value| value.as_object())
+    {
+        for (key, value) in labels {
+            let value = value
+                .as_str()
+                .ok_or_else(|| format!("workload selector label {key} is not a string"))?;
+            requirements.push(format!("{key}={value}"));
+        }
+    }
+
+    if let Some(expressions) = selector
+        .get("matchExpressions")
+        .and_then(|value| value.as_array())
+    {
+        for expression in expressions {
+            let key = expression
+                .get("key")
+                .and_then(|value| value.as_str())
+                .ok_or_else(|| "workload selector expression is missing key".to_string())?;
+            let operator = expression
+                .get("operator")
+                .and_then(|value| value.as_str())
+                .ok_or_else(|| {
+                    format!("workload selector expression for {key} is missing operator")
+                })?;
+            let values = expression
+                .get("values")
+                .and_then(|value| value.as_array())
+                .map(|values| {
+                    values
+                        .iter()
+                        .map(|value| {
+                            value.as_str().ok_or_else(|| {
+                                format!(
+                                    "workload selector expression for {key} has a non-string value"
+                                )
+                            })
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .transpose()?
+                .unwrap_or_default();
+            let requirement = match operator {
+                "In" | "NotIn" if values.is_empty() => {
+                    return Err(format!(
+                        "workload selector expression {operator} for {key} has no values"
+                    ));
+                }
+                "In" => format!("{key} in ({})", values.join(",")),
+                "NotIn" => format!("{key} notin ({})", values.join(",")),
+                "Exists" => key.to_string(),
+                "DoesNotExist" => format!("!{key}"),
+                other => {
+                    return Err(format!(
+                        "workload selector expression for {key} has unsupported operator {other}"
+                    ));
+                }
+            };
+            requirements.push(requirement);
+        }
+    }
+
+    requirements.sort();
+    if requirements.is_empty() {
+        return Err("workload label selector is empty".into());
+    }
+    Ok(requirements.join(","))
 }
 
 /// How to log a container given its current status.
@@ -353,4 +412,50 @@ fn attempt_signature(terminated: &serde_json::Value) -> String {
         .and_then(|v| v.as_str())
         .unwrap_or("");
     format!("{code}@{at}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::workload_label_selector;
+    use serde_json::json;
+
+    #[test]
+    fn workload_selector_includes_labels_and_expressions() {
+        let data = json!({
+            "spec": {"selector": {
+                "matchLabels": {"app": "api"},
+                "matchExpressions": [
+                    {"key": "tier", "operator": "In", "values": ["web", "worker"]},
+                    {"key": "deprecated", "operator": "DoesNotExist"},
+                    {"key": "track", "operator": "NotIn", "values": ["canary"]},
+                    {"key": "managed", "operator": "Exists"}
+                ]
+            }}
+        });
+        assert_eq!(
+            workload_label_selector(&data).unwrap(),
+            "!deprecated,app=api,managed,tier in (web,worker),track notin (canary)"
+        );
+    }
+
+    #[test]
+    fn match_expressions_only_selector_remains_scoped() {
+        let data = json!({
+            "spec": {"selector": {"matchExpressions": [
+                {"key": "app", "operator": "Exists"}
+            ]}}
+        });
+        assert_eq!(workload_label_selector(&data).unwrap(), "app");
+    }
+
+    #[test]
+    fn empty_or_malformed_selector_is_rejected() {
+        assert!(workload_label_selector(&json!({"spec": {"selector": {}}})).is_err());
+        assert!(workload_label_selector(&json!({
+            "spec": {"selector": {"matchExpressions": [
+                {"key": "app", "operator": "In", "values": []}
+            ]}}
+        }))
+        .is_err());
+    }
 }

@@ -36,6 +36,12 @@ pub(crate) struct TableSelected(pub(crate) StoredValue<Option<RwSignal<BTreeSet<
 #[derive(Clone, Copy)]
 pub(crate) struct TableRows(pub(crate) StoredValue<Option<RwSignal<HashMap<String, ResourceRow>>>>);
 
+/// Per-row action targets for tables where rows can have different kinds.
+#[derive(Clone, Copy)]
+pub(crate) struct TableTargets(
+    pub(crate) StoredValue<Option<RwSignal<HashMap<String, DetailTarget>>>>,
+);
+
 /// Which column the resource table is sorted by.
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum SortKey {

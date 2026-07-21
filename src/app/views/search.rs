@@ -5,30 +5,23 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use leptos::prelude::*;
-use roder_core::{ResourceKind, ResourceRow, RowStatus, Trend};
+use roder_core::{ResourceKind, RowStatus, Trend};
 
 use crate::app::components::table::{cmp_str, sortable_th, FlashTd};
 use crate::app::components::table_row::{NameCell, ResourceRow as ResourceRowView};
-use crate::app::events::{apply_event, fire_action};
+use crate::app::events::fire_action;
 use crate::app::hooks::{table_window, use_table_state, Coalescer};
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::overlays::toast::Toast;
+use crate::app::search_state::{self, MergedRow};
 use crate::app::state::{
     open_logs, ConnectionState, Connectivity, CtxMenu, DetailTarget, LogPods, LogTarget,
-    MultiKindSearch, OnlyProblems, ResourceFilter, SortKey, TableRows, TableSelected, Tick,
+    MultiKindSearch, OnlyProblems, ResourceFilter, SortKey, TableRows, TableSelected, TableTargets,
+    Tick,
 };
 #[cfg(target_arch = "wasm32")]
 use crate::app::util::history::history_back;
 use crate::data;
-
-/// A row paired with its resource kind for multi-kind results. The `kind` is
-/// wrapped in `Arc` so the SSE handler doesn't need to clone the kind on every
-/// event for every row.
-#[derive(Clone, PartialEq)]
-struct MergedRow {
-    kind: Arc<ResourceKind>,
-    row: ResourceRow,
-}
 
 /// Unified column schema for multi-kind results.
 #[derive(Clone, Debug, PartialEq)]
@@ -145,29 +138,46 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
     let toast = expect_context::<RwSignal<Option<Toast>>>();
 
     let t = use_table_state();
+    let action_targets = RwSignal::new(HashMap::<String, DetailTarget>::new());
 
     // Register selection + row map so the context menu can fire bulk actions in the search view.
     let sv_sel = expect_context::<TableSelected>().0;
     let sv_rows = expect_context::<TableRows>().0;
+    let sv_targets = expect_context::<TableTargets>().0;
     sv_sel.set_value(Some(t.selected));
     sv_rows.set_value(Some(t.rows));
+    sv_targets.set_value(Some(action_targets));
     on_cleanup(move || {
         sv_sel.set_value(None);
         sv_rows.set_value(None);
+        sv_targets.set_value(None);
     });
 
     // Merged rows: the parent map for the search view. Keyed by `{kind_key}/{uid}`
     // so the same uid from different kinds can't collide. Holds a `MergedRow`
     // (kind + row) so the row component can deref both at render time.
     let merged_rows: RwSignal<HashMap<String, MergedRow>> = RwSignal::new(Default::default());
-    // Mirror merged_rows into t.rows (ResourceRow projection) so the context menu's
-    // TableRows lookup finds namespace/name by uid for bulk right-click actions.
+    // Mirror merged rows into the context-menu projections.
     let rows_for_ctx = t.rows;
     Effect::new(move |_| {
         merged_rows.with(|m| {
             rows_for_ctx.set(
                 m.iter()
                     .map(|(k, mr)| (k.clone(), mr.row.clone()))
+                    .collect(),
+            );
+            action_targets.set(
+                m.iter()
+                    .map(|(key, mr)| {
+                        (
+                            key.clone(),
+                            DetailTarget {
+                                key: mr.kind.key.clone(),
+                                namespace: mr.row.namespace.clone(),
+                                name: mr.row.name.clone(),
+                            },
+                        )
+                    })
                     .collect(),
             );
         });
@@ -233,102 +243,28 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
 
         let conn = use_context::<ConnectionState>().map(|c| c.0);
         for kind in &kinds {
-            let kind_key = kind.key.clone();
             let url = data::watch_url(
-                &kind_key,
+                &kind.key,
                 query.namespaces.first().map(String::as_str),
                 query.selector.as_deref(),
             );
             let entering = t.entering;
             let removing = t.removing;
             let kind_arc = kind.clone();
-            // Per-kind row buffer; events are applied here, then mirrored to
-            // the parent `merged_rows` with the `{kind_key}/` prefix.
-            let kind_rows = RwSignal::new(HashMap::<String, ResourceRow>::new());
-            let prefix = format!("{}/", kind_key);
             let reconnect: RwSignal<u32> = RwSignal::new(0);
             Effect::new(move |_prev: Option<Option<data::SseHandle>>| {
                 reconnect.track();
                 let ka = kind_arc.clone();
                 let url = url.clone();
-                let kr = kind_rows;
                 let mr = merged_rows;
                 let ent = entering;
                 let rm = removing;
-                let pfx = prefix.clone();
                 let probe_url = url.clone();
                 // Coalesce this kind's SSE burst so the merged-set sort recomputes
                 // once per burst rather than once per delta (see `Coalescer`).
                 let coalescer = Coalescer::new(move |batch: Vec<roder_core::WatchEvent>| {
-                    use roder_core::WatchEvent::*;
                     for ev in batch {
-                        match ev {
-                            // Snapshot replaces the whole kind: mirror the full rebuild
-                            // (otherwise the per-kind buffer's safety-net timeouts for
-                            // deletes would orphan entries in the parent).
-                            Snapshot { columns, rows: r } => {
-                                apply_event(
-                                    kr,
-                                    ent,
-                                    rm,
-                                    None,
-                                    Snapshot {
-                                        columns,
-                                        rows: r.clone(),
-                                    },
-                                );
-                                mr.update(|m| {
-                                    m.retain(|k, _| !k.starts_with(&pfx));
-                                    for row in r {
-                                        let merged_key = format!("{}{}", pfx, row.uid);
-                                        m.insert(
-                                            merged_key,
-                                            MergedRow {
-                                                kind: ka.clone(),
-                                                row,
-                                            },
-                                        );
-                                    }
-                                });
-                            }
-                            // Applied upserts a single row — no full rebuild needed.
-                            Applied { row } => {
-                                apply_event(kr, ent, rm, None, Applied { row: row.clone() });
-                                let merged_key = format!("{}{}", pfx, row.uid);
-                                mr.update(|m| {
-                                    m.insert(
-                                        merged_key,
-                                        MergedRow {
-                                            kind: ka.clone(),
-                                            row,
-                                        },
-                                    );
-                                });
-                            }
-                            // Deleted removes a single row — the per-kind buffer's
-                            // `apply_event` already tags it in `removing`; mirror that
-                            // tagging for the parent's row.
-                            Deleted { uid } => {
-                                apply_event(kr, ent, rm, None, Deleted { uid: uid.clone() });
-                                let merged_key = format!("{}{}", pfx, uid);
-                                rm.update(|s| {
-                                    s.insert(merged_key);
-                                });
-                            }
-                            // The server has already stopped this kind's
-                            // informer; per-kind UI surfacing is a follow-up.
-                            Forbidden { message } => {
-                                apply_event(
-                                    kr,
-                                    ent,
-                                    rm,
-                                    None,
-                                    Forbidden {
-                                        message: message.clone(),
-                                    },
-                                );
-                            }
-                        }
+                        search_state::apply_event(mr, ent, rm, ka.clone(), ev);
                     }
                 });
                 data::subscribe_with_error(
@@ -512,13 +448,6 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
         }
     };
 
-    let on_unmount = move |uid: String| {
-        merged_rows.update(|m| {
-            m.remove(&uid);
-        });
-    };
-    let _ = on_unmount; // captured by the For row closures below
-
     view! {
         <div class="resource-view">
             <div class="view-head">
@@ -591,21 +520,16 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                                 namespace: init.as_ref().and_then(|mr| mr.row.namespace.clone()),
                                 name: init.as_ref().map(|mr| mr.row.name.clone()).unwrap_or_default(),
                             };
-                            // For the context menu, derive the "node" from the first kind's
-                            // Node column (only meaningful for pod kinds).
-                            let node_for_ctx = {
-                                let kinds = resolved_kinds.get();
-                                let node_col = kinds.first().and_then(|k| k.columns.iter().position(|c| c == "Node"));
-                                move || {
-                                    let node_col = node_col?;
-                                    merged.get().and_then(|mr| mr.row.cells.get(node_col).cloned())
-                                }
+                            let node_for_ctx = move || {
+                                let mr = merged.get()?;
+                                let node_col = mr.kind.columns.iter().position(|c| c == "Node")?;
+                                mr.row.cells.get(node_col).cloned()
                             };
                             let on_unmount = {
                                 let uid = uid.clone();
                                 move |u: String| {
                                     debug_assert_eq!(u, uid, "transitionend uid mismatch");
-                                    merged_rows.update(|m| { m.remove(&uid); });
+                                    search_state::finish_removal(merged_rows, removing, &uid);
                                 }
                             };
 

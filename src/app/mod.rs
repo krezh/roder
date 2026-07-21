@@ -14,6 +14,7 @@ mod hooks;
 mod logs;
 mod mobile;
 mod overlays;
+mod search_state;
 mod state;
 mod table_logic;
 mod util;
@@ -44,7 +45,8 @@ use state::{
     AccessReviewOpen, AlertsData, AlertsLastRefresh, AlertsOpen, Catalog, ConnectionState,
     Connectivity, CtxMenu, DrainOpen, DrainTarget, ExecOpen, ExecTarget, FilterFocus, LogPods,
     LogTarget, NavOpen, NsPaletteOpen, OnlyProblems, PaletteOpen, PodModalTarget, ResourceFilter,
-    ShortcutsOpen, TableRows, TableSelected, Tick, TreeOpen, WorkspaceConf, WorkspaceConfig,
+    ShortcutsOpen, TableRows, TableSelected, TableTargets, Tick, TreeOpen, WorkspaceConf,
+    WorkspaceConfig,
 };
 use views::resource::ResourceView;
 use views::search::SearchResultsView;
@@ -244,6 +246,7 @@ pub fn App() -> impl IntoView {
     provide_context(ConnectionState(connection));
     provide_context(TableSelected(StoredValue::new(None)));
     provide_context(TableRows(StoredValue::new(None)));
+    provide_context(TableTargets(StoredValue::new(None)));
 
     // Keep an end-to-end status alive independently of whichever view/SSE streams
     // happen to be open. Browser network events update immediately; the periodic

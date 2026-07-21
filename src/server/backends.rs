@@ -19,6 +19,12 @@ struct Entry {
     last_active: Instant,
 }
 
+#[derive(Clone)]
+pub struct ResolvedBackend {
+    pub backend: Arc<Backend>,
+    pub tokens: Tokens,
+}
+
 /// Maps an authenticated subject to their own `Arc<Backend>`, building it
 /// lazily on first use. Wired into `AppState.backends` and resolved by
 /// `require_auth` on every authenticated request.
@@ -102,11 +108,7 @@ impl BackendRegistry {
         self.evict_locked(subject).await;
     }
 
-    /// Read back a subject's current cached token set (post-`resolve`),
-    /// e.g. so `require_auth` can re-seal the possibly-refreshed/rotated
-    /// tokens into the session cookie without `resolve` itself needing to
-    /// return anything beyond the `Arc<Backend>` (Tasks 5/6 tests depend on
-    /// that signature).
+    /// Read back a subject's current cached token set.
     pub async fn resolved_tokens(&self, subject: &str) -> Option<Tokens> {
         self.map.read().await.get(subject).map(|e| e.tokens.clone())
     }
@@ -114,7 +116,6 @@ impl BackendRegistry {
     /// Drop all per-user backends (e.g. on shutdown), shedding their informers/watches.
     pub async fn clear(&self) {
         self.map.write().await.clear();
-        self.build_locks.lock().await.clear();
     }
 
     async fn subject_lock(&self, subject: &str) -> Arc<Mutex<()>> {
@@ -123,6 +124,17 @@ impl BackendRegistry {
             .entry(subject.to_string())
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone()
+    }
+
+    async fn cleanup_subject_lock(&self, subject: &str, lock: &Arc<Mutex<()>>) {
+        let mut locks = self.build_locks.lock().await;
+        if locks
+            .get(subject)
+            .is_some_and(|stored| Arc::ptr_eq(stored, lock))
+            && Arc::strong_count(lock) == 2
+        {
+            locks.remove(subject);
+        }
     }
 
     /// Evict a subject's cached entry, but only if no build/refresh is
@@ -142,13 +154,9 @@ impl BackendRegistry {
     /// semantics mean a missed eviction this pass has no correctness impact,
     /// only a slightly later cleanup.
     ///
-    /// Once the lock is acquired we also drop the subject's `build_locks`
-    /// entry (not just the `map` entry) so that map churns don't grow
-    /// `build_locks` unboundedly; a fresh lock is lazily recreated by
-    /// `subject_lock` next time this subject resolves.
     async fn evict_locked(&self, subject: &str) -> bool {
         let lock = self.build_locks.lock().await.get(subject).cloned();
-        let _guard = match &lock {
+        let guard = match &lock {
             Some(l) => match l.try_lock() {
                 Ok(guard) => Some(guard),
                 Err(_) => return false, // build/refresh in flight; skip this pass
@@ -156,76 +164,116 @@ impl BackendRegistry {
             None => None, // subject was never resolved; nothing to race
         };
         let removed = self.map.write().await.remove(subject).is_some();
-        self.build_locks.lock().await.remove(subject);
+        drop(guard);
+        if let Some(lock) = &lock {
+            self.cleanup_subject_lock(subject, lock).await;
+        }
         removed
     }
 
     /// Resolve the caller's own `Backend`, building it (single-flight per
     /// subject) and refreshing the token if it's near expiry. Records
     /// last-activity on every successful resolve.
-    pub async fn resolve(&self, tokens: &Tokens) -> Result<Arc<Backend>, ()> {
+    pub async fn resolve(&self, tokens: &Tokens) -> Result<ResolvedBackend, ()> {
         let subject = tokens.identity.subject.clone();
         if subject.is_empty() {
             return Err(());
         }
 
         // Fast path: warm, valid backend for this subject.
-        if let Some(b) = self.warm(&subject, tokens).await {
+        if let Some(b) = self.warm(&subject).await {
             return Ok(b);
         }
 
         // Single-flight build/refresh per subject.
         let lock = self.subject_lock(&subject).await;
-        let _guard = lock.lock().await;
-        if let Some(b) = self.warm(&subject, tokens).await {
-            return Ok(b);
+        let guard = lock.lock().await;
+        let result = if let Some(resolved) = self.warm(&subject).await {
+            Ok(resolved)
+        } else {
+            self.refresh_or_build(subject.clone(), tokens).await
+        };
+        drop(guard);
+        self.cleanup_subject_lock(&subject, &lock).await;
+        result
+    }
+
+    /// Resolve token values produced directly by a successful, verified OIDC
+    /// exchange. Unlike browser-cookie resolution, this may replace a warm
+    /// identity because the caller has just verified the ID token.
+    pub async fn resolve_login(&self, tokens: &Tokens) -> Result<ResolvedBackend, ()> {
+        let subject = tokens.identity.subject.clone();
+        if subject.is_empty() || tokens.id_token.is_empty() {
+            return Err(());
         }
 
-        let live = self.mint_tokens(tokens).await?; // refresh if id_token empty / near expiry
+        let lock = self.subject_lock(&subject).await;
+        let guard = lock.lock().await;
+        let result = self.replace_login(subject.clone(), tokens).await;
+        drop(guard);
+        self.cleanup_subject_lock(&subject, &lock).await;
+        result
+    }
 
-        // If an entry already exists for this subject (it was just stale/near
-        // expiry, not missing), hot-swap the refreshed token into the existing
-        // backend instead of rebuilding it from scratch.
+    async fn replace_login(&self, subject: String, tokens: &Tokens) -> Result<ResolvedBackend, ()> {
+        let mut map = self.map.write().await;
+        if let Some(entry) = map.get_mut(&subject) {
+            entry.backend.set_token(&tokens.id_token).map_err(|_| ())?;
+            entry.tokens = tokens.clone();
+            entry.last_active = Instant::now();
+            return Ok(ResolvedBackend {
+                backend: entry.backend.clone(),
+                tokens: entry.tokens.clone(),
+            });
+        }
+        drop(map);
+        let backend = self.build_backend(tokens).await?;
+        self.insert(subject, backend.clone(), tokens.clone()).await;
+        Ok(ResolvedBackend {
+            backend,
+            tokens: tokens.clone(),
+        })
+    }
+
+    async fn refresh_or_build(
+        &self,
+        subject: String,
+        tokens: &Tokens,
+    ) -> Result<ResolvedBackend, ()> {
+        let live = self.mint_tokens(tokens).await?;
         {
             let mut map = self.map.write().await;
             if let Some(entry) = map.get_mut(&subject) {
                 entry.backend.set_token(&live.id_token).map_err(|_| ())?;
                 entry.tokens = live;
                 entry.last_active = Instant::now();
-                return Ok(entry.backend.clone());
+                return Ok(ResolvedBackend {
+                    backend: entry.backend.clone(),
+                    tokens: entry.tokens.clone(),
+                });
             }
         }
 
-        let backend = self.build_backend(&live).await?; // Backend::connect_with_token
-        self.insert(subject, backend.clone(), live).await;
-        Ok(backend)
+        let backend = self.build_backend(&live).await?;
+        self.insert(subject, backend.clone(), live.clone()).await;
+        Ok(ResolvedBackend {
+            backend,
+            tokens: live,
+        })
     }
 
-    async fn warm(&self, subject: &str, cookie: &Tokens) -> Option<Arc<Backend>> {
+    async fn warm(&self, subject: &str) -> Option<ResolvedBackend> {
         let mut map = self.map.write().await;
         let e = map.get_mut(subject)?;
         // Only reuse for the same subject (guaranteed by key) and if not near expiry.
         if e.tokens.needs_refresh() || e.tokens.id_token.is_empty() {
             return None;
         }
-        // Adopt fresher identity/groups from the cookie if newer login changed
-        // them: a re-login can rotate group membership (e.g. after an RBAC/IdP
-        // change) while the cached entry's backend is still perfectly warm, so
-        // only the stored identity is stale, not the connection. `require_auth`
-        // re-seals `resolved_tokens(subject)` (this entry's `tokens`) back into
-        // the browser cookie on every request, so if we didn't adopt here a
-        // fresher cookie would be overwritten with the stale identity/groups it
-        // just carried in, silently reverting a permission change for up to the
-        // idle-eviction window.
-        e.tokens.identity = cookie.identity.clone();
-        // A request may carry a refresh token rotated by another replica. Adopt
-        // it rather than re-sealing this process's stale generation over the
-        // browser's newer cookie.
-        if cookie.refresh_token.is_some() && cookie.refresh_token != e.tokens.refresh_token {
-            e.tokens.refresh_token = cookie.refresh_token.clone();
-        }
         e.last_active = Instant::now();
-        Some(e.backend.clone())
+        Some(ResolvedBackend {
+            backend: e.backend.clone(),
+            tokens: e.tokens.clone(),
+        })
     }
 
     async fn insert(&self, subject: String, backend: Arc<Backend>, tokens: Tokens) {
@@ -424,9 +472,12 @@ mod tests {
         let a_again = reg.resolve(&a1).await.unwrap();
         let b = reg.resolve(&b1).await.unwrap();
 
-        assert!(Arc::ptr_eq(&a, &a_again), "same subject -> same backend");
         assert!(
-            !Arc::ptr_eq(&a, &b),
+            Arc::ptr_eq(&a.backend, &a_again.backend),
+            "same subject -> same backend"
+        );
+        assert!(
+            !Arc::ptr_eq(&a.backend, &b.backend),
             "distinct subjects -> distinct backends"
         );
         assert_eq!(reg.len().await, 2);
@@ -444,7 +495,7 @@ mod tests {
         let b2 = reg.resolve(&t).await.unwrap();
 
         assert!(
-            Arc::ptr_eq(&b, &b2),
+            Arc::ptr_eq(&b.backend, &b2.backend),
             "refresh reuses the same backend, only swaps the token"
         );
 
@@ -477,33 +528,23 @@ mod tests {
 
         // The surviving subject still resolves to the same cached backend.
         let a_after = reg.resolve(&a1).await.unwrap();
-        assert!(Arc::ptr_eq(&a_before, &a_after));
+        assert!(Arc::ptr_eq(&a_before.backend, &a_after.backend));
     }
 
-    // Carry-in finding #1 (Task 5 review): `evict()` must drop the subject's
-    // `build_locks` entry too, not just the `map` entry, or the lock map
-    // grows unboundedly as subjects churn.
     #[tokio::test]
-    async fn evict_also_drops_the_build_lock() {
+    async fn completed_resolve_cleans_unused_build_lock() {
         let shared = SharedCluster::for_test();
         let reg = BackendRegistry::new(shared, None, 100, Duration::from_secs(1200));
         let mut a1 = fake_tokens();
         a1.identity.subject = "alice".into();
 
         reg.resolve(&a1).await.unwrap();
-        assert!(reg.build_locks.lock().await.contains_key("alice"));
-
-        reg.evict("alice").await;
         assert!(
             !reg.build_locks.lock().await.contains_key("alice"),
-            "evicting a subject must also drop its build_locks entry, not just the map entry"
+            "unused lock entries should not accumulate"
         );
     }
 
-    // Carry-in finding #2 (Task 5 review): evicting a subject whose build
-    // lock is held by a concurrent in-flight `resolve` must not remove the
-    // entry out from under that build (which would otherwise silently
-    // resurrect it via the build's own `insert()` right after).
     #[tokio::test]
     async fn evict_skips_a_subject_with_an_in_flight_build() {
         let shared = SharedCluster::for_test();
@@ -517,6 +558,8 @@ mod tests {
         // mint+connect+insert sequence.
         let lock = reg.subject_lock("alice").await;
         let guard = lock.lock().await;
+        let same_lock = reg.subject_lock("alice").await;
+        assert!(Arc::ptr_eq(&lock, &same_lock));
 
         reg.evict("alice").await;
         assert!(
@@ -525,8 +568,11 @@ mod tests {
         );
 
         drop(guard);
+        drop(same_lock);
+        drop(lock);
         reg.evict("alice").await; // uncontended now — proceeds normally
         assert!(reg.get_backend("alice").await.is_none());
+        assert!(!reg.build_locks.lock().await.contains_key("alice"));
     }
 
     #[tokio::test]
@@ -582,40 +628,46 @@ mod tests {
         assert_eq!(stored.identity.subject, "alice");
     }
 
-    // Fix #2 (final whole-branch review): a warm resolve must adopt the
-    // cookie's identity/groups, not keep serving the entry's original ones.
-    // Without this, a re-login that changed group membership (e.g. a
-    // de-privileging RBAC/IdP change) would leave `require_auth` re-sealing
-    // the stale, more-privileged groups back into the browser cookie for the
-    // whole idle-eviction window, since the warm path never rebuilds the
-    // backend (only a cold connect would otherwise pick up fresh groups).
     #[tokio::test]
-    async fn warm_resolve_adopts_fresh_groups_from_the_cookie() {
+    async fn stale_cookie_groups_do_not_replace_a_warm_identity() {
         let shared = SharedCluster::for_test();
         let reg = BackendRegistry::new(shared, None, 100, Duration::from_secs(1200));
-        let mut t = fake_tokens();
-        t.identity.subject = "alice".into();
-        t.identity.groups = vec!["admins".into()];
+        let mut current = fake_tokens();
+        current.identity.subject = "alice".into();
+        current.identity.groups = vec!["viewers".into()];
 
-        let b_before = reg.resolve(&t).await.unwrap();
+        let before = reg.resolve_login(&current).await.unwrap();
 
-        // Simulate a re-login that changed group membership: same subject,
-        // still-valid token (so this hits the warm path), different groups.
-        let mut t2 = t.clone();
-        t2.identity.groups = vec!["viewers".into()];
-        t2.refresh_token = Some("rotated-by-peer".into());
-        let b_after = reg.resolve(&t2).await.unwrap();
+        let mut stale_cookie = current.clone();
+        stale_cookie.id_token.clear();
+        stale_cookie.access_token.clear();
+        stale_cookie.identity.groups = vec!["admins".into()];
+        stale_cookie.refresh_token = Some("stale-refresh-token".into());
+        let after = reg.resolve(&stale_cookie).await.unwrap();
 
         assert!(
-            Arc::ptr_eq(&b_before, &b_after),
-            "warm resolve must reuse the same backend, only refresh identity"
+            Arc::ptr_eq(&before.backend, &after.backend),
+            "warm resolve should reuse the backend"
         );
-        let stored = reg.resolved_tokens("alice").await.unwrap();
-        assert_eq!(
-            stored.identity.groups,
-            vec!["viewers".to_string()],
-            "warm resolve must adopt the cookie's fresh groups into the stored entry"
-        );
-        assert_eq!(stored.refresh_token.as_deref(), Some("rotated-by-peer"));
+        assert_eq!(after.tokens.identity.groups, vec!["viewers"]);
+        assert_eq!(after.tokens.refresh_token.as_deref(), Some("rt"));
+    }
+
+    #[tokio::test]
+    async fn verified_login_replaces_a_warm_identity() {
+        let shared = SharedCluster::for_test();
+        let reg = BackendRegistry::new(shared, None, 100, Duration::from_secs(1200));
+        let mut previous = fake_tokens();
+        previous.identity.subject = "alice".into();
+        previous.identity.groups = vec!["admins".into()];
+        reg.resolve_login(&previous).await.unwrap();
+
+        let mut login = previous.clone();
+        login.id_token = "new-verified-id-token".into();
+        login.identity.groups = vec!["viewers".into()];
+        let resolved = reg.resolve_login(&login).await.unwrap();
+
+        assert_eq!(resolved.tokens.identity.groups, vec!["viewers"]);
+        assert_eq!(resolved.tokens.id_token, "new-verified-id-token");
     }
 }

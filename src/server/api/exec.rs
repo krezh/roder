@@ -3,8 +3,10 @@
 //! page the exec overlay iframe loads.
 
 use std::sync::Arc;
+use std::time::Duration;
 
-use axum::extract::Query;
+use axum::extract::{Query, State};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use roder_k8s::Backend;
@@ -19,20 +21,31 @@ pub struct ExecQuery {
     node_shell: bool,
 }
 
-/// Injects a `nicolaka/netshoot` ephemeral container into a pod and waits for
-/// it to reach Running, then returns `{"container": "<name>"}`.
+const EXEC_JOIN_TIMEOUT: Duration = Duration::from_secs(10);
+
+#[derive(Deserialize)]
+pub struct DebugShellRequest {
+    namespace: String,
+    pod: String,
+}
+
+/// Injects the configured debug container into a pod and waits for it to reach
+/// Running, then returns `{"container": "<name>"}`.
 pub async fn debug_shell(
     Extension(b): Extension<Arc<Backend>>,
-    Query(q): Query<ExecQuery>,
+    Json(request): Json<DebugShellRequest>,
 ) -> Response {
-    match b.inject_debug_container(&q.namespace, &q.pod).await {
+    match b
+        .inject_debug_container(&request.namespace, &request.pod)
+        .await
+    {
         Ok(container) => Json(serde_json::json!({ "container": container })).into_response(),
-        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
 #[derive(Deserialize)]
-pub struct NodeShellQuery {
+pub struct NodeShellRequest {
     node: String,
 }
 
@@ -40,23 +53,48 @@ pub struct NodeShellQuery {
 /// Running, then returns `{"namespace": .., "pod": ..}` for use with `/api/exec`.
 pub async fn node_shell_create(
     Extension(b): Extension<Arc<Backend>>,
-    Query(q): Query<NodeShellQuery>,
+    Json(request): Json<NodeShellRequest>,
 ) -> Response {
-    match b.create_node_shell(&q.node).await {
+    match b.create_node_shell(&request.node).await {
         Ok((namespace, pod)) => {
             Json(serde_json::json!({ "namespace": namespace, "pod": pod })).into_response()
         }
-        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
 /// WebSocket endpoint that proxies stdin/stdout for an interactive pod shell.
 pub async fn exec_ws(
+    State(state): State<crate::server::AppState>,
     Extension(b): Extension<Arc<Backend>>,
+    headers: HeaderMap,
     Query(q): Query<ExecQuery>,
     ws: axum::extract::ws::WebSocketUpgrade,
 ) -> Response {
+    if !origin_allowed(&headers, &state.config.base_url) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
     ws.on_upgrade(move |socket| exec_session(socket, b, q))
+}
+
+fn origin_allowed(headers: &HeaderMap, base_url: &str) -> bool {
+    let Some(origin) = headers.get(header::ORIGIN) else {
+        return true;
+    };
+    let Ok(origin) = origin.to_str() else {
+        return false;
+    };
+    let (Ok(origin), Ok(base)) = (reqwest::Url::parse(origin), reqwest::Url::parse(base_url))
+    else {
+        return false;
+    };
+    origin.origin() == base.origin()
+}
+
+async fn cleanup_node_shell(b: &Backend, q: &ExecQuery) {
+    if q.node_shell {
+        let _ = b.delete_node_shell_pod(&q.namespace, &q.pod).await;
+    }
 }
 
 async fn exec_session(socket: axum::extract::ws::WebSocket, b: Arc<Backend>, q: ExecQuery) {
@@ -82,18 +120,18 @@ async fn exec_session(socket: axum::extract::ws::WebSocket, b: Arc<Backend>, q: 
         Err(e) => {
             let msg = format!("\r\n\x1b[31m[exec: {}]\x1b[0m\r\n", e);
             let _ = ws_sink.send(Message::Binary(msg.into_bytes().into())).await;
-            if q.node_shell {
-                let _ = b.delete_node_shell_pod(&q.namespace, &q.pod).await;
-            }
+            cleanup_node_shell(&b, &q).await;
             return;
         }
     };
 
     let mut resize_tx = attached.terminal_size();
     let Some(mut stdin) = attached.stdin() else {
+        cleanup_node_shell(&b, &q).await;
         return;
     };
     let Some(mut stdout) = attached.stdout() else {
+        cleanup_node_shell(&b, &q).await;
         return;
     };
 
@@ -153,13 +191,34 @@ async fn exec_session(socket: axum::extract::ws::WebSocket, b: Arc<Backend>, q: 
         _ = from_client => {}
     }
 
-    let _ = attached.join().await;
-    if q.node_shell {
-        let _ = b.delete_node_shell_pod(&q.namespace, &q.pod).await;
-    }
+    let _ = tokio::time::timeout(EXEC_JOIN_TIMEOUT, attached.join()).await;
+    cleanup_node_shell(&b, &q).await;
 }
 
 /// Serves the xterm.js terminal page loaded in the exec overlay iframe.
 pub async fn terminal_page() -> impl IntoResponse {
     axum::response::Html(include_str!("../terminal.html"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn websocket_origin_must_match_configured_base_url() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::ORIGIN, "https://roder.example.com".parse().unwrap());
+        assert!(origin_allowed(&headers, "https://roder.example.com/app"));
+
+        headers.insert(header::ORIGIN, "https://evil.example.com".parse().unwrap());
+        assert!(!origin_allowed(&headers, "https://roder.example.com"));
+    }
+
+    #[test]
+    fn websocket_origin_may_be_absent_for_non_browser_clients() {
+        assert!(origin_allowed(
+            &HeaderMap::new(),
+            "https://roder.example.com"
+        ));
+    }
 }

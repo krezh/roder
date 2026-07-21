@@ -5,13 +5,14 @@
 use std::sync::Arc;
 
 use axum::extract::{Query, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
+use roder_auth::Identity;
 use roder_k8s::Backend;
 
 use super::bad_gateway;
-use super::talos::{request_groups, talos_capabilities};
+use super::talos::talos_capabilities;
 use crate::server::AppState;
 
 /// Authenticated end-to-end connectivity check against the Kubernetes API.
@@ -38,11 +39,10 @@ pub struct AlertsQuery {
 
 pub async fn alerts(
     State(state): State<AppState>,
+    Extension(identity): Extension<Identity>,
     Query(query): Query<AlertsQuery>,
-    headers: HeaderMap,
 ) -> Response {
-    let groups = request_groups(&state, &headers).unwrap_or_default();
-    if !state.config.can_read_alerts(&groups) {
+    if !state.config.can_read_alerts(&identity.groups) {
         return StatusCode::FORBIDDEN.into_response();
     }
     let cache = state.alerts.read().await.as_ref().map(Arc::clone);
@@ -84,12 +84,13 @@ pub async fn namespaces(Extension(b): Extension<Arc<Backend>>) -> Response {
 }
 
 /// Optional server integrations available to the current deployment.
-pub async fn features(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let alertmanager = state.alerts.read().await.is_some()
-        && state
-            .config
-            .can_read_alerts(&request_groups(&state, &headers).unwrap_or_default());
-    let talos = talos_capabilities(&state, &headers);
+pub async fn features(
+    State(state): State<AppState>,
+    Extension(identity): Extension<Identity>,
+) -> Response {
+    let alertmanager =
+        state.alerts.read().await.is_some() && state.config.can_read_alerts(&identity.groups);
+    let talos = talos_capabilities(&state, &identity);
     Json(serde_json::json!({
         "talos": talos,
         "alertmanager": alertmanager,

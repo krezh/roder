@@ -372,12 +372,16 @@ pub(crate) fn log_level(line: &str) -> &'static str {
         }
     }
 
-    // JSON: only use JSON-path for lines that look like JSON objects to avoid
-    // accidentally matching `level=` inside a stringified JSON value.
+    // Parse JSON rather than matching its surface formatting: valid JSON allows
+    // whitespace around separators and escaped content can contain level-like text.
     if t.starts_with('{') {
-        for key in [r#""level":""#, r#""severity":""#, r#""lvl":""#] {
-            if let Some(pos) = t.find(key) {
-                if let Some(lvl) = level_word(&t[pos + key.len()..]) {
+        if let Ok(JsonValue::Object(object)) = serde_json::from_str::<JsonValue>(t) {
+            for key in ["level", "severity", "lvl"] {
+                if let Some(lvl) = object
+                    .get(key)
+                    .and_then(JsonValue::as_str)
+                    .and_then(level_word)
+                {
                     return lvl;
                 }
             }
@@ -700,6 +704,14 @@ mod tests {
         );
         // JSON without a level key → plain
         assert_eq!(log_level(r#"{"msg":"hello"}"#), "plain");
+    }
+
+    #[test]
+    fn log_level_json_accepts_valid_whitespace() {
+        assert_eq!(
+            log_level(r#"{ "message" : "degraded", "level" : "warning" }"#),
+            "warn"
+        );
     }
 
     #[test]

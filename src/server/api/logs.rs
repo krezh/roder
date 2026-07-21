@@ -107,22 +107,8 @@ mod tests {
     use super::*;
     use crate::server::handlers::fixtures::test_backend;
 
-    // Fix #1 (final whole-branch review): `metrics_history` reads from the
-    // shared SA-scraped metrics cache keyed by arbitrary namespace/name,
-    // bypassing the caller's own watch — so it must RBAC-gate on `get pods`
-    // in the request's namespace using the caller's own token, or a
-    // namespace-scoped user could read metrics for pods they can't `get`.
-    //
-    // `test_backend()`'s `SharedCluster::for_test()` has an empty catalog, so
-    // `Backend::can`'s own catalog lookup (`self.entry(key)`, before it ever
-    // reaches the SSAR call) fails and `can` short-circuits to `false` —
-    // never actually round-tripping a SelfSubjectAccessReview. That still
-    // proves the contract this test cares about (the handler 403s whenever
-    // `can` returns `false`, regardless of *why*), but neither the real
-    // SSAR-allow nor SSAR-deny network path is exercised here. Driving either
-    // would need a populated catalog plus a real/mocked apiserver returning a
-    // `SelfSubjectAccessReview` status, which this crate has no test seam for
-    // yet; see the review report for that coverage gap.
+    // The test backend has no catalog entry for pods, so its access check
+    // returns false without contacting an API server.
     #[tokio::test]
     async fn metrics_history_is_forbidden_without_pod_get_access() {
         let q = MetricsQuery {

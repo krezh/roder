@@ -11,6 +11,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
+use roder_auth::Identity;
 use roder_core::{
     ObjectDetail, TalosCapabilities, TalosConfigDiff, TalosConfigDifference, TalosConfigPeerDiff,
 };
@@ -39,27 +40,14 @@ pub struct TalosNodeQuery {
     node: String,
 }
 
-pub(crate) fn request_groups(state: &AppState, headers: &HeaderMap) -> Option<Vec<String>> {
-    if state.config.dev_mode {
-        return Some(Vec::new());
-    }
-    let key = state.config.session_key?;
-    let cookie =
-        crate::server::session::cookie_value(headers, crate::server::session::SESSION_COOKIE)?;
-    crate::server::session::open_session(&cookie, &key).map(|tokens| tokens.identity.groups)
-}
-
-pub(crate) fn talos_capabilities(state: &AppState, headers: &HeaderMap) -> TalosCapabilities {
+pub(crate) fn talos_capabilities(state: &AppState, identity: &Identity) -> TalosCapabilities {
     if state.talos.is_none() {
         return TalosCapabilities::default();
     }
-    let Some(groups) = request_groups(state, headers) else {
-        return TalosCapabilities::default();
-    };
-    let actions = state.config.can_operate_talos(&groups);
-    let config = state.config.can_read_talos_config(&groups);
+    let actions = state.config.can_operate_talos(&identity.groups);
+    let config = state.config.can_read_talos_config(&identity.groups);
     TalosCapabilities {
-        read: actions || config || state.config.can_read_talos(&groups),
+        read: actions || config || state.config.can_read_talos(&identity.groups),
         actions,
         config,
     }
@@ -94,7 +82,7 @@ fn is_control_plane(detail: &ObjectDetail) -> bool {
 pub async fn talos_node(
     State(state): State<AppState>,
     Extension(backend): Extension<Arc<Backend>>,
-    headers: HeaderMap,
+    Extension(identity): Extension<Identity>,
     Query(q): Query<TalosNodeQuery>,
 ) -> Response {
     if q.node.is_empty() {
@@ -103,7 +91,7 @@ pub async fn talos_node(
     let Some(talos) = state.talos.as_ref() else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let capabilities = talos_capabilities(&state, &headers);
+    let capabilities = talos_capabilities(&state, &identity);
     if !capabilities.read {
         return StatusCode::FORBIDDEN.into_response();
     }
@@ -134,13 +122,13 @@ pub async fn talos_node(
 pub async fn talos_config_diff(
     State(state): State<AppState>,
     Extension(backend): Extension<Arc<Backend>>,
-    headers: HeaderMap,
+    Extension(identity): Extension<Identity>,
     Query(q): Query<TalosNodeQuery>,
 ) -> Response {
     if q.node.is_empty() {
         return (StatusCode::BAD_REQUEST, "missing node").into_response();
     }
-    if !talos_capabilities(&state, &headers).config {
+    if !talos_capabilities(&state, &identity).config {
         return StatusCode::FORBIDDEN.into_response();
     }
     let Some(talos) = state.talos.as_ref() else {
@@ -232,7 +220,7 @@ fn config_display_value(value: Option<&roder_talos::ConfigField>) -> Option<Stri
 pub async fn talos_dmesg(
     State(state): State<AppState>,
     Extension(backend): Extension<Arc<Backend>>,
-    headers: HeaderMap,
+    Extension(identity): Extension<Identity>,
     Query(q): Query<TalosNodeQuery>,
 ) -> Response {
     if q.node.is_empty() {
@@ -241,7 +229,7 @@ pub async fn talos_dmesg(
     let Some(talos) = state.talos.as_ref() else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    if !talos_capabilities(&state, &headers).read {
+    if !talos_capabilities(&state, &identity).read {
         return StatusCode::FORBIDDEN.into_response();
     }
     if let Err(response) = visible_node(&backend, &q.node).await {
@@ -280,6 +268,7 @@ fn talos_lock_conflict() -> Response {
 pub(crate) async fn talos_mutation(
     state: &AppState,
     headers: &HeaderMap,
+    identity: &Identity,
     owner: &str,
     req: &ActionRequest,
     backend: Arc<Backend>,
@@ -294,7 +283,7 @@ pub(crate) async fn talos_mutation(
     ) {
         return None;
     }
-    if !talos_capabilities(state, headers).actions {
+    if !talos_capabilities(state, identity).actions {
         return Some(StatusCode::FORBIDDEN.into_response());
     }
     let Some(talos) = state.talos.as_ref() else {
@@ -319,7 +308,7 @@ pub(crate) async fn talos_mutation(
     };
     if power_action {
         if let Some(response) =
-            crate::server::ha::forward_action_from_target(state, headers, node, req).await
+            crate::server::ha::forward_action_from_target(state, headers, identity, node, req).await
         {
             return Some(response);
         }

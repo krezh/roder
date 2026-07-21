@@ -87,6 +87,33 @@ pub async fn fetch_json<T: DeserializeOwned>(_url: &str) -> Result<T, String> {
     Err("fetch is only available in the browser".to_string())
 }
 
+#[cfg(target_arch = "wasm32")]
+pub async fn post_json<T: DeserializeOwned>(
+    url: &str,
+    body: &serde_json::Value,
+) -> Result<T, String> {
+    use gloo_net::http::Request;
+    let resp = Request::post(url)
+        .json(body)
+        .map_err(|e| e.to_string())?
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.ok() {
+        redirect_to_login_if_unauthorized(resp.status());
+        return Err(resp.text().await.unwrap_or_else(|_| resp.status_text()));
+    }
+    resp.json::<T>().await.map_err(|e| e.to_string())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn post_json<T: DeserializeOwned>(
+    _url: &str,
+    _body: &serde_json::Value,
+) -> Result<T, String> {
+    Err("fetch is only available in the browser".to_string())
+}
+
 /// Probe `url` with a GET to extract a human-readable error (e.g. "401 Unauthorized").
 /// Used when an SSE stream closes unexpectedly — the `onerror` event carries no message.
 #[cfg(target_arch = "wasm32")]

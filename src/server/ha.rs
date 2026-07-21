@@ -1,6 +1,7 @@
 use axum::body::Body;
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
+use roder_auth::Identity;
 use roder_core::ActiveDrainJob;
 
 use super::api::action::ActionRequest;
@@ -47,6 +48,7 @@ impl HaState {
 pub(crate) async fn forward_action_from_target(
     state: &AppState,
     headers: &HeaderMap,
+    identity: &Identity,
     target: &str,
     request: &ActionRequest,
 ) -> Option<Response> {
@@ -80,13 +82,13 @@ pub(crate) async fn forward_action_from_target(
                 .into_response(),
         );
     };
-    let cookie = forwarding_cookie(state, headers).await;
+    let cookie = forwarding_cookie(state, identity).await;
     let mut forwarded = ha
         .http
         .post(format!("http://{}:8080/api/action", peer.ip))
         .header(INTERNAL_HEADER, "1")
         .json(request);
-    if let Some(auth) = forwarded_auth(state, headers).await {
+    if let Some(auth) = forwarded_auth(state, identity).await {
         forwarded = forwarded.header(FORWARDED_AUTH_HEADER, auth);
     }
     if let Some(cookie) = cookie {
@@ -104,7 +106,7 @@ pub(crate) async fn forward_action_from_target(
 
 pub(crate) async fn proxy_to_executor(
     state: &AppState,
-    headers: &HeaderMap,
+    identity: &Identity,
     executor: Option<&str>,
     method: reqwest::Method,
     path: &str,
@@ -120,12 +122,12 @@ pub(crate) async fn proxy_to_executor(
         Err(response) => return Some(response),
     };
     let mut request = ha.http.request(method, url).header(INTERNAL_HEADER, "1");
-    if let Some(cookie) = forwarding_cookie(state, headers).await {
+    if let Some(cookie) = forwarding_cookie(state, identity).await {
         request = request.header(header::COOKIE.as_str(), cookie);
     }
     if let Some(body) = body {
         request = request.json(body);
-        if let Some(auth) = forwarded_auth(state, headers).await {
+        if let Some(auth) = forwarded_auth(state, identity).await {
             request = request.header(FORWARDED_AUTH_HEADER, auth);
         }
     }
@@ -142,6 +144,7 @@ pub(crate) async fn proxy_to_executor(
 pub(crate) async fn active_jobs(
     state: &AppState,
     headers: &HeaderMap,
+    identity: &Identity,
 ) -> Result<Vec<ActiveDrainJob>, Response> {
     let Some(ha) = state.ha.as_ref() else {
         return Ok(Vec::new());
@@ -149,7 +152,7 @@ pub(crate) async fn active_jobs(
     if headers.contains_key(INTERNAL_HEADER) {
         return Ok(Vec::new());
     }
-    let cookie = forwarding_cookie(state, headers).await;
+    let cookie = forwarding_cookie(state, identity).await;
     let peers = ha.coordinator.pods().await.map_err(coordination_error)?;
     let mut active = Vec::new();
     for peer in peers.into_iter().filter(|peer| peer.name != ha.pod_name) {
@@ -207,31 +210,21 @@ fn coordination_error(error: impl std::fmt::Display) -> Response {
         .into_response()
 }
 
-async fn forwarding_cookie(state: &AppState, headers: &HeaderMap) -> Option<String> {
+async fn forwarding_cookie(state: &AppState, identity: &Identity) -> Option<String> {
     if state.config.dev_mode {
         return None;
     }
-    if let Some(caller) = super::api::request_caller(state, headers) {
-        if let (Some(tokens), Some(key)) = (
-            state.backends.resolved_tokens(&caller.owner).await,
-            state.config.session_key,
-        ) {
-            return Some(format!(
-                "{}={}",
-                super::session::SESSION_COOKIE,
-                super::session::seal_session(&tokens, &key)
-            ));
-        }
-    }
-    headers
-        .get(header::COOKIE)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_owned)
+    let tokens = state.backends.resolved_tokens(&identity.subject).await?;
+    let key = state.config.session_key?;
+    Some(format!(
+        "{}={}",
+        super::session::SESSION_COOKIE,
+        super::session::seal_session(&tokens, &key)
+    ))
 }
 
-async fn forwarded_auth(state: &AppState, headers: &HeaderMap) -> Option<String> {
-    let caller = super::api::request_caller(state, headers)?;
-    let tokens = state.backends.resolved_tokens(&caller.owner).await?;
+async fn forwarded_auth(state: &AppState, identity: &Identity) -> Option<String> {
+    let tokens = state.backends.resolved_tokens(&identity.subject).await?;
     let key = state.config.session_key?;
     Some(super::session::seal_forwarded_tokens(&tokens, &key))
 }

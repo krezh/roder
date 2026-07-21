@@ -14,6 +14,10 @@ image:
   # pipeline fills it with the published image's digest.
   digest: ""
 
+# Image used for ephemeral pod debugging and privileged node shells. It must
+# remain pinned by digest because node shells run with host-level access.
+debugImage: "docker.io/nicolaka/netshoot@sha256:b09d9b21381f47a79b3cbcb30da25266dc17186ea00ae65e99fdc51396f48e70"
+
 serviceAccount:
   create: true
   annotations: {}

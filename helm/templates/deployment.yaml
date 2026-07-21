@@ -78,6 +78,8 @@ spec:
               value: {{ .Values.backends.maxUserBackends | quote }}
             - name: RODER_BACKEND_IDLE_SECS
               value: {{ .Values.backends.backendIdleSecs | quote }}
+            - name: RODER_DEBUG_IMAGE
+              value: {{ .Values.debugImage | quote }}
             {{- with .Values.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

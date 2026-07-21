@@ -41,23 +41,6 @@
     targets = [ "wasm32-unknown-unknown" ];
   };
 
-  scripts = {
-    docker-run.exec = ''
-      TAG="''${2:-roder:dev}"
-      name="roder-docker-test"
-      docker rm -f "$name" >/dev/null 2>&1 || true
-      docker run --rm \
-        --name "$name" \
-        --network host \
-        --user 0:0 \
-        -e RODER_DEV_MODE=1 \
-        -e RUST_LOG=info \
-        -e KUBECONFIG=/tmp/kube/config \
-        -v "~/.kube/config:/tmp/kube/config:ro" \
-        "$TAG"
-    '';
-  };
-
   env.RODER_DEV_MODE = "1";
   env.RUST_LOG = "info";
   env.RODER_ALERTMANAGER_URL = "https://alertmanager.plexuz.xyz";

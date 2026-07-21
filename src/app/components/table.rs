@@ -172,19 +172,25 @@ pub(crate) fn ScaleControl<F>(run: F, #[prop(into)] current: Signal<Option<i32>>
 where
     F: Fn(&'static str, serde_json::Value) + Clone + 'static,
 {
-    let replicas = RwSignal::new(0i32);
-    // Pre-fill with the live spec.replicas once the object loads.
+    let replicas = RwSignal::new(None::<i32>);
     Effect::new(move |_| {
-        if let Some(n) = current.get() {
-            replicas.set(n);
-        }
+        replicas.set(current.get());
     });
     view! {
         <span class="scale">
             <input type="number" min="0" class="scale-input"
-                prop:value=move || replicas.get().to_string()
-                on:input=move |e| { if let Ok(n) = event_target_value(&e).parse::<i32>() { replicas.set(n); } } />
-            <button class="act" on:click=move |_| run("scale", serde_json::json!({ "replicas": replicas.get() }))>"Scale"</button>
+                disabled=move || current.get().is_none()
+                prop:value=move || replicas.get().map(|n| n.to_string()).unwrap_or_default()
+                on:input=move |e| replicas.set(event_target_value(&e).parse::<i32>().ok()) />
+            <button class="act"
+                disabled=move || current.get().is_none() || replicas.get().is_none()
+                on:click=move |_| {
+                    if current.get_untracked().is_some() {
+                        if let Some(replicas) = replicas.get_untracked() {
+                            run("scale", serde_json::json!({ "replicas": replicas }));
+                        }
+                    }
+                }>"Scale"</button>
         </span>
     }
 }

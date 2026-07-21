@@ -1,11 +1,6 @@
-//! Mobile's bottom action sheet — the touch equivalent of the desktop's
+//! Mobile's bottom action sheet: the touch equivalent of the desktop's
 //! cursor-anchored right-click context menu (`overlays/context_menu.rs`).
 //! Triggered by long-press on a `MobileRowCard` instead of `oncontextmenu`.
-//!
-//! The bulk-target-resolution and action business logic mirrors
-//! `context_menu.rs` line for line — it's duplicated rather than extracted
-//! because the two are too view-entangled to share cleanly, and the desktop
-//! file must stay untouched (see the mobile UI plan's Phase 3 notes).
 
 use leptos::prelude::*;
 use roder_core::{ResourceKind, RowStatus};
@@ -15,8 +10,9 @@ use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::overlays::toast::{show_toast, Toast, ToastKind};
 use crate::app::state::{
     open_logs, Catalog, CtxMenu, DetailTarget, ExecOpen, ExecTarget, LogPods, LogTarget, TableRows,
-    TableSelected,
+    TableSelected, TableTargets,
 };
+use crate::app::table_logic::{resolve_action_targets, targets_all};
 use crate::app::util::clipboard::copy_to_clipboard;
 use crate::app::util::format::parse_key;
 use crate::app::util::predicate::KindKind;
@@ -33,51 +29,66 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
     let exec_open = expect_context::<ExecOpen>().0;
     let table_selected = expect_context::<TableSelected>().0;
     let table_rows = expect_context::<TableRows>().0;
+    let table_targets = expect_context::<TableTargets>().0;
     let toast = expect_context::<RwSignal<Option<Toast>>>();
 
     let (snapshot, closing, do_close) = crate::app::overlays::use_option_overlay(ctx);
 
     view! {
         {move || snapshot.get().map(|m| {
-            let (group, kind) = parse_key(&m.target.key);
-            let kk = KindKind::new(&group, &kind);
-            let is_pod = kk.is_pod();
-            let is_workload = kk.is_workload();
-            let is_scalable = kk.is_scalable();
-            let is_flux = kk.is_flux();
-            let is_helmrelease = kk.is_helmrelease();
-            let has_source_ref = kk.has_source_ref();
-            let is_eso = kk.is_eso();
-            let is_cronjob = kk.is_cronjob();
-
             let rows_opt = table_rows.get_value();
-            let target_uids: Vec<String> = match (table_selected.get_value(), rows_opt) {
-                (Some(sel), Some(_)) => {
-                    let uids = sel.get_untracked();
-                    if uids.len() > 1 && uids.contains(&m.uid) {
-                        uids.into_iter().collect()
-                    } else {
-                        vec![m.uid.clone()]
-                    }
-                }
-                _ => vec![m.uid.clone()],
+            let selected = table_selected.get_value().map(|signal| signal.get_untracked());
+            let empty_rows = Default::default();
+            let empty_targets = Default::default();
+            let resolved = match (rows_opt, table_targets.get_value()) {
+                (Some(rows), Some(row_targets)) => rows.with_untracked(|rows| {
+                    row_targets.with_untracked(|row_targets| {
+                        resolve_action_targets(
+                            &m.uid,
+                            &m.target,
+                            selected.as_ref(),
+                            rows,
+                            row_targets,
+                        )
+                    })
+                }),
+                (Some(rows), None) => rows.with_untracked(|rows| {
+                    resolve_action_targets(
+                        &m.uid,
+                        &m.target,
+                        selected.as_ref(),
+                        rows,
+                        &empty_targets,
+                    )
+                }),
+                (None, Some(row_targets)) => row_targets.with_untracked(|row_targets| {
+                    resolve_action_targets(
+                        &m.uid,
+                        &m.target,
+                        selected.as_ref(),
+                        &empty_rows,
+                        row_targets,
+                    )
+                }),
+                (None, None) => resolve_action_targets(
+                    &m.uid,
+                    &m.target,
+                    selected.as_ref(),
+                    &empty_rows,
+                    &empty_targets,
+                ),
             };
-            let targets: Vec<DetailTarget> = match rows_opt {
-                Some(rows) => {
-                    let ts: Vec<DetailTarget> = rows.with_untracked(|rm| {
-                        target_uids.iter()
-                            .filter_map(|uid| rm.get(uid).map(|r| DetailTarget {
-                                key: m.target.key.clone(),
-                                namespace: r.namespace.clone(),
-                                name: r.name.clone(),
-                            }))
-                            .collect()
-                    });
-                    if ts.is_empty() { vec![m.target.clone()] } else { ts }
-                }
-                None => vec![m.target.clone()],
-            };
+            let target_uids = resolved.uids;
+            let targets = resolved.targets;
             let is_bulk = targets.len() > 1;
+            let is_pod = targets_all(&targets, |kind| kind.is_pod());
+            let is_workload = targets_all(&targets, |kind| kind.is_workload());
+            let is_scalable = targets_all(&targets, |kind| kind.is_scalable());
+            let is_flux = targets_all(&targets, |kind| kind.is_flux());
+            let is_helmrelease = targets_all(&targets, |kind| kind.is_helmrelease());
+            let has_source_ref = targets_all(&targets, |kind| kind.has_source_ref());
+            let is_eso = targets_all(&targets, |kind| kind.is_eso());
+            let is_cronjob = targets_all(&targets, |kind| kind.is_cronjob());
             let suspend_state: Option<bool> = rows_opt.and_then(|rows| {
                 rows.with_untracked(|rm| {
                     let mut states = target_uids.iter().filter_map(|uid| rm.get(uid)).map(|r| r.status == RowStatus::Warn);
@@ -89,13 +100,16 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
             let show_resume = suspend_state != Some(false);
 
             let open = { let t = m.target.clone(); move |_| { detail.set(Some(t.clone())); do_close(); } };
-            let has_logs = is_pod || is_workload || kk.is_job();
+            let has_logs = targets_all(&targets, |kind| {
+                kind.is_pod() || kind.is_workload() || kind.is_job()
+            });
             let logs = {
                 let ts = targets.clone();
-                let agg = !is_pod;
                 move |_| {
                     for t in &ts {
-                        open_logs(log_pods, LogTarget::from_detail(t, agg));
+                        let (group, kind) = parse_key(&t.key);
+                        let aggregate = !KindKind::new(&group, &kind).is_pod();
+                        open_logs(log_pods, LogTarget::from_detail(t, aggregate));
                     }
                     if let Some(sel) = table_selected.get_value() { sel.set(Default::default()); }
                     do_close();

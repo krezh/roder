@@ -37,10 +37,11 @@ pub struct ActionRequest {
 pub async fn action(
     State(state): State<AppState>,
     Extension(b): Extension<Arc<Backend>>,
+    Extension(identity): Extension<roder_auth::Identity>,
     headers: HeaderMap,
     Json(req): Json<ActionRequest>,
 ) -> Response {
-    let Some(caller) = request_caller(&state, &headers) else {
+    let Some(caller) = request_caller(&identity) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     // Audit every mutation with the acting identity.
@@ -57,7 +58,7 @@ pub async fn action(
     if req.action == "drain-cancel" {
         if let Some(response) = crate::server::ha::proxy_to_executor(
             &state,
-            &headers,
+            &identity,
             req.executor.as_deref(),
             reqwest::Method::POST,
             "/api/action",
@@ -89,7 +90,9 @@ pub async fn action(
         None
     };
 
-    if let Some(response) = talos_mutation(&state, &headers, &caller.owner, &req, b.clone()).await {
+    if let Some(response) =
+        talos_mutation(&state, &headers, &identity, &caller.owner, &req, b.clone()).await
+    {
         return response;
     }
 
@@ -117,7 +120,8 @@ pub async fn action(
         };
         let options = drain_options.expect("drain options validated above");
         if let Some(response) =
-            crate::server::ha::forward_action_from_target(&state, &headers, name, &req).await
+            crate::server::ha::forward_action_from_target(&state, &headers, &identity, name, &req)
+                .await
         {
             return response;
         }
@@ -170,7 +174,12 @@ pub async fn action(
                 };
                 b.evict_pod(ns, name).await
             }
-            "scale" => b.scale(key, ns, name, req.replicas.unwrap_or(0)).await,
+            "scale" => {
+                let Some(replicas) = req.replicas else {
+                    return (StatusCode::BAD_REQUEST, "missing replicas").into_response();
+                };
+                b.scale(key, ns, name, replicas).await
+            }
             "restart" => b.rollout_restart(key, ns, name).await,
             "flux-suspend" => b.flux_suspend(key, ns, name, true).await,
             "flux-resume" => b.flux_suspend(key, ns, name, false).await,
@@ -254,6 +263,7 @@ mod tests {
         let response = action(
             State(state.clone()),
             Extension(test_backend()),
+            Extension(owner.identity.clone()),
             sealed_cookie_header(&owner),
             Json(cancel),
         )
@@ -273,6 +283,7 @@ mod tests {
         let response = action(
             State(state),
             Extension(test_backend()),
+            Extension(foreign.identity.clone()),
             sealed_cookie_header(&foreign),
             Json(cancel),
         )
@@ -297,6 +308,7 @@ mod tests {
         let response = action(
             State(state),
             Extension(test_backend()),
+            Extension(owner.identity.clone()),
             sealed_cookie_header(&owner),
             Json(cancel),
         )
@@ -319,8 +331,29 @@ mod tests {
         let response = action(
             State(state),
             Extension(test_backend()),
+            Extension(tokens.identity.clone()),
             sealed_cookie_header(&tokens),
             Json(drain),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn scale_requires_replicas() {
+        let state = prod_state_without_provider();
+        let tokens = fake_tokens();
+        let mut scale = request("scale");
+        scale.key = Some("deployments.v1.apps".into());
+        scale.namespace = Some("default".into());
+        scale.name = Some("api".into());
+
+        let response = action(
+            State(state),
+            Extension(test_backend()),
+            Extension(tokens.identity.clone()),
+            sealed_cookie_header(&tokens),
+            Json(scale),
         )
         .await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);

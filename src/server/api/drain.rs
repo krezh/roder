@@ -11,8 +11,9 @@ use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::Json;
+use axum::{Extension, Json};
 use futures::{FutureExt, Stream};
+use roder_auth::Identity;
 use roder_core::{DrainEvent, DrainEventKind, DrainOptions};
 use roder_k8s::Backend;
 use serde::Deserialize;
@@ -304,15 +305,15 @@ fn live_events(
 /// `main.rs`'s session-gated `protected` router alongside `logs`/`watch`.
 pub async fn drain_progress(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Extension(identity): Extension<Identity>,
     Query(q): Query<DrainProgressQuery>,
 ) -> Response {
-    let Some(caller) = super::request_caller(&state, &headers) else {
+    let Some(caller) = super::request_caller(&identity) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     if let Some(response) = crate::server::ha::proxy_to_executor(
         &state,
-        &headers,
+        &identity,
         q.executor.as_deref(),
         reqwest::Method::GET,
         &format!(
@@ -356,12 +357,16 @@ pub async fn drain_progress(
 
 /// Return the newest unfinished drain owned by this session so a refreshed
 /// browser can reopen its progress window.
-pub async fn active_drain(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let Some(caller) = super::request_caller(&state, &headers) else {
+pub async fn active_drain(
+    State(state): State<AppState>,
+    Extension(identity): Extension<Identity>,
+    headers: HeaderMap,
+) -> Response {
+    let Some(caller) = super::request_caller(&identity) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let local = state.drain_jobs.active(&caller.owner);
-    let remote = match crate::server::ha::active_jobs(&state, &headers).await {
+    let remote = match crate::server::ha::active_jobs(&state, &headers, &identity).await {
         Ok(active) => active,
         Err(response) => return response,
     };
@@ -377,9 +382,7 @@ pub async fn active_drain(State(state): State<AppState>, headers: HeaderMap) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::handlers::fixtures::{
-        fake_tokens, prod_state_without_provider, sealed_cookie_header,
-    };
+    use crate::server::handlers::fixtures::{fake_tokens, prod_state_without_provider};
 
     #[test]
     fn is_terminal_matches_exactly_the_three_terminal_kinds() {
@@ -540,7 +543,7 @@ mod tests {
         foreign.identity.subject = "owner-b".into();
         let response = drain_progress(
             State(state.clone()),
-            sealed_cookie_header(&foreign),
+            Extension(foreign.identity.clone()),
             Query(DrainProgressQuery { id, executor: None }),
         )
         .await;
@@ -548,7 +551,7 @@ mod tests {
 
         let response = drain_progress(
             State(state),
-            sealed_cookie_header(&owner),
+            Extension(owner.identity.clone()),
             Query(DrainProgressQuery { id, executor: None }),
         )
         .await;

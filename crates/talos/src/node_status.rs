@@ -105,7 +105,7 @@ impl Backend {
                                 health_unknown: health.is_none_or(|h| h.unknown),
                                 last_change: health
                                     .and_then(|h| h.last_change.as_ref())
-                                    .map(timestamp),
+                                    .and_then(|value| timestamp(value).ok()),
                                 events: s
                                     .events
                                     .map(|events| {
@@ -115,7 +115,10 @@ impl Backend {
                                             .map(|event| TalosServiceEvent {
                                                 state: event.state,
                                                 message: event.msg,
-                                                timestamp: event.ts.as_ref().map(timestamp),
+                                                timestamp: event
+                                                    .ts
+                                                    .as_ref()
+                                                    .and_then(|value| timestamp(value).ok()),
                                             })
                                             .collect()
                                     })

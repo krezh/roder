@@ -6,10 +6,9 @@
 //! take it via an `Extension<Arc<Backend>>` extractor rather than reading a
 //! single shared backend off `AppState`.
 
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-
-use super::AppState;
+use roder_auth::Identity;
 
 pub(crate) mod action;
 mod drain;
@@ -35,23 +34,16 @@ pub(crate) struct RequestCaller {
     pub audit: String,
 }
 
-pub(crate) fn request_caller(state: &AppState, headers: &HeaderMap) -> Option<RequestCaller> {
-    if state.config.dev_mode {
-        return Some(RequestCaller {
-            owner: "dev".into(),
-            audit: "dev".into(),
-        });
-    }
-    let key = state.config.session_key?;
-    let cookie =
-        crate::server::session::cookie_value(headers, crate::server::session::SESSION_COOKIE)?;
-    let identity = crate::server::session::open_session(&cookie, &key)?.identity;
+pub(crate) fn request_caller(identity: &Identity) -> Option<RequestCaller> {
     if identity.subject.is_empty() {
         return None;
     }
     Some(RequestCaller {
         owner: identity.subject.clone(),
-        audit: identity.email.unwrap_or(identity.subject),
+        audit: identity
+            .email
+            .clone()
+            .unwrap_or_else(|| identity.subject.clone()),
     })
 }
 
@@ -68,39 +60,42 @@ fn ns_filter(ns: &Option<String>) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::handlers::fixtures::{
-        dev_state, fake_tokens, prod_state_without_provider, sealed_cookie_header,
-    };
+    use crate::server::handlers::fixtures::fake_tokens;
 
-    #[tokio::test]
-    async fn dev_caller_uses_dev_for_owner_and_audit() {
-        let caller = request_caller(&dev_state(), &HeaderMap::new()).unwrap();
+    #[test]
+    fn dev_caller_uses_dev_for_owner_and_audit() {
+        let identity = Identity {
+            subject: "dev".into(),
+            email: None,
+            name: Some("dev mode".into()),
+            groups: Vec::new(),
+        };
+        let caller = request_caller(&identity).unwrap();
         assert_eq!(caller.owner, "dev");
         assert_eq!(caller.audit, "dev");
     }
 
-    #[tokio::test]
-    async fn production_caller_uses_subject_for_owner_and_email_for_audit() {
-        let state = prod_state_without_provider();
+    #[test]
+    fn production_caller_uses_subject_for_owner_and_email_for_audit() {
         let mut tokens = fake_tokens();
         tokens.identity.subject = "stable-subject".into();
         tokens.identity.email = Some("person@example.com".into());
 
-        let caller = request_caller(&state, &sealed_cookie_header(&tokens)).unwrap();
+        let caller = request_caller(&tokens.identity).unwrap();
         assert_eq!(caller.owner, "stable-subject");
         assert_eq!(caller.audit, "person@example.com");
     }
 
-    #[tokio::test]
-    async fn production_caller_falls_back_to_subject_for_audit() {
-        let state = prod_state_without_provider();
+    #[test]
+    fn production_caller_falls_back_to_subject_for_audit() {
         let mut tokens = fake_tokens();
         tokens.identity.subject = "stable-subject".into();
         tokens.identity.email = None;
 
-        let caller = request_caller(&state, &sealed_cookie_header(&tokens)).unwrap();
+        let caller = request_caller(&tokens.identity).unwrap();
         assert_eq!(caller.owner, "stable-subject");
         assert_eq!(caller.audit, "stable-subject");
-        assert!(request_caller(&state, &HeaderMap::new()).is_none());
+        tokens.identity.subject.clear();
+        assert!(request_caller(&tokens.identity).is_none());
     }
 }

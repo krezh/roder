@@ -69,6 +69,8 @@ impl AmAlert {
 }
 
 const CACHE_TTL: Duration = Duration::from_secs(30);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 
 enum Transport {
     /// Direct HTTP — `RODER_ALERTMANAGER_URL` is a full `http(s)://` URL.
@@ -81,20 +83,27 @@ enum Transport {
 pub struct AlertsCache {
     base_url: String,
     transport: Transport,
-    cache: tokio::sync::Mutex<Option<(Vec<roder_core::FiringAlert>, Instant)>>,
+    cache: tokio::sync::RwLock<Option<(Vec<roder_core::FiringAlert>, Instant)>>,
+    refresh_lock: tokio::sync::Mutex<()>,
 }
 
 impl AlertsCache {
     pub fn new(url: String) -> Self {
         let transport = if url.starts_with("http://") || url.starts_with("https://") {
-            Transport::Direct(reqwest::Client::new())
+            Transport::Direct(
+                reqwest::Client::builder()
+                    .timeout(REQUEST_TIMEOUT)
+                    .build()
+                    .expect("static Alertmanager HTTP client configuration is valid"),
+            )
         } else {
             Transport::KubeProxy
         };
         Self {
             base_url: url,
             transport,
-            cache: tokio::sync::Mutex::new(None),
+            cache: tokio::sync::RwLock::new(None),
+            refresh_lock: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -116,47 +125,78 @@ impl AlertsCache {
         client: &kube::Client,
         refresh_requested_at: Option<Instant>,
     ) -> Result<Vec<roder_core::FiringAlert>, String> {
-        let mut guard = self.cache.lock().await;
+        if let Some(data) = self.cached(refresh_requested_at).await {
+            return Ok(data);
+        }
 
-        if let Some((ref data, ref ts)) = *guard {
-            let reusable = refresh_requested_at
-                .map(|requested_at| *ts >= requested_at)
-                .unwrap_or_else(|| ts.elapsed() < CACHE_TTL);
-            if reusable {
-                return Ok(data.clone());
-            }
+        // Serialize refreshes without retaining the cache lock across network I/O.
+        let _refresh = self.refresh_lock.lock().await;
+        if let Some(data) = self.cached(refresh_requested_at).await {
+            return Ok(data);
         }
 
         let url = format!("{}/api/v2/alerts", self.base_url);
         info!("alertmanager: fetching {url}");
 
         let body = match &self.transport {
-            Transport::Direct(http) => http
-                .get(&url)
-                .send()
-                .await
-                .map_err(|e| {
+            Transport::Direct(http) => {
+                let response = http.get(&url).send().await.map_err(|e| {
                     warn!("alertmanager: request failed: {e}");
                     format!("alertmanager request: {e}")
-                })?
-                .text()
-                .await
-                .map_err(|e| format!("alertmanager response: {e}"))?,
+                })?;
+                let mut response = response
+                    .error_for_status()
+                    .map_err(|e| format!("alertmanager response: {e}"))?;
+                let mut bytes = Vec::new();
+                while let Some(chunk) = response
+                    .chunk()
+                    .await
+                    .map_err(|e| format!("alertmanager response: {e}"))?
+                {
+                    if bytes.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
+                        return Err(format!(
+                            "alertmanager response exceeds {MAX_RESPONSE_BYTES} byte limit"
+                        ));
+                    }
+                    bytes.extend_from_slice(&chunk);
+                }
+                String::from_utf8(bytes)
+                    .map_err(|e| format!("alertmanager response is not UTF-8: {e}"))?
+            }
             Transport::KubeProxy => {
                 let req = http::Request::get(&url)
                     .body(Vec::new())
                     .map_err(|e| format!("alertmanager request build: {e}"))?;
-                client.request_text(req).await.map_err(|e| {
-                    warn!("alertmanager: proxy request failed: {e}");
-                    format!("alertmanager proxy: {e}")
-                })?
+                tokio::time::timeout(REQUEST_TIMEOUT, async {
+                    use futures::AsyncReadExt as _;
+
+                    let stream = client.request_stream(req).await.map_err(|e| {
+                        warn!("alertmanager: proxy request failed: {e}");
+                        format!("alertmanager proxy: {e}")
+                    })?;
+                    let mut bytes = Vec::new();
+                    stream
+                        .take((MAX_RESPONSE_BYTES + 1) as u64)
+                        .read_to_end(&mut bytes)
+                        .await
+                        .map_err(|e| format!("alertmanager proxy response: {e}"))?;
+                    if bytes.len() > MAX_RESPONSE_BYTES {
+                        return Err(format!(
+                            "alertmanager response exceeds {MAX_RESPONSE_BYTES} byte limit"
+                        ));
+                    }
+                    String::from_utf8(bytes)
+                        .map_err(|e| format!("alertmanager response is not UTF-8: {e}"))
+                })
+                .await
+                .map_err(|_| "alertmanager proxy request timed out".to_string())??
             }
         };
 
         let raw: Vec<AmAlert> = serde_json::from_str(&body).map_err(|e| {
             warn!(
                 "alertmanager: json parse failed: {e}\nbody: {}",
-                &body[..body.len().min(500)]
+                utf8_prefix(&body, 500)
             );
             format!("alertmanager json: {e}")
         })?;
@@ -171,7 +211,39 @@ impl AlertsCache {
             .map(AmAlert::into_firing)
             .collect();
 
-        *guard = Some((alerts.clone(), Instant::now()));
+        *self.cache.write().await = Some((alerts.clone(), Instant::now()));
         Ok(alerts)
+    }
+
+    async fn cached(
+        &self,
+        refresh_requested_at: Option<Instant>,
+    ) -> Option<Vec<roder_core::FiringAlert>> {
+        let guard = self.cache.read().await;
+        let (data, timestamp) = guard.as_ref()?;
+        let reusable = refresh_requested_at
+            .map(|requested_at| *timestamp >= requested_at)
+            .unwrap_or_else(|| timestamp.elapsed() < CACHE_TTL);
+        reusable.then(|| data.clone())
+    }
+}
+
+fn utf8_prefix(value: &str, max_bytes: usize) -> &str {
+    let mut end = value.len().min(max_bytes);
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    &value[..end]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::utf8_prefix;
+
+    #[test]
+    fn response_preview_truncates_at_utf8_boundary() {
+        let value = format!("{}é", "a".repeat(499));
+        assert_eq!(utf8_prefix(&value, 500), "a".repeat(499));
+        assert_eq!(utf8_prefix(&value, 501), value);
     }
 }

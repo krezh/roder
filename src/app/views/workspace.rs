@@ -81,9 +81,6 @@ pub(crate) fn WorkspaceView() -> impl IntoView {
                                 });
                             }
                             WatchEvent::Forbidden { message } => {
-                                // The server has already stopped this pane's
-                                // informer; surfacing this per-pane in the UI is
-                                // a follow-up. Log for now.
                                 leptos::logging::warn!("watch forbidden for pane {key}: {message}");
                             }
                         }

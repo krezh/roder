@@ -2,8 +2,8 @@
 //! layer: a single-kind stream (`watch`) and a multiplexed one merging
 //! several kinds over one connection (`watch_multi`, for a workspace of panes).
 
+use std::collections::HashSet;
 use std::convert::Infallible;
-
 use std::sync::Arc;
 
 use axum::extract::{Query, State};
@@ -88,6 +88,44 @@ pub struct MultiWatchQuery {
     panes: String,
 }
 
+const MAX_MULTI_WATCH_PANES: usize = 16;
+
+fn parse_pane_specs(panes: &str) -> Result<Vec<(String, Option<String>)>, &'static str> {
+    if panes.is_empty() {
+        return Err("no panes specified");
+    }
+
+    let mut seen = HashSet::new();
+    let mut specs = Vec::new();
+    for spec in panes.split(',') {
+        if spec.is_empty() || spec.trim() != spec {
+            return Err("malformed pane specification");
+        }
+        let mut parts = spec.split(':');
+        let key = parts.next().unwrap_or_default();
+        let namespace = parts.next();
+        if key.is_empty()
+            || parts.next().is_some()
+            || namespace.is_some_and(|value| value.trim() != value)
+        {
+            return Err("malformed pane specification");
+        }
+        let pane = (
+            key.to_string(),
+            namespace
+                .filter(|value| !value.is_empty())
+                .map(String::from),
+        );
+        if seen.insert(pane.clone()) {
+            specs.push(pane);
+            if specs.len() > MAX_MULTI_WATCH_PANES {
+                return Err("too many panes specified");
+            }
+        }
+    }
+    Ok(specs)
+}
+
 /// Multiplexed workspace watch: one SSE stream merging N per-kind informer
 /// streams, so all panes share a single browser connection.
 pub async fn watch_multi(
@@ -95,24 +133,10 @@ pub async fn watch_multi(
     Extension(b): Extension<Arc<Backend>>,
     Query(q): Query<MultiWatchQuery>,
 ) -> Response {
-    let pane_specs: Vec<(String, Option<String>)> = q
-        .panes
-        .split(',')
-        .filter(|s| !s.is_empty())
-        .filter_map(|s| {
-            let mut parts = s.splitn(2, ':');
-            let key = parts.next()?.to_string();
-            if key.is_empty() {
-                return None;
-            }
-            let ns = parts.next().filter(|n| !n.is_empty()).map(String::from);
-            Some((key, ns))
-        })
-        .collect();
-
-    if pane_specs.is_empty() {
-        return (StatusCode::BAD_REQUEST, "no panes specified").into_response();
-    }
+    let pane_specs = match parse_pane_specs(&q.panes) {
+        Ok(specs) => specs,
+        Err(error) => return (StatusCode::BAD_REQUEST, error).into_response(),
+    };
 
     type PaneStream =
         std::pin::Pin<Box<dyn futures::Stream<Item = Result<SseEvent, Infallible>> + Send>>;
@@ -193,5 +217,25 @@ mod tests {
         let text = String::from_utf8(body.to_vec()).unwrap();
         assert!(text.contains("event: version"), "got: {text}");
         assert!(text.contains("data: abc123"), "got: {text}");
+    }
+
+    #[test]
+    fn pane_specs_are_deduplicated_and_bounded() {
+        let specs =
+            parse_pane_specs("pods.v1.:default,pods.v1.:default,nodes.v1.:,nodes.v1.").unwrap();
+        assert_eq!(specs.len(), 2);
+
+        let too_many = (0..=MAX_MULTI_WATCH_PANES)
+            .map(|index| format!("kind-{index}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert_eq!(parse_pane_specs(&too_many), Err("too many panes specified"));
+    }
+
+    #[test]
+    fn malformed_pane_specs_are_rejected() {
+        for panes in ["", ",pods.v1.", "pods.v1.,", ":default", "a:b:c"] {
+            assert!(parse_pane_specs(panes).is_err(), "accepted {panes:?}");
+        }
     }
 }

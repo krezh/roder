@@ -4,8 +4,8 @@
 use axum::extract::{Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{AppendHeaders, IntoResponse, Redirect, Response};
-use axum::Json;
-use roder_auth::{AuthError, Identity};
+use axum::{Extension, Json};
+use roder_auth::{AuthError, Identity, Tokens};
 use serde::Deserialize;
 
 use super::super::session::{
@@ -54,6 +54,21 @@ pub struct CallbackParams {
     error_description: Option<String>,
 }
 
+fn callback_success_response(tokens: &Tokens, key: &[u8; 32], secure: bool) -> Response {
+    let sealed = seal_session(tokens, key);
+    (
+        AppendHeaders([
+            (
+                header::SET_COOKIE,
+                set_cookie(SESSION_COOKIE, &sealed, secure, 604_800),
+            ),
+            (header::SET_COOKIE, set_cookie(LOGIN_COOKIE, "", secure, 0)),
+        ]),
+        Redirect::to("/"),
+    )
+        .into_response()
+}
+
 /// OAuth callback: verify state, exchange the code, enforce groups, create a
 /// session, and establish the token-passthrough cluster client.
 pub async fn callback(
@@ -93,27 +108,14 @@ pub async fn callback(
                     // Establish (and validate cluster reachability for) this
                     // subject's own backend up front, so a hard connect failure
                     // is reported immediately rather than on the first API call.
-                    if state.backends.resolve(&tokens).await.is_err() {
+                    if state.backends.resolve_login(&tokens).await.is_err() {
                         return (
                             StatusCode::BAD_GATEWAY,
                             "connected to OIDC but failed to reach the cluster",
                         )
                             .into_response();
                     }
-                    let sealed = seal_session(&tokens, &key);
-
-                    let secure = state.config.secure_cookies();
-                    (
-                        AppendHeaders([
-                            (
-                                header::SET_COOKIE,
-                                set_cookie(SESSION_COOKIE, &sealed, secure, 604_800),
-                            ),
-                            (header::SET_COOKIE, set_cookie(LOGIN_COOKIE, "", secure, 0)),
-                        ]),
-                        Redirect::to("/"),
-                    )
-                        .into_response()
+                    callback_success_response(&tokens, &key, state.config.secure_cookies())
                 }
                 Err(AuthError::Forbidden) => (
                     StatusCode::FORBIDDEN,
@@ -150,125 +152,30 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Respon
     ([(header::SET_COOKIE, cookie)], Redirect::to(dest)).into_response()
 }
 
-/// Who am I — used by the UI to show the signed-in identity. `require_auth` has
-/// already validated/refreshed the session, so the identity comes straight from
-/// the sealed session cookie.
-pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if state.config.dev_mode {
-        return Json(Identity {
-            subject: "dev".to_string(),
-            email: None,
-            name: Some("dev mode".to_string()),
-            groups: vec![],
-        })
-        .into_response();
-    }
-
-    match (
-        state.config.session_key,
-        cookie_value(&headers, SESSION_COOKIE),
-    ) {
-        (Some(key), Some(cookie)) => match open_session(&cookie, &key) {
-            Some(tokens) => Json(tokens.identity).into_response(),
-            None => StatusCode::UNAUTHORIZED.into_response(),
-        },
-        _ => StatusCode::UNAUTHORIZED.into_response(),
-    }
+/// Who am I — used by the UI to show the identity resolved by `require_auth`.
+pub async fn me(Extension(identity): Extension<Identity>) -> Json<Identity> {
+    Json(identity)
 }
 
 #[cfg(test)]
 mod tests {
-    //! Tests for `health`, `login`, `callback`, `logout`, and `me`.
-    //!
-    //! What we can exercise without a real OIDC provider:
-    //! 1. The cookie-format contract (the regression we just fixed).
-    //! 2. Dev-mode paths (`provider: None`) for `login`, `callback`, `me`.
-    //! 3. `logout` (no provider needed).
-    //!
-    //! Out of scope: the actual OIDC code exchange, which needs a real IdP.
-
     use super::super::fixtures::*;
     use super::*;
-    use axum::http::header::SET_COOKIE;
-    use axum::http::HeaderValue;
     use std::sync::Arc;
-
-    // -------- THE cookie regression test --------
-    //
-    // The `Set-Cookie` header is the one HTTP header that MUST be appendable:
-    // a response setting both a session cookie and a login-clearing cookie has
-    // to carry two `Set-Cookie` lines. axum's `IntoResponseParts` impl for
-    // `[(K, V); N]` calls `headers.insert()` (overwrites duplicates), so a
-    // naive `[(SET_COOKIE, …), (SET_COOKIE, …)]` tuple silently drops the
-    // first cookie. `AppendHeaders` uses `headers.append()` and is the only
-    // correct way to set multiple Set-Cookie headers in axum. This test pins
-    // the exact response-building pattern the callback uses so a future
-    // refactor can't regress to the broken form.
 
     #[test]
     fn callback_success_response_emits_both_set_cookie_headers() {
-        let sid = "abc123def456";
-        let secure = true;
-
-        // Mirror the production success path's tuple exactly.
-        let response = (
-            AppendHeaders([
-                (SET_COOKIE, set_cookie(SESSION_COOKIE, sid, secure, 604_800)),
-                (SET_COOKIE, set_cookie(LOGIN_COOKIE, "", secure, 0)),
-            ]),
-            Redirect::to("/"),
-        )
-            .into_response();
+        let tokens = fake_tokens();
+        let response = callback_success_response(&tokens, &TEST_KEY, true);
 
         let cookies = collect_set_cookies(&response);
-        assert_eq!(
-            cookies.len(),
-            2,
-            "expected 2 Set-Cookie headers, got {}: {:?}",
-            cookies.len(),
-            cookies
-        );
+        assert_eq!(cookies.len(), 2, "got: {cookies:?}");
 
         let joined = cookies.join("\n");
-        assert!(
-            joined.contains(&format!("roder_session={sid}")),
-            "session cookie missing: {joined}"
-        );
-        assert!(
-            joined.contains("roder_login=;"),
-            "login-clearing cookie missing: {joined}"
-        );
-        assert!(
-            joined.contains("Max-Age=0"),
-            "login-clearing cookie must have Max-Age=0: {joined}"
-        );
-        assert!(
-            joined.contains("Max-Age=604800"),
-            "session cookie must have 1-week Max-Age: {joined}"
-        );
-    }
-
-    #[test]
-    fn array_form_of_two_set_cookies_only_keeps_last_documents_the_bug() {
-        // Documents the axum behavior the regression test protects against.
-        // If this test ever changes behavior, axum has changed and the
-        // production code is safe to revert to the array form.
-        let response: Response = (
-            [
-                (SET_COOKIE, "roder_session=abc; Max-Age=604800".to_string()),
-                (SET_COOKIE, "roder_login=; Max-Age=0".to_string()),
-            ],
-            Redirect::to("/"),
-        )
-            .into_response();
-
-        let cookies = collect_set_cookies(&response);
-        assert_eq!(
-            cookies.len(),
-            1,
-            "the array form drops the first Set-Cookie (this is the bug): {cookies:?}"
-        );
-        assert!(cookies[0].contains("roder_login=;"));
+        assert!(joined.contains("roder_session="), "got: {joined}");
+        assert!(joined.contains("roder_login=;"), "got: {joined}");
+        assert!(joined.contains("Max-Age=0"), "got: {joined}");
+        assert!(joined.contains("Max-Age=604800"), "got: {joined}");
     }
 
     // -------- health --------
@@ -381,46 +288,24 @@ mod tests {
 
     #[tokio::test]
     async fn me_dev_mode_returns_dev_identity() {
-        let state = dev_state();
-        let res = me(State(state), HeaderMap::new()).await;
-        assert_eq!(res.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(res.into_body(), 4096).await.unwrap();
-        let id: Identity = serde_json::from_slice(&body).unwrap();
+        let id = me(Extension(Identity {
+            subject: "dev".into(),
+            email: None,
+            name: Some("dev mode".into()),
+            groups: Vec::new(),
+        }))
+        .await
+        .0;
         assert_eq!(id.subject, "dev");
     }
 
     #[tokio::test]
-    async fn me_production_without_session_returns_401() {
-        let state = prod_state_without_provider();
-        let res = me(State(state), HeaderMap::new()).await;
-        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    #[tokio::test]
-    async fn me_production_with_unknown_session_returns_401() {
-        let state = prod_state_without_provider();
-        // A cookie that doesn't decrypt under our key (no live session either).
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::COOKIE,
-            HeaderValue::from_str(&format!("{SESSION_COOKIE}=nope")).unwrap(),
-        );
-        let res = me(State(state), headers).await;
-        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    #[tokio::test]
-    async fn me_production_with_valid_session_returns_identity() {
-        let state = prod_state_without_provider();
+    async fn me_returns_resolved_identity() {
         let mut tokens = fake_tokens();
         tokens.identity.subject = "user-42".into();
         tokens.identity.name = Some("User Forty-Two".into());
 
-        // No live session in memory: `me` must fall back to opening the cookie.
-        let res = me(State(state), sealed_cookie_header(&tokens)).await;
-        assert_eq!(res.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(res.into_body(), 4096).await.unwrap();
-        let id: Identity = serde_json::from_slice(&body).unwrap();
+        let id = me(Extension(tokens.identity)).await.0;
         assert_eq!(id.subject, "user-42");
         assert_eq!(id.name.as_deref(), Some("User Forty-Two"));
     }

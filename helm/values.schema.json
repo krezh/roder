@@ -3,6 +3,10 @@
   "type": "object",
   "properties": {
     "replicaCount": { "type": "integer", "minimum": 1 },
+    "debugImage": {
+      "type": "string",
+      "pattern": "^.+@sha256:[A-Fa-f0-9]{64}$"
+    },
     "talos": {
       "type": "object",
       "properties": {

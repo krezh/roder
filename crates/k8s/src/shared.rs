@@ -270,27 +270,45 @@ fn spawn_crd_watch_shared(shared: Arc<SharedCluster>) {
 mod tests {
     use super::*;
 
-    /// Compile-time assertion that the public surface is wired.
+    #[tokio::test]
+    async fn column_notifications_reach_each_shared_subscriber() {
+        let shared = SharedCluster::for_test();
+        let mut first = shared.subscribe_columns();
+        let mut second = shared.subscribe_columns();
+
+        shared.columns_changed.send(()).unwrap();
+        assert_eq!(first.recv().await, Ok(()));
+        assert_eq!(second.recv().await, Ok(()));
+    }
+
     #[test]
-    fn shared_cluster_type_exists() {
-        fn _assert(s: &SharedCluster) -> Vec<roder_core::ResourceKind> {
-            s.kinds()
-        }
-    }
+    fn catalog_data_indexes_entries_by_resource_key() {
+        let api_resource = kube::core::ApiResource {
+            group: "apps".into(),
+            version: "v1".into(),
+            api_version: "apps/v1".into(),
+            kind: "Deployment".into(),
+            plural: "deployments".into(),
+        };
+        let entry = CatalogEntry {
+            kind: roder_core::ResourceKind {
+                key: "apps/v1/Deployment".into(),
+                group: "apps".into(),
+                version: "v1".into(),
+                kind: "Deployment".into(),
+                plural: "deployments".into(),
+                namespaced: true,
+                category: roder_core::Category::Workloads,
+                columns: vec!["Ready".into()],
+            },
+            api_resource,
+        };
 
-    #[tokio::test]
-    async fn for_test_builds_an_empty_shared_cluster() {
-        let shared = SharedCluster::for_test();
-        assert!(shared.kinds().is_empty());
-        assert!(shared.entry("missing").is_err());
-        assert!(shared.entry_by_kind("GitRepository").is_err());
-    }
-
-    #[tokio::test]
-    async fn enrichment_and_columns_are_accessible() {
-        let shared = SharedCluster::for_test();
-        let enrich = shared.enrichment();
-        assert!(enrich.pod_usage.read().await.is_empty());
-        assert!(shared.columns().load().is_empty());
+        let catalog = CatalogData::new(vec![entry.clone()]);
+        assert_eq!(catalog.entries.len(), 1);
+        assert_eq!(
+            catalog.by_key["apps/v1/Deployment"].api_resource,
+            entry.api_resource
+        );
     }
 }

@@ -146,25 +146,7 @@ pub(crate) fn LogsView(
         let lvl_f = level_filter.get().to_lowercase();
         lines.with(|v| {
             v.iter()
-                .filter(|(_, line)| {
-                    let (pod, msg) = match line.split_once(" │ ") {
-                        Some((p, m)) => (Some(p), m),
-                        None => (None, line.as_str()),
-                    };
-                    // Level filter
-                    if !lvl_f.is_empty() && log_level(msg) != lvl_f.as_str() {
-                        return false;
-                    }
-                    // Text filter (search in pod name and message)
-                    if !f.is_empty() {
-                        let pod_match = pod.is_none_or(|p| p.to_lowercase().contains(&f));
-                        let msg_match = msg.to_lowercase().contains(&f);
-                        if !pod_match && !msg_match {
-                            return false;
-                        }
-                    }
-                    true
-                })
+                .filter(|(_, line)| log_line_matches(line, &f, &lvl_f))
                 .cloned()
                 .collect::<Vec<_>>()
         })
@@ -249,6 +231,19 @@ pub(crate) fn LogsView(
     }
 }
 
+fn log_line_matches(line: &str, text_filter_lower: &str, level_filter_lower: &str) -> bool {
+    let (pod, message) = match line.split_once(" │ ") {
+        Some((pod, message)) => (Some(pod), message),
+        None => (None, line),
+    };
+    if !level_filter_lower.is_empty() && log_level(message) != level_filter_lower {
+        return false;
+    }
+    text_filter_lower.is_empty()
+        || pod.is_some_and(|pod| pod.to_lowercase().contains(text_filter_lower))
+        || message.to_lowercase().contains(text_filter_lower)
+}
+
 /// Extract an ISO 8601 timestamp from the beginning of a log line.
 /// Returns `(Some(timestamp), remaining_content)` or `(None, original_line)`.
 fn extract_timestamp(line: &str) -> (Option<String>, String) {
@@ -301,7 +296,21 @@ fn extract_timestamp(line: &str) -> (Option<String>, String) {
 
 #[cfg(test)]
 mod tests {
-    use super::extract_timestamp;
+    use super::{extract_timestamp, log_line_matches};
+
+    #[test]
+    fn plain_line_requires_text_filter_to_match_message() {
+        assert!(!log_line_matches("server started", "missing", ""));
+        assert!(log_line_matches("server started", "started", ""));
+    }
+
+    #[test]
+    fn aggregate_line_can_match_pod_or_message_and_level() {
+        let line = "api-7c9 │ ERROR request failed";
+        assert!(log_line_matches(line, "api-7c9", "error"));
+        assert!(log_line_matches(line, "request", "error"));
+        assert!(!log_line_matches(line, "api-7c9", "info"));
+    }
 
     #[test]
     fn rfc3339_with_z() {

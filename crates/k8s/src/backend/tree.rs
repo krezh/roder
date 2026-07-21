@@ -64,11 +64,8 @@ impl Backend {
                 "resource tree is only available for Kustomization/HelmRelease".into(),
             ));
         }
-        // Bounds how many owner-node fetches (each a live apiserver GET, or a
-        // recursive fan-out of them) are in flight at once for this one tree
-        // resolution — it does NOT bound total work, just concurrency, so a
-        // wide tree can't burst dozens of simultaneous requests at the API
-        // server.
+        // Bounds live apiserver calls for this tree. Each permit is released
+        // immediately after one request, before recursive child expansion.
         let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(8));
         Ok(self
             .build_owner_node(
@@ -112,7 +109,7 @@ impl Backend {
             {
                 Some(o) => o,
                 None => match self.dyn_api(&key, ns.as_deref()) {
-                    Ok(api) => match api.get(&name).await {
+                    Ok(api) => match with_api_permit(&semaphore, api.get(&name)).await {
                         Ok(o) => o,
                         Err(e) => {
                             return owner_error_node(
@@ -162,7 +159,7 @@ impl Backend {
                     Err(e) => (Vec::new(), Some(e)),
                 }
             } else {
-                match self.helm_release_children(&data).await {
+                match self.helm_release_children(&data, &semaphore).await {
                     Ok(manifest_refs) => {
                         let refs = manifest_refs
                             .into_iter()
@@ -213,12 +210,6 @@ impl Backend {
             if is_owner_kind(&child.group, &child.kind) {
                 return match child.key {
                     Some(key) => {
-                        // Acquire a permit before issuing the network call(s)
-                        // this recursive step triggers; held for the duration
-                        // of the whole subtree fetch so the bound applies
-                        // cluster-wide to this one tree resolution, not just
-                        // to the immediate GET.
-                        let _permit = semaphore.acquire().await.expect("semaphore never closed");
                         self.build_owner_node(
                             OwnerRef {
                                 key,
@@ -323,6 +314,14 @@ impl Backend {
     }
 }
 
+pub(super) async fn with_api_permit<T>(
+    semaphore: &tokio::sync::Semaphore,
+    operation: impl std::future::Future<Output = T>,
+) -> T {
+    let _permit = semaphore.acquire().await.expect("semaphore never closed");
+    operation.await
+}
+
 fn owner_error_node(
     group: String,
     kind: String,
@@ -367,7 +366,7 @@ fn parse_inventory_id(id: &str) -> Option<(Option<String>, String, String, Strin
 
 #[cfg(test)]
 mod inventory_id_tests {
-    use super::parse_inventory_id;
+    use super::{parse_inventory_id, with_api_permit};
 
     #[test]
     fn namespaced_with_group() {
@@ -412,5 +411,17 @@ mod inventory_id_tests {
         assert!(parse_inventory_id("").is_none());
         assert!(parse_inventory_id("too_few_parts").is_none());
         assert!(parse_inventory_id("__too_short").is_none()); // 4 parts but empty name+kind
+    }
+
+    #[tokio::test]
+    async fn api_permit_is_released_after_each_operation() {
+        let semaphore = tokio::sync::Semaphore::new(1);
+        tokio::time::timeout(std::time::Duration::from_millis(100), async {
+            with_api_permit(&semaphore, async {}).await;
+            with_api_permit(&semaphore, async {}).await;
+        })
+        .await
+        .expect("sequential API operations must not retain a recursive permit");
+        assert_eq!(semaphore.available_permits(), 1);
     }
 }

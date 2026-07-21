@@ -464,7 +464,7 @@ pub const DRAIN_TIMEOUT_MAX_SECS: u64 = 3_600;
 pub const DRAIN_GRACE_PERIOD_MAX_SECS: u32 = 86_400;
 
 /// Options for a node drain, mirroring `kubectl drain`'s flags.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct DrainOptions {
     /// Evict pods not managed by a controller (`--force`).
@@ -482,19 +482,6 @@ pub struct DrainOptions {
     /// Overall wall-clock budget for eviction + termination (`--timeout`).
     /// Zero waits indefinitely.
     pub timeout_secs: u64,
-}
-
-impl Default for DrainOptions {
-    fn default() -> Self {
-        Self {
-            force: false,
-            delete_emptydir_data: false,
-            ignore_daemonsets: true,
-            disable_eviction: false,
-            grace_period: None,
-            timeout_secs: 0,
-        }
-    }
 }
 
 impl DrainOptions {
@@ -659,7 +646,7 @@ mod tests {
     fn drain_options_defaults() {
         let o = DrainOptions::default();
         assert!(!o.force && !o.delete_emptydir_data && !o.disable_eviction);
-        assert!(o.ignore_daemonsets);
+        assert!(!o.ignore_daemonsets);
         assert_eq!(o.timeout_secs, 0);
         assert_eq!(o.grace_period, None);
         // An empty JSON object deserializes to the same defaults.

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.32](https://github.com/krezh/roder/compare/0.1.31...0.1.32) (2026-07-21)
+
+
+### Performance Improvements
+
+* speed up release builds ([9c40f5f](https://github.com/krezh/roder/commit/9c40f5fd8360f607cbedb72a82e136aa25d1b985))
+
 ## [0.1.31](https://github.com/krezh/roder/compare/0.1.30...0.1.31) (2026-07-21)
 
 

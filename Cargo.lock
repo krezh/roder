@@ -3695,7 +3695,7 @@ dependencies = [
 
 [[package]]
 name = "roder"
-version = "0.1.30"
+version = "0.1.31"
 dependencies = [
  "aes-gcm",
  "axum",
@@ -3735,7 +3735,7 @@ dependencies = [
 
 [[package]]
 name = "roder-auth"
-version = "0.1.30"
+version = "0.1.31"
 dependencies = [
  "base64 0.22.1",
  "openidconnect",
@@ -3751,7 +3751,7 @@ dependencies = [
 
 [[package]]
 name = "roder-core"
-version = "0.1.30"
+version = "0.1.31"
 dependencies = [
  "serde",
  "serde_json",
@@ -3759,7 +3759,7 @@ dependencies = [
 
 [[package]]
 name = "roder-k8s"
-version = "0.1.30"
+version = "0.1.31"
 dependencies = [
  "arc-swap",
  "base64 0.22.1",
@@ -3783,7 +3783,7 @@ dependencies = [
 
 [[package]]
 name = "roder-talos"
-version = "0.1.30"
+version = "0.1.31"
 dependencies = [
  "async-stream",
  "base64 0.22.1",

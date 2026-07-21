@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.30](https://github.com/krezh/roder/compare/0.1.29...0.1.30) (2026-07-21)
+
+
+### Features
+
+* support safe multi-replica node operations ([f627d39](https://github.com/krezh/roder/commit/f627d390c590c647366f5dcccb34184b1194e8b2))
+
+
+### Bug Fixes
+
+* **cargo:** update rust crate tokio (1.53.0 ➔ 1.53.1) ([#103](https://github.com/krezh/roder/issues/103)) ([3a62962](https://github.com/krezh/roder/commit/3a6296211d785e1b0112b58ac49836a83a4f3c58))
+
+
+### Miscellaneous Chores
+
+* **cargo:** lock file maintenance cargo.lock ([#105](https://github.com/krezh/roder/issues/105)) ([c5e6973](https://github.com/krezh/roder/commit/c5e69730106e15ac8e00afced62420fd679eaa6b))
+
 ## [0.1.29](https://github.com/krezh/roder/compare/0.1.28...0.1.29) (2026-07-20)
 
 

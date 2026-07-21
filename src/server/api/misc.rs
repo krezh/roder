@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
@@ -22,14 +22,25 @@ pub async fn health(Extension(b): Extension<Arc<Backend>>) -> Response {
     }
 }
 
-/// Current firing alerts from Alertmanager, with 30-second in-process cache.
+/// Current firing alerts from Alertmanager, with a 30-second in-process cache
+/// unless an explicit refresh is requested.
 ///
 /// Fetched via the ServiceAccount client (not the caller's token): Alertmanager
 /// returns cluster-wide alerts unfiltered by k8s identity, and the cache is
 /// shared across every user on a 30s TTL, so per-user token passthrough was
 /// incoherent. Gated by `RODER_ALERTS_GROUPS` instead — see
 /// `ServerConfig::can_read_alerts`.
-pub async fn alerts(State(state): State<AppState>, headers: HeaderMap) -> Response {
+#[derive(Default, serde::Deserialize)]
+pub struct AlertsQuery {
+    #[serde(default)]
+    refresh: bool,
+}
+
+pub async fn alerts(
+    State(state): State<AppState>,
+    Query(query): Query<AlertsQuery>,
+    headers: HeaderMap,
+) -> Response {
     let groups = request_groups(&state, &headers).unwrap_or_default();
     if !state.config.can_read_alerts(&groups) {
         return StatusCode::FORBIDDEN.into_response();
@@ -38,7 +49,12 @@ pub async fn alerts(State(state): State<AppState>, headers: HeaderMap) -> Respon
     let Some(cache) = cache else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
-    match cache.get(&state.shared.sa_client()).await {
+    let result = if query.refresh {
+        cache.refresh(&state.shared.sa_client()).await
+    } else {
+        cache.get(&state.shared.sa_client()).await
+    };
+    match result {
         Ok(alerts) => Json(alerts).into_response(),
         Err(e) => {
             tracing::warn!("alerts: {e}");

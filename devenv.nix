@@ -60,6 +60,7 @@
 
   env.RODER_DEV_MODE = "1";
   env.RUST_LOG = "info";
+  env.RODER_ALERTMANAGER_URL = "https://alertmanager.plexuz.xyz";
 
   processes.dev.exec = "cargo leptos watch";
 

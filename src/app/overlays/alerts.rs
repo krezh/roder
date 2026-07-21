@@ -2,14 +2,42 @@ use leptos::prelude::*;
 use roder_core::FiringAlert;
 
 use super::use_bool_overlay;
-use crate::app::state::{AlertsData, AlertsOpen};
+use crate::app::state::{AlertsData, AlertsLastRefresh, AlertsOpen, Tick};
 
 #[component]
 pub(crate) fn AlertsPanel() -> impl IntoView {
     let open = expect_context::<AlertsOpen>().0;
     let data = expect_context::<AlertsData>().0;
+    let last_refresh = expect_context::<AlertsLastRefresh>().0;
+    let tick = expect_context::<Tick>().0;
     let (visible, closing, do_close) = use_bool_overlay(open);
     let show_silenced = RwSignal::new(false);
+    let refreshing = RwSignal::new(false);
+    let refresh_error = RwSignal::new(None::<String>);
+
+    let refresh = move |_| {
+        #[cfg(target_arch = "wasm32")]
+        {
+            if refreshing.get_untracked() {
+                return;
+            }
+            refreshing.set(true);
+            refresh_error.set(None);
+            leptos::task::spawn_local(async move {
+                match crate::app::fetch_alerts(true).await {
+                    Ok(alerts) => crate::app::update_alerts(data, last_refresh, alerts),
+                    Err(error) => {
+                        refresh_error.set(Some(error));
+                        set_timeout(
+                            move || refresh_error.set(None),
+                            std::time::Duration::from_secs(4),
+                        );
+                    }
+                }
+                refreshing.set(false);
+            });
+        }
+    };
 
     let sorted_alerts = Memo::new(move |_| {
         let all = data.get().unwrap_or_default();
@@ -32,13 +60,32 @@ pub(crate) fn AlertsPanel() -> impl IntoView {
             <div class="alerts-scrim" on:click=move |_| do_close()></div>
             <div class="alerts-panel" class:closing=move || closing.get()>
                 <div class="alerts-header">
-                    <span class="alerts-title">"Firing Alerts"</span>
+                    <div class="alerts-heading">
+                        <span class="alerts-title">"Firing Alerts"</span>
+                        <span
+                            class="alerts-refreshed"
+                            class:error=move || refresh_error.get().is_some()
+                            title=move || refresh_error.get().unwrap_or_default()
+                        >
+                            {move || {
+                                tick.track();
+                                refresh_status(last_refresh.get(), refresh_error.get().is_some())
+                            }}
+                        </span>
+                    </div>
                     <button
                         class="alerts-silence-toggle"
                         class:active=move || show_silenced.get()
                         on:click=move |_| show_silenced.update(|s| *s = !*s)
                     >
                         "Silenced"
+                    </button>
+                    <button
+                        class="alerts-refresh"
+                        disabled=move || refreshing.get()
+                        on:click=refresh
+                    >
+                        {move || if refreshing.get() { "Refreshing..." } else { "Refresh" }}
                     </button>
                     <button class="alerts-close" on:click=move |_| do_close()>"✕"</button>
                 </div>
@@ -56,6 +103,29 @@ pub(crate) fn AlertsPanel() -> impl IntoView {
                 </div>
             </div>
         </Show>
+    }
+}
+
+fn refresh_status(last_refresh_ms: Option<f64>, failed: bool) -> String {
+    if failed {
+        return "Refresh failed".to_string();
+    }
+    let Some(ms) = last_refresh_ms else {
+        return "Not refreshed yet".to_string();
+    };
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let elapsed_secs = ((js_sys::Date::now() - ms) / 1000.0).max(0.0) as u64;
+        return format!(
+            "Last refreshed {} ago",
+            roder_core::format_age_secs(elapsed_secs)
+        );
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = ms;
+        "Last refreshed".to_string()
     }
 }
 

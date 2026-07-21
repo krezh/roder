@@ -100,10 +100,29 @@ impl AlertsCache {
 
     /// Return the current alert list, refreshing if the cache is stale.
     pub async fn get(&self, client: &kube::Client) -> Result<Vec<roder_core::FiringAlert>, String> {
+        self.load(client, None).await
+    }
+
+    /// Fetch a fresh alert list, coalescing concurrent refresh requests.
+    pub async fn refresh(
+        &self,
+        client: &kube::Client,
+    ) -> Result<Vec<roder_core::FiringAlert>, String> {
+        self.load(client, Some(Instant::now())).await
+    }
+
+    async fn load(
+        &self,
+        client: &kube::Client,
+        refresh_requested_at: Option<Instant>,
+    ) -> Result<Vec<roder_core::FiringAlert>, String> {
         let mut guard = self.cache.lock().await;
 
         if let Some((ref data, ref ts)) = *guard {
-            if ts.elapsed() < CACHE_TTL {
+            let reusable = refresh_requested_at
+                .map(|requested_at| *ts >= requested_at)
+                .unwrap_or_else(|| ts.elapsed() < CACHE_TTL);
+            if reusable {
                 return Ok(data.clone());
             }
         }

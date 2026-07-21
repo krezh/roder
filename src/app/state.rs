@@ -119,6 +119,10 @@ pub(crate) struct AccessReviewOpen(pub(crate) RwSignal<bool>);
 #[derive(Clone, Copy)]
 pub(crate) struct AlertsData(pub(crate) RwSignal<Option<Vec<FiringAlert>>>);
 
+/// Browser time of the last successful alerts API response, in milliseconds.
+#[derive(Clone, Copy)]
+pub(crate) struct AlertsLastRefresh(pub(crate) RwSignal<Option<f64>>);
+
 /// `None` = SSE stream is live. `Some(msg)` = disconnected, with the HTTP status
 /// or network error that caused it (e.g. "401 Unauthorized", "Network error").
 #[derive(Clone, PartialEq, Eq)]

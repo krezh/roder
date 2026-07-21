@@ -41,10 +41,10 @@ use overlays::toast::{Toast, ToastView};
 use overlays::tree::ResourceTreeWindow;
 use overlays::AlertsPanel;
 use state::{
-    AccessReviewOpen, AlertsData, AlertsOpen, Catalog, ConnectionState, Connectivity, CtxMenu,
-    DrainOpen, DrainTarget, ExecOpen, ExecTarget, FilterFocus, LogPods, LogTarget, NavOpen,
-    NsPaletteOpen, OnlyProblems, PaletteOpen, PodModalTarget, ResourceFilter, ShortcutsOpen,
-    TableRows, TableSelected, Tick, TreeOpen, WorkspaceConf, WorkspaceConfig,
+    AccessReviewOpen, AlertsData, AlertsLastRefresh, AlertsOpen, Catalog, ConnectionState,
+    Connectivity, CtxMenu, DrainOpen, DrainTarget, ExecOpen, ExecTarget, FilterFocus, LogPods,
+    LogTarget, NavOpen, NsPaletteOpen, OnlyProblems, PaletteOpen, PodModalTarget, ResourceFilter,
+    ShortcutsOpen, TableRows, TableSelected, Tick, TreeOpen, WorkspaceConf, WorkspaceConfig,
 };
 use views::resource::ResourceView;
 use views::search::SearchResultsView;
@@ -75,6 +75,29 @@ fn asset_version() -> String {
     {
         String::new()
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn fetch_alerts(force_refresh: bool) -> Result<Vec<roder_core::FiringAlert>, String> {
+    let url = if force_refresh {
+        "/api/alerts?refresh=true"
+    } else {
+        "/api/alerts"
+    };
+    data::fetch_json(url).await
+}
+
+#[cfg(target_arch = "wasm32")]
+fn update_alerts(
+    data: RwSignal<Option<Vec<roder_core::FiringAlert>>>,
+    last_refresh: RwSignal<Option<f64>>,
+    alerts: Vec<roder_core::FiringAlert>,
+) {
+    if let Ok(json) = serde_json::to_string(&alerts) {
+        crate::data::storage_set("roder.alerts", &json);
+    }
+    data.set(Some(alerts));
+    last_refresh.set(Some(js_sys::Date::now()));
 }
 
 /// The HTML document shell rendered on the server.
@@ -197,6 +220,8 @@ pub fn App() -> impl IntoView {
     provide_context(AccessReviewOpen(access_review_open));
     let alerts_data: RwSignal<Option<Vec<roder_core::FiringAlert>>> = RwSignal::new(None);
     provide_context(AlertsData(alerts_data));
+    let alerts_last_refresh = RwSignal::new(None::<f64>);
+    provide_context(AlertsLastRefresh(alerts_last_refresh));
     let _alertmanager_enabled = RwSignal::new(false);
     let resource_filter = RwSignal::new(String::new());
     provide_context(ResourceFilter(resource_filter));
@@ -392,11 +417,8 @@ pub fn App() -> impl IntoView {
         {
             alerts_data.set(Some(cached));
         }
-        if let Ok(list) = data::fetch_json::<Vec<roder_core::FiringAlert>>("/api/alerts").await {
-            if let Ok(json) = serde_json::to_string(&list) {
-                data::storage_set("roder.alerts", &json);
-            }
-            alerts_data.set(Some(list));
+        if let Ok(list) = fetch_alerts(false).await {
+            update_alerts(alerts_data, alerts_last_refresh, list);
         }
     });
 
@@ -409,13 +431,8 @@ pub fn App() -> impl IntoView {
                     if !_alertmanager_enabled.get_untracked() {
                         return;
                     }
-                    if let Ok(list) =
-                        data::fetch_json::<Vec<roder_core::FiringAlert>>("/api/alerts").await
-                    {
-                        if let Ok(json) = serde_json::to_string(&list) {
-                            data::storage_set("roder.alerts", &json);
-                        }
-                        alerts_data.set(Some(list));
+                    if let Ok(list) = fetch_alerts(false).await {
+                        update_alerts(alerts_data, alerts_last_refresh, list);
                     }
                 });
             },

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.31](https://github.com/krezh/roder/compare/0.1.30...0.1.31) (2026-07-21)
+
+
+### Bug Fixes
+
+* handle multi-document Talos configs and node targeting ([d9d06a6](https://github.com/krezh/roder/commit/d9d06a6a14160644030f896fdfc5a9f0a5d19e31))
+
 ## [0.1.30](https://github.com/krezh/roder/compare/0.1.29...0.1.30) (2026-07-21)
 
 

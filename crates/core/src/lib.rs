@@ -490,7 +490,7 @@ impl Default for DrainOptions {
             ignore_daemonsets: true,
             disable_eviction: false,
             grace_period: None,
-            timeout_secs: 60,
+            timeout_secs: 300,
         }
     }
 }
@@ -658,7 +658,7 @@ mod tests {
         let o = DrainOptions::default();
         assert!(!o.force && !o.delete_emptydir_data && !o.disable_eviction);
         assert!(o.ignore_daemonsets);
-        assert_eq!(o.timeout_secs, 60);
+        assert_eq!(o.timeout_secs, 300);
         assert_eq!(o.grace_period, None);
         // An empty JSON object deserializes to the same defaults.
         let from_empty: DrainOptions = serde_json::from_str("{}").unwrap();

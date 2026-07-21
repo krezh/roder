@@ -118,7 +118,7 @@ fn DrainForm(
     let ignore_daemonsets = RwSignal::new(true);
     let disable_eviction = RwSignal::new(false);
     let grace = RwSignal::new(String::new()); // blank = pod default
-    let timeout = RwSignal::new("60".to_string());
+    let timeout = RwSignal::new(DrainOptions::default().timeout_secs.to_string());
 
     let name = target.name.clone();
     let running_name = name.clone();

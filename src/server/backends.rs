@@ -218,6 +218,12 @@ impl BackendRegistry {
         // just carried in, silently reverting a permission change for up to the
         // idle-eviction window.
         e.tokens.identity = cookie.identity.clone();
+        // A request may carry a refresh token rotated by another replica. Adopt
+        // it rather than re-sealing this process's stale generation over the
+        // browser's newer cookie.
+        if cookie.refresh_token.is_some() && cookie.refresh_token != e.tokens.refresh_token {
+            e.tokens.refresh_token = cookie.refresh_token.clone();
+        }
         e.last_active = Instant::now();
         Some(e.backend.clone())
     }
@@ -597,6 +603,7 @@ mod tests {
         // still-valid token (so this hits the warm path), different groups.
         let mut t2 = t.clone();
         t2.identity.groups = vec!["viewers".into()];
+        t2.refresh_token = Some("rotated-by-peer".into());
         let b_after = reg.resolve(&t2).await.unwrap();
 
         assert!(
@@ -609,5 +616,6 @@ mod tests {
             vec!["viewers".to_string()],
             "warm resolve must adopt the cookie's fresh groups into the stored entry"
         );
+        assert_eq!(stored.refresh_token.as_deref(), Some("rotated-by-peer"));
     }
 }

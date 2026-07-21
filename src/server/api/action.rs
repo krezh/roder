@@ -9,14 +9,14 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use roder_k8s::Backend;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::talos::talos_mutation;
 use super::{bad_gateway, ns_filter, request_caller};
 use crate::server::drain_jobs::CancelResult;
 use crate::server::AppState;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct ActionRequest {
     pub(crate) action: String,
     key: Option<String>,
@@ -30,6 +30,7 @@ pub struct ActionRequest {
     pub(crate) drain: Option<bool>,
     pub(crate) options: Option<roder_core::DrainOptions>,
     pub(crate) job: Option<u64>,
+    pub(crate) executor: Option<String>,
 }
 
 /// Single mutation endpoint dispatching by `action`.
@@ -54,6 +55,18 @@ pub async fn action(
     );
 
     if req.action == "drain-cancel" {
+        if let Some(response) = crate::server::ha::proxy_to_executor(
+            &state,
+            &headers,
+            req.executor.as_deref(),
+            reqwest::Method::POST,
+            "/api/action",
+            Some(&req),
+        )
+        .await
+        {
+            return response;
+        }
         let Some(id) = req.job else {
             return (StatusCode::BAD_REQUEST, "missing job").into_response();
         };
@@ -103,14 +116,29 @@ pub async fn action(
             return (StatusCode::BAD_REQUEST, "missing key or name").into_response();
         };
         let options = drain_options.expect("drain options validated above");
+        if let Some(response) =
+            crate::server::ha::forward_action_from_target(&state, &headers, name, &req).await
+        {
+            return response;
+        }
+        let lease = match state.ha.as_ref() {
+            Some(ha) => match ha.coordinator.acquire(name).await {
+                Ok(lease) => Some(lease),
+                Err(error) => return (StatusCode::CONFLICT, error.to_string()).into_response(),
+            },
+            None => None,
+        };
         let id = match super::drain::spawn_drain_job(
             &state,
             b,
-            caller.owner,
-            key.to_string(),
-            name.to_string(),
-            options,
-            None,
+            super::drain::DrainJobRequest {
+                owner: caller.owner,
+                key: key.to_string(),
+                name: name.to_string(),
+                options,
+                power: None,
+                lease,
+            },
         ) {
             Ok(id) => id,
             Err(_) => {
@@ -121,7 +149,15 @@ pub async fn action(
                     .into_response()
             }
         };
-        return (StatusCode::OK, serde_json::json!({ "job": id }).to_string()).into_response();
+        return (
+            StatusCode::OK,
+            serde_json::json!({
+                "job": id,
+                "executor": state.ha.as_ref().map(|ha| ha.pod_name.as_str())
+            })
+            .to_string(),
+        )
+            .into_response();
     } else {
         let (Some(key), Some(name)) = (req.key.as_deref(), req.name.as_deref()) else {
             return (StatusCode::BAD_REQUEST, "missing key or name").into_response();
@@ -198,6 +234,7 @@ mod tests {
             drain: None,
             options: None,
             job: None,
+            executor: None,
         }
     }
 

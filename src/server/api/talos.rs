@@ -317,6 +317,13 @@ pub(crate) async fn talos_mutation(
         Ok(node) => node,
         Err(response) => return Some(response),
     };
+    if power_action {
+        if let Some(response) =
+            crate::server::ha::forward_action_from_target(state, headers, node, req).await
+        {
+            return Some(response);
+        }
+    }
     if power_action && state.config.pod_node_name.as_deref() == Some(node) {
         return Some(
             (
@@ -337,6 +344,13 @@ pub(crate) async fn talos_mutation(
         .and_then(|value| value.as_str())
         .map(String::from);
     let drain_session = power_action.then(|| backend.drain_session());
+    if matches!(
+        req.action.as_str(),
+        "talos-service-start" | "talos-service-stop" | "talos-service-restart"
+    ) && req.service.is_none()
+    {
+        return Some((StatusCode::BAD_REQUEST, "missing service").into_response());
+    }
 
     if power_action && req.drain.unwrap_or(false) {
         let options = drain_options.expect("drain options validated above");
@@ -357,14 +371,26 @@ pub(crate) async fn talos_mutation(
             previous_boot_id,
             lock,
         };
+        let lease = match state.ha.as_ref() {
+            Some(ha) => match ha.coordinator.acquire(node).await {
+                Ok(lease) => Some(lease),
+                Err(error) => {
+                    return Some((StatusCode::CONFLICT, error.to_string()).into_response())
+                }
+            },
+            None => None,
+        };
         let id = match super::drain::spawn_drain_job(
             state,
             backend,
-            owner.to_string(),
-            node_key,
-            node.to_string(),
-            options,
-            Some(phase),
+            super::drain::DrainJobRequest {
+                owner: owner.to_string(),
+                key: node_key,
+                name: node.to_string(),
+                options,
+                power: Some(phase),
+                lease,
+            },
         ) {
             Ok(id) => id,
             Err(_) => {
@@ -378,7 +404,15 @@ pub(crate) async fn talos_mutation(
             }
         };
         return Some(
-            (StatusCode::OK, serde_json::json!({ "job": id }).to_string()).into_response(),
+            (
+                StatusCode::OK,
+                serde_json::json!({
+                    "job": id,
+                    "executor": state.ha.as_ref().map(|ha| ha.pod_name.as_str())
+                })
+                .to_string(),
+            )
+                .into_response(),
         );
     }
 
@@ -386,11 +420,17 @@ pub(crate) async fn talos_mutation(
         Ok(guard) => guard,
         Err(_) => return Some(talos_lock_conflict()),
     };
+    let lease = match state.ha.as_ref() {
+        Some(ha) => match ha.coordinator.acquire(node).await {
+            Ok(lease) => Some(lease),
+            Err(error) => return Some((StatusCode::CONFLICT, error.to_string()).into_response()),
+        },
+        None => None,
+    };
+
     let result = match req.action.as_str() {
         "talos-service-start" | "talos-service-stop" | "talos-service-restart" => {
-            let Some(service) = req.service.as_deref() else {
-                return Some((StatusCode::BAD_REQUEST, "missing service").into_response());
-            };
+            let service = req.service.as_deref().expect("service validated above");
             talos
                 .service_action(
                     node,
@@ -404,6 +444,9 @@ pub(crate) async fn talos_mutation(
         _ => unreachable!(),
     };
     if let Err(error) = result {
+        if let Some(lease) = lease {
+            lease.release().await;
+        }
         return Some(talos_error(error));
     }
     if req.action == "talos-reboot" {
@@ -417,8 +460,14 @@ pub(crate) async fn talos_mutation(
             )
             .await
         {
+            if let Some(lease) = lease {
+                lease.release().await;
+            }
             return Some((StatusCode::GATEWAY_TIMEOUT, error.to_string()).into_response());
         }
+    }
+    if let Some(lease) = lease {
+        lease.release().await;
     }
     Some(
         Json(serde_json::json!({

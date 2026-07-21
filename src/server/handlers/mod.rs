@@ -88,6 +88,7 @@ pub(crate) mod fixtures {
             talos: None,
             talos_action_lock: Arc::new(Mutex::new(())),
             drain_jobs: Arc::new(crate::server::drain_jobs::DrainJobs::default()),
+            ha: None,
         }
     }
 

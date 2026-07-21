@@ -1,8 +1,8 @@
 # roder keeps per-user informer caches in-process, so each replica opens its own
 # set of watches against the API server. Running ONE replica keeps one watch per
 # active (user, resource) on etcd — raising this duplicates those watches across
-# replicas and is rarely what you want. (Sessions are stateless, so a single
-# replica still tolerates restarts; set RODER_SESSION_KEY so they survive.)
+# replicas. Multiple replicas enable off-target node power operations and are
+# automatically spread across nodes; set a stable RODER_SESSION_KEY shared by all.
 replicaCount: 1
 
 image:
@@ -140,6 +140,9 @@ securityContext:
 service:
   type: ClusterIP
   port: 8080
+  # Keeps a browser/gateway source on one replica, avoiding concurrent OIDC
+  # refresh-token rotation across otherwise independent backend caches.
+  sessionAffinity: ClientIP
 
 # Gateway API HTTPRoute. Disabled by default.
 httpRoute:
@@ -178,7 +181,9 @@ readinessProbe:
 strategy:
   type: RollingUpdate
   rollingUpdate:
-    maxUnavailable: 0
+    # Allows a hard anti-affinity replica to move on clusters with exactly N nodes.
+    # For one replica this rounds down to zero, preserving availability.
+    maxUnavailable: 50%
     maxSurge: 1
 
 nodeSelector: {}

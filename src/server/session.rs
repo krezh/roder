@@ -44,6 +44,15 @@ struct SealedPending {
     expires_at_unix: i64,
 }
 
+#[derive(Serialize, Deserialize)]
+struct SealedForwardedTokens {
+    id_token: String,
+    access_token: String,
+    refresh_token: Option<String>,
+    identity: Identity,
+    expires_at_unix: i64,
+}
+
 fn cipher(key: &[u8; 32]) -> Aes256Gcm {
     let k = Key::<Aes256Gcm>::from(*key);
     Aes256Gcm::new(&k)
@@ -99,6 +108,31 @@ pub fn open_session(cookie: &str, key: &[u8; 32]) -> Option<Tokens> {
         refresh_token: s.refresh_token,
         expires_at: OffsetDateTime::from_unix_timestamp(s.expires_at_unix).ok()?,
         identity: s.identity,
+    })
+}
+
+/// Seal the complete, already-verified token set for one authenticated
+/// inter-replica request. Unlike the browser cookie this includes the ID token,
+/// so the executor does not rotate the refresh token a second time.
+pub fn seal_forwarded_tokens(tokens: &Tokens, key: &[u8; 32]) -> String {
+    let payload = SealedForwardedTokens {
+        id_token: tokens.id_token.clone(),
+        access_token: tokens.access_token.clone(),
+        refresh_token: tokens.refresh_token.clone(),
+        identity: tokens.identity.clone(),
+        expires_at_unix: tokens.expires_at.unix_timestamp(),
+    };
+    seal_bytes(&serde_json::to_vec(&payload).unwrap_or_default(), key)
+}
+
+pub fn open_forwarded_tokens(value: &str, key: &[u8; 32]) -> Option<Tokens> {
+    let tokens: SealedForwardedTokens = serde_json::from_slice(&open_bytes(value, key)?).ok()?;
+    Some(Tokens {
+        id_token: tokens.id_token,
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
+        expires_at: OffsetDateTime::from_unix_timestamp(tokens.expires_at_unix).ok()?,
+        identity: tokens.identity,
     })
 }
 
@@ -301,6 +335,16 @@ mod tests {
             opened.expires_at.unix_timestamp(),
             tokens.expires_at.unix_timestamp()
         );
+    }
+
+    #[test]
+    fn forwarded_tokens_preserve_the_id_token() {
+        let tokens = fake_tokens(3600);
+        let sealed = seal_forwarded_tokens(&tokens, &[7; 32]);
+        let opened = open_forwarded_tokens(&sealed, &[7; 32]).unwrap();
+        assert_eq!(opened.id_token, tokens.id_token);
+        assert_eq!(opened.refresh_token, tokens.refresh_token);
+        assert_eq!(opened.identity, tokens.identity);
     }
 
     #[test]

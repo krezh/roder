@@ -21,12 +21,13 @@ struct Entry {
     cancel: Arc<AtomicBool>,
     cancellable: bool,
     done: bool,
+    started_at: u64,
 }
 
-#[derive(Default)]
 pub struct DrainJobs {
     entries: Mutex<HashMap<u64, Entry>>,
     next_id: AtomicU64,
+    executor: Option<String>,
 }
 
 pub struct JobHandle {
@@ -47,6 +48,14 @@ pub enum CancelResult {
 }
 
 impl DrainJobs {
+    pub fn new(executor: Option<String>) -> Self {
+        Self {
+            entries: Mutex::new(HashMap::new()),
+            next_id: AtomicU64::new(0),
+            executor,
+        }
+    }
+
     pub fn create(
         self: &Arc<Self>,
         owner: String,
@@ -83,6 +92,10 @@ impl DrainJobs {
                 cancel: Arc::new(AtomicBool::new(false)),
                 cancellable: true,
                 done: false,
+                started_at: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64,
             },
         );
         Ok(JobHandle {
@@ -101,6 +114,8 @@ impl DrainJobs {
             .max_by_key(|(id, _)| *id)
             .map(|(id, entry)| ActiveDrainJob {
                 job: *id,
+                executor: self.executor.clone(),
+                started_at: entry.started_at,
                 key: entry.key.clone(),
                 name: entry.target.clone(),
                 power: entry.power.clone(),
@@ -155,6 +170,12 @@ impl DrainJobs {
         }
         e.cancel.store(true, Ordering::Relaxed);
         CancelResult::Accepted
+    }
+}
+
+impl Default for DrainJobs {
+    fn default() -> Self {
+        Self::new(None)
     }
 }
 
@@ -359,15 +380,12 @@ mod tests {
         jobs.create_for("bob".into(), "nodes".into(), "node-c".into(), None)
             .unwrap();
 
-        assert_eq!(
-            jobs.active("alice"),
-            Some(ActiveDrainJob {
-                job: active.id,
-                key: "nodes".into(),
-                name: "node-b".into(),
-                power: Some("reboot".into()),
-            })
-        );
+        let recovered = jobs.active("alice").unwrap();
+        assert_eq!(recovered.job, active.id);
+        assert_eq!(recovered.executor, None);
+        assert_eq!(recovered.key, "nodes");
+        assert_eq!(recovered.name, "node-b");
+        assert_eq!(recovered.power.as_deref(), Some("reboot"));
         assert_eq!(jobs.active("bob").unwrap().name, "node-c");
         assert!(jobs.active("charlie").is_none());
     }

@@ -44,4 +44,36 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "roder.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
+{{- if gt (int .Values.replicaCount) 1 }}
+---
+# Multi-replica operation routing and per-node exclusion are namespace-local.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "roder.fullname" . }}-coordination
+  labels:
+    {{- include "roder.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "roder.fullname" . }}-coordination
+  labels:
+    {{- include "roder.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "roder.fullname" . }}-coordination
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "roder.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
 {{- end }}

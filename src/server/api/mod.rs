@@ -11,7 +11,7 @@ use axum::response::{IntoResponse, Response};
 
 use super::AppState;
 
-mod action;
+pub(crate) mod action;
 mod drain;
 mod exec;
 mod logs;

@@ -97,7 +97,7 @@ pub(crate) struct DrainTarget {
     pub(crate) power: Option<String>,
     pub(crate) control_plane: bool,
     /// Existing job to reopen after a browser refresh; `None` starts at options.
-    pub(crate) job: Option<u64>,
+    pub(crate) job: Option<roder_core::DrainJobRef>,
 }
 
 #[derive(Clone, Copy)]

@@ -5,6 +5,7 @@ pub mod api;
 pub mod backends;
 pub mod config;
 pub mod drain_jobs;
+pub mod ha;
 pub mod handlers;
 pub mod session;
 
@@ -60,6 +61,8 @@ pub struct AppState {
     /// passed to handlers via request extensions. Built lazily on each user's
     /// first authenticated request; idle-evicted; soft-capped.
     pub backends: std::sync::Arc<crate::server::backends::BackendRegistry>,
+    /// Multi-replica operation routing and Kubernetes Lease coordination.
+    pub ha: Option<Arc<ha::HaState>>,
 }
 
 // Lets Leptos's axum handlers pull `LeptosOptions` out of our custom state.
@@ -116,6 +119,25 @@ pub async fn build_state(leptos_options: LeptosOptions) -> Result<AppState, Stri
         "connected to cluster at startup, {} kinds discovered",
         shared.kinds().len()
     );
+    let ha = if matches!(
+        std::env::var("RODER_HA_ENABLED").as_deref(),
+        Ok("1") | Ok("true") | Ok("yes")
+    ) {
+        let pod_name = std::env::var("RODER_POD_NAME")
+            .map_err(|_| "RODER_HA_ENABLED requires RODER_POD_NAME".to_string())?;
+        let pod_uid = std::env::var("RODER_POD_UID")
+            .map_err(|_| "RODER_HA_ENABLED requires RODER_POD_UID".to_string())?;
+        let selector = std::env::var("RODER_POD_LABEL_SELECTOR")
+            .map_err(|_| "RODER_HA_ENABLED requires RODER_POD_LABEL_SELECTOR".to_string())?;
+        let scope = std::env::var("RODER_HA_SCOPE").unwrap_or_else(|_| selector.clone());
+        let holder = format!("{pod_name}/{pod_uid}");
+        Some(Arc::new(ha::HaState::new(
+            roder_k8s::NodeCoordinator::new(shared.sa_client(), selector, holder, scope),
+            pod_name,
+        )))
+    } else {
+        None
+    };
 
     // Alertmanager discovery uses the SA client (unchanged behavior, now via shared).
     let am_client = shared.sa_client();
@@ -171,8 +193,11 @@ pub async fn build_state(leptos_options: LeptosOptions) -> Result<AppState, Stri
         shared,
         talos,
         talos_action_lock: Arc::new(Mutex::new(())),
-        drain_jobs: Arc::new(drain_jobs::DrainJobs::default()),
+        drain_jobs: Arc::new(drain_jobs::DrainJobs::new(
+            ha.as_ref().map(|ha| ha.pod_name.clone()),
+        )),
         backends,
+        ha,
     })
 }
 

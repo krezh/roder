@@ -15,6 +15,7 @@ spec:
     metadata:
       labels:
         {{- include "roder.selectorLabels" . | nindent 8 }}
+        roder.io/ha-protocol: "1"
         {{- with .Values.podLabels }}{{- toYaml . | nindent 8 }}{{- end }}
       {{- with .Values.podAnnotations }}
       annotations:
@@ -41,6 +42,20 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            - name: RODER_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: RODER_POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            - name: RODER_HA_ENABLED
+              value: {{ gt (int .Values.replicaCount) 1 | quote }}
+            - name: RODER_POD_LABEL_SELECTOR
+              value: {{ printf "app.kubernetes.io/name=%s,app.kubernetes.io/instance=%s,roder.io/ha-protocol=1" (include "roder.name" .) .Release.Name | quote }}
+            - name: RODER_HA_SCOPE
+              value: {{ printf "%s/%s" .Release.Namespace .Release.Name | quote }}
             {{- if .Values.talos.enabled }}
             - name: RODER_TALOS_READER_GROUPS
               value: {{ toJson .Values.talos.readerGroups | quote }}
@@ -104,6 +119,16 @@ spec:
       {{- with .Values.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
+      {{- else }}
+      {{- if gt (int .Values.replicaCount) 1 }}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  {{- include "roder.selectorLabels" . | nindent 18 }}
+              topologyKey: kubernetes.io/hostname
+      {{- end }}
       {{- end }}
       {{- with .Values.tolerations }}
       tolerations:

@@ -7,8 +7,8 @@ use leptos::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use roder_core::ActiveDrainJob;
 use roder_core::{
-    DrainBlocker, DrainEvent, DrainEventKind, DrainOptions, DRAIN_GRACE_PERIOD_MAX_SECS,
-    DRAIN_TIMEOUT_MAX_SECS, DRAIN_TIMEOUT_MIN_SECS,
+    DrainBlocker, DrainEvent, DrainEventKind, DrainJobRef, DrainOptions,
+    DRAIN_GRACE_PERIOD_MAX_SECS, DRAIN_TIMEOUT_MAX_SECS, DRAIN_TIMEOUT_MIN_SECS,
 };
 
 use crate::app::overlays::toast::{
@@ -19,7 +19,7 @@ use crate::app::state::{DrainOpen, DrainTarget};
 #[derive(Clone, PartialEq)]
 enum Phase {
     Options,
-    Running { job: u64 },
+    Running { job: DrainJobRef },
 }
 
 /// Always mounted (alongside `ConfirmDialog`/`ExecWindow`); opening it is just
@@ -46,7 +46,10 @@ pub(crate) fn DrainOverlay() -> impl IntoView {
                     name: active.name,
                     power: active.power,
                     control_plane: false,
-                    job: Some(active.job),
+                    job: Some(DrainJobRef {
+                        job: active.job,
+                        executor: active.executor,
+                    }),
                 }));
             }
         });
@@ -66,7 +69,7 @@ fn DrainOpenView(
     do_close: impl Fn() + Copy + Send + 'static,
 ) -> impl IntoView {
     let toast = expect_context::<RwSignal<Option<Toast>>>();
-    let phase = RwSignal::new(match target.job {
+    let phase = RwSignal::new(match target.job.clone() {
         Some(job) => Phase::Running { job },
         None => Phase::Options,
     });
@@ -259,7 +262,7 @@ fn DrainForm(
 /// rather than a reset of this one.
 #[component]
 fn DrainProgress(
-    job: u64,
+    job: DrainJobRef,
     name: String,
     /// Same target the options form submitted against — retried with
     /// adjusted options via the same `start_drain` helper.
@@ -275,6 +278,7 @@ fn DrainProgress(
     request_pending: RwSignal<bool>,
     do_close: impl Fn() + Copy + Send + 'static,
 ) -> impl IntoView {
+    let job = StoredValue::new(job);
     let heading = match target.get_value().power {
         Some(p) => format!("Draining {name} → {p}"),
         None => format!("Draining {name}"),
@@ -305,7 +309,7 @@ fn DrainProgress(
     // later — a fresh `DrainForm` — or the modal snapshot clearing after
     // close) or on a retry replacing this arm with a new `job`.
     Effect::new(move |_prev: Option<Option<crate::data::SseHandle>>| {
-        crate::data::subscribe_lines(&format!("/api/drain-progress?id={job}"), move |line| {
+        crate::data::subscribe_lines(&progress_url(&job.get_value()), move |line| {
             let Ok(ev) = serde_json::from_str::<DrainEvent>(&line) else {
                 return;
             };
@@ -447,7 +451,8 @@ fn DrainProgress(
         cancel_pending.set(true);
         let cancel_name = name.get_value();
         leptos::task::spawn_local(async move {
-            let payload = serde_json::json!({"action": "drain-cancel", "job": job});
+            let job = job.get_value();
+            let payload = serde_json::json!({"action": "drain-cancel", "job": job.job, "executor": job.executor});
             if let Err(e) = crate::data::post_action(&payload).await {
                 cancel_pending.set(false);
                 show_toast_detail(
@@ -465,7 +470,7 @@ fn DrainProgress(
 
     let hide = move |_: leptos::ev::MouseEvent| {
         detach_and_close(
-            job,
+            job.get_value(),
             name.get_value(),
             target.get_value().power,
             toast,
@@ -481,7 +486,7 @@ fn DrainProgress(
             do_close();
         } else {
             detach_and_close(
-                job,
+                job.get_value(),
                 name.get_value(),
                 target.get_value().power,
                 toast,
@@ -636,7 +641,7 @@ struct DetachedProgress {
 /// Closing mid-run: drop the window's subscription but keep watching the job
 /// in the background just long enough to toast the final result.
 fn detach_and_close(
-    job: u64,
+    job: DrainJobRef,
     name: String,
     power: Option<String>,
     toast: RwSignal<Option<Toast>>,
@@ -653,108 +658,107 @@ fn detach_and_close(
     let progress2 = Rc::clone(&progress);
     let sse_bg: Rc<RefCell<Option<crate::data::SseHandle>>> = Rc::new(RefCell::new(None));
     let sse_bg2 = Rc::clone(&sse_bg);
-    let handle =
-        crate::data::subscribe_lines(&format!("/api/drain-progress?id={job}"), move |line| {
-            let Ok(ev) = serde_json::from_str::<DrainEvent>(&line) else {
-                return;
-            };
-            let detail = {
-                let mut progress = progress2.borrow_mut();
-                match &ev.kind {
-                    DrainEventKind::Cordoned => Some("Node cordoned".to_string()),
-                    DrainEventKind::Started { total } => {
-                        progress.total = *total;
-                        Some(format!("Evicting {total} pods"))
-                    }
-                    DrainEventKind::Evicted { pod, done, total } => {
-                        progress.evicted = *done;
-                        progress.total = *total;
-                        Some(format!("Evicted {done} of {total}: {pod}"))
-                    }
-                    DrainEventKind::EvictFailed { pod, reason } => {
-                        Some(format!("Failed to evict {pod}: {reason}"))
-                    }
-                    DrainEventKind::WaitingTermination { pods } => Some(waiting_message(pods)),
-                    DrainEventKind::PowerRequested { action } => {
-                        progress.power_requested = true;
-                        Some(format!("{action} requested"))
-                    }
-                    DrainEventKind::NodeReady => {
-                        progress.node_ready = true;
-                        Some("Node returned Ready".to_string())
-                    }
-                    DrainEventKind::Blocked { .. }
-                    | DrainEventKind::Done { .. }
-                    | DrainEventKind::Error { .. }
-                    | DrainEventKind::Cancelled => None,
+    let handle = crate::data::subscribe_lines(&progress_url(&job), move |line| {
+        let Ok(ev) = serde_json::from_str::<DrainEvent>(&line) else {
+            return;
+        };
+        let detail = {
+            let mut progress = progress2.borrow_mut();
+            match &ev.kind {
+                DrainEventKind::Cordoned => Some("Node cordoned".to_string()),
+                DrainEventKind::Started { total } => {
+                    progress.total = *total;
+                    Some(format!("Evicting {total} pods"))
                 }
-            };
-            if let Some(detail) = detail {
-                let progress = progress2.borrow();
-                let percent = progress_percent(
-                    progress.evicted,
-                    progress.total,
-                    power.as_deref(),
-                    progress.power_requested,
-                    progress.node_ready,
-                    false,
-                );
-                update_progress_toast(toast, progress_toast, detail, percent);
+                DrainEventKind::Evicted { pod, done, total } => {
+                    progress.evicted = *done;
+                    progress.total = *total;
+                    Some(format!("Evicted {done} of {total}: {pod}"))
+                }
+                DrainEventKind::EvictFailed { pod, reason } => {
+                    Some(format!("Failed to evict {pod}: {reason}"))
+                }
+                DrainEventKind::WaitingTermination { pods } => Some(waiting_message(pods)),
+                DrainEventKind::PowerRequested { action } => {
+                    progress.power_requested = true;
+                    Some(format!("{action} requested"))
+                }
+                DrainEventKind::NodeReady => {
+                    progress.node_ready = true;
+                    Some("Node returned Ready".to_string())
+                }
+                DrainEventKind::Blocked { .. }
+                | DrainEventKind::Done { .. }
+                | DrainEventKind::Error { .. }
+                | DrainEventKind::Cancelled => None,
             }
-            let msg = match ev.kind {
-                DrainEventKind::Done { summary } if summary.failed.is_empty() => Some((
-                    match power.as_deref() {
-                        Some("reboot") => format!(
-                            "Drained and rebooted {name}: evicted {}, skipped {}",
-                            summary.evicted, summary.skipped
-                        ),
-                        Some("shutdown") => format!(
-                            "Drained and shut down {name}: evicted {}, skipped {}",
-                            summary.evicted, summary.skipped
-                        ),
-                        _ => format!(
-                            "Drained {name}: evicted {}, skipped {}",
-                            summary.evicted, summary.skipped
-                        ),
-                    },
-                    ToastKind::Ok,
-                )),
-                DrainEventKind::Done { summary } => Some((
-                    match power.as_deref() {
-                        Some("reboot") => format!(
-                            "Drain before rebooting {name} left {} pod(s) failed",
-                            summary.failed.len()
-                        ),
-                        Some("shutdown") => format!(
-                            "Drain before shutting down {name} left {} pod(s) failed",
-                            summary.failed.len()
-                        ),
-                        _ => format!(
-                            "Drain of {name} left {} pod(s) failed",
-                            summary.failed.len()
-                        ),
-                    },
-                    ToastKind::Err,
-                )),
-                DrainEventKind::Blocked { .. } => Some((
-                    power_failure_text(&name, power.as_deref(), "blocked"),
-                    ToastKind::Err,
-                )),
-                DrainEventKind::Error { message } => Some((
-                    power_failure_text(&name, power.as_deref(), &format!("failed: {message}")),
-                    ToastKind::Err,
-                )),
-                DrainEventKind::Cancelled => Some((
-                    power_failure_text(&name, power.as_deref(), "cancelled"),
-                    ToastKind::Err,
-                )),
-                _ => None,
-            };
-            if let Some((text, kind)) = msg {
-                show_toast(toast, text, kind);
-                sse_bg2.borrow_mut().take(); // drop handle → closes the stream
-            }
-        });
+        };
+        if let Some(detail) = detail {
+            let progress = progress2.borrow();
+            let percent = progress_percent(
+                progress.evicted,
+                progress.total,
+                power.as_deref(),
+                progress.power_requested,
+                progress.node_ready,
+                false,
+            );
+            update_progress_toast(toast, progress_toast, detail, percent);
+        }
+        let msg = match ev.kind {
+            DrainEventKind::Done { summary } if summary.failed.is_empty() => Some((
+                match power.as_deref() {
+                    Some("reboot") => format!(
+                        "Drained and rebooted {name}: evicted {}, skipped {}",
+                        summary.evicted, summary.skipped
+                    ),
+                    Some("shutdown") => format!(
+                        "Drained and shut down {name}: evicted {}, skipped {}",
+                        summary.evicted, summary.skipped
+                    ),
+                    _ => format!(
+                        "Drained {name}: evicted {}, skipped {}",
+                        summary.evicted, summary.skipped
+                    ),
+                },
+                ToastKind::Ok,
+            )),
+            DrainEventKind::Done { summary } => Some((
+                match power.as_deref() {
+                    Some("reboot") => format!(
+                        "Drain before rebooting {name} left {} pod(s) failed",
+                        summary.failed.len()
+                    ),
+                    Some("shutdown") => format!(
+                        "Drain before shutting down {name} left {} pod(s) failed",
+                        summary.failed.len()
+                    ),
+                    _ => format!(
+                        "Drain of {name} left {} pod(s) failed",
+                        summary.failed.len()
+                    ),
+                },
+                ToastKind::Err,
+            )),
+            DrainEventKind::Blocked { .. } => Some((
+                power_failure_text(&name, power.as_deref(), "blocked"),
+                ToastKind::Err,
+            )),
+            DrainEventKind::Error { message } => Some((
+                power_failure_text(&name, power.as_deref(), &format!("failed: {message}")),
+                ToastKind::Err,
+            )),
+            DrainEventKind::Cancelled => Some((
+                power_failure_text(&name, power.as_deref(), "cancelled"),
+                ToastKind::Err,
+            )),
+            _ => None,
+        };
+        if let Some((text, kind)) = msg {
+            show_toast(toast, text, kind);
+            sse_bg2.borrow_mut().take(); // drop handle → closes the stream
+        }
+    });
     *sse_bg.borrow_mut() = handle;
 
     // Belt-and-braces over the server's exactly-one-terminal-event guarantee:
@@ -821,7 +825,7 @@ fn parse_drain_limits(grace: &str, timeout: &str) -> (Option<u32>, u64) {
 }
 
 /// POST the drain (or drain-first power) action; resolve to the job id.
-async fn start_drain(target: &DrainTarget, options: &DrainOptions) -> Result<u64, String> {
+async fn start_drain(target: &DrainTarget, options: &DrainOptions) -> Result<DrainJobRef, String> {
     let payload = match &target.power {
         None => serde_json::json!({
             "action": "drain", "key": target.key, "name": target.name, "options": options,
@@ -831,10 +835,14 @@ async fn start_drain(target: &DrainTarget, options: &DrainOptions) -> Result<u64
         }),
     };
     let body = crate::data::post_action(&payload).await?;
-    serde_json::from_str::<serde_json::Value>(&body)
-        .ok()
-        .and_then(|v| v.get("job")?.as_u64())
-        .ok_or_else(|| format!("unexpected response: {body}"))
+    serde_json::from_str::<DrainJobRef>(&body).map_err(|_| format!("unexpected response: {body}"))
+}
+
+fn progress_url(job: &DrainJobRef) -> String {
+    match job.executor.as_deref() {
+        Some(executor) => format!("/api/drain-progress?id={}&executor={executor}", job.job),
+        None => format!("/api/drain-progress?id={}", job.job),
+    }
 }
 
 #[cfg(test)]
@@ -931,5 +939,23 @@ mod tests {
             (None, DrainOptions::default().timeout_secs)
         );
         assert_eq!(parse_drain_limits("invalid", "30"), (None, 30));
+    }
+
+    #[test]
+    fn progress_url_routes_to_the_executor_when_present() {
+        assert_eq!(
+            progress_url(&DrainJobRef {
+                job: 7,
+                executor: Some("roder-b".into()),
+            }),
+            "/api/drain-progress?id=7&executor=roder-b"
+        );
+        assert_eq!(
+            progress_url(&DrainJobRef {
+                job: 7,
+                executor: None,
+            }),
+            "/api/drain-progress?id=7"
+        );
     }
 }

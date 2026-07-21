@@ -533,9 +533,22 @@ pub struct DrainEvent {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ActiveDrainJob {
     pub job: u64,
+    /// Replica currently executing this process-local job.
+    #[serde(default)]
+    pub executor: Option<String>,
+    #[serde(default)]
+    pub started_at: u64,
     pub key: String,
     pub name: String,
     pub power: Option<String>,
+}
+
+/// Process-local drain id paired with the replica that owns it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DrainJobRef {
+    pub job: u64,
+    #[serde(default)]
+    pub executor: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

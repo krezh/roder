@@ -6,6 +6,7 @@ metadata:
     {{- include "roder.labels" . | nindent 4 }}
 spec:
   type: {{ .Values.service.type }}
+  sessionAffinity: {{ .Values.service.sessionAffinity }}
   ports:
     - name: http
       port: {{ .Values.service.port }}
@@ -13,3 +14,4 @@ spec:
       protocol: TCP
   selector:
     {{- include "roder.selectorLabels" . | nindent 4 }}
+    roder.io/ha-protocol: "1"

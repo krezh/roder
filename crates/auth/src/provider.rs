@@ -204,14 +204,21 @@ impl OidcProvider {
     pub async fn refresh(&self, refresh_token: String) -> Result<Tokens> {
         let client = self.core_client();
         let resp = client
-            .exchange_refresh_token(&RefreshToken::new(refresh_token))
+            .exchange_refresh_token(&RefreshToken::new(refresh_token.clone()))
             .map_err(|e| AuthError::Refresh(e.to_string()))?
             .request_async(&ReqwestClient(self.http.clone()))
             .await
             .map_err(|e| AuthError::Refresh(e.to_string()))?;
 
         // Refreshed ID tokens carry no nonce; skip the nonce check.
-        self.tokens_from_response_no_nonce(&client, resp)
+        let mut tokens = self.tokens_from_response_no_nonce(&client, resp)?;
+        // OAuth servers may omit refresh_token when the existing one remains
+        // valid. Keeping it is required for another replica or a restarted pod
+        // to mint an ID token from the sealed session cookie.
+        if tokens.refresh_token.is_none() {
+            tokens.refresh_token = Some(refresh_token);
+        }
+        Ok(tokens)
     }
 
     fn tokens_from_response<C>(

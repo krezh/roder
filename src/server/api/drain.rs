@@ -39,6 +39,15 @@ pub(crate) struct PowerPhase {
     pub lock: tokio::sync::OwnedMutexGuard<()>,
 }
 
+pub(crate) struct DrainJobRequest {
+    pub owner: String,
+    pub key: String,
+    pub name: String,
+    pub options: DrainOptions,
+    pub power: Option<PowerPhase>,
+    pub lease: Option<roder_k8s::HeldNodeLease>,
+}
+
 /// Spawn a drain (optionally chained into a power action) as a background
 /// job: registers it with `state.drain_jobs`, runs `Backend::drain` on a
 /// detached task, then — if `power` is `Some` and the drain succeeded
@@ -47,18 +56,25 @@ pub(crate) struct PowerPhase {
 pub(crate) fn spawn_drain_job(
     state: &AppState,
     backend: Arc<Backend>,
-    owner: String,
-    key: String,
-    name: String,
-    options: DrainOptions,
-    power: Option<PowerPhase>,
+    request: DrainJobRequest,
 ) -> Result<u64, CreateError> {
+    let DrainJobRequest {
+        owner,
+        key,
+        name,
+        options,
+        power,
+        lease,
+    } = request;
     let power_action = power.as_ref().map(|phase| phase.action.clone());
     let handle = state
         .drain_jobs
         .create_for(owner, key.clone(), name.clone(), power_action)?;
     let id = handle.id;
     let cancel = handle.cancel_flag();
+    if let Some(lease) = lease.as_ref() {
+        lease.cancel_on_loss(Arc::clone(&cancel));
+    }
     // Capture the request's Kubernetes identity before detaching the task.
     let session = backend.drain_session();
     tokio::spawn(async move {
@@ -163,6 +179,9 @@ pub(crate) fn spawn_drain_job(
             }
         })
         .await;
+        if let Some(lease) = lease {
+            lease.release().await;
+        }
     });
     Ok(id)
 }
@@ -205,6 +224,7 @@ fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
 #[derive(Deserialize)]
 pub struct DrainProgressQuery {
     id: u64,
+    executor: Option<String>,
 }
 
 /// Does this event end a job's stream? A job always emits exactly one of
@@ -290,6 +310,22 @@ pub async fn drain_progress(
     let Some(caller) = super::request_caller(&state, &headers) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
+    if let Some(response) = crate::server::ha::proxy_to_executor(
+        &state,
+        &headers,
+        q.executor.as_deref(),
+        reqwest::Method::GET,
+        &format!(
+            "/api/drain-progress?id={}&executor={}",
+            q.id,
+            q.executor.as_deref().unwrap_or("")
+        ),
+        None,
+    )
+    .await
+    {
+        return response;
+    }
     let Some((replay, rx, done)) = state.drain_jobs.subscribe(&caller.owner, q.id) else {
         return StatusCode::NOT_FOUND.into_response();
     };
@@ -324,7 +360,18 @@ pub async fn active_drain(State(state): State<AppState>, headers: HeaderMap) -> 
     let Some(caller) = super::request_caller(&state, &headers) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    Json(state.drain_jobs.active(&caller.owner)).into_response()
+    let local = state.drain_jobs.active(&caller.owner);
+    let remote = match crate::server::ha::active_jobs(&state, &headers).await {
+        Ok(active) => active,
+        Err(response) => return response,
+    };
+    Json(
+        local
+            .into_iter()
+            .chain(remote)
+            .max_by_key(|job| job.started_at),
+    )
+    .into_response()
 }
 
 #[cfg(test)]
@@ -494,7 +541,7 @@ mod tests {
         let response = drain_progress(
             State(state.clone()),
             sealed_cookie_header(&foreign),
-            Query(DrainProgressQuery { id }),
+            Query(DrainProgressQuery { id, executor: None }),
         )
         .await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
@@ -502,7 +549,7 @@ mod tests {
         let response = drain_progress(
             State(state),
             sealed_cookie_header(&owner),
-            Query(DrainProgressQuery { id }),
+            Query(DrainProgressQuery { id, executor: None }),
         )
         .await;
         assert_eq!(response.status(), StatusCode::OK);

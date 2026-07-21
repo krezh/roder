@@ -7,7 +7,9 @@ use axum::http::{header, HeaderName, HeaderValue, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Redirect, Response};
 
-use super::super::session::{cookie_value, open_session, seal_session, set_cookie, SESSION_COOKIE};
+use super::super::session::{
+    cookie_value, open_forwarded_tokens, open_session, seal_session, set_cookie, SESSION_COOKIE,
+};
 use crate::server::AppState;
 
 /// Add security headers to every response. The CSP
@@ -128,9 +130,34 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
     let Some(cookie) = cookie_value(req.headers(), SESSION_COOKIE) else {
         return reject();
     };
-    let Some(cookie_tokens) = open_session(&cookie, &key) else {
+    let Some(mut cookie_tokens) = open_session(&cookie, &key) else {
         return reject();
     };
+
+    if req
+        .headers()
+        .contains_key(crate::server::ha::INTERNAL_HEADER)
+    {
+        if let Some(forwarded) = req
+            .headers()
+            .get(crate::server::ha::FORWARDED_AUTH_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| open_forwarded_tokens(value, &key))
+            .filter(|tokens| tokens.identity.subject == cookie_tokens.identity.subject)
+        {
+            cookie_tokens = forwarded;
+        }
+    }
+
+    // These routes authorize directly from the sealed session and never need a
+    // Kubernetes backend. Avoid needless token refreshes when HA peers proxy
+    // progress/recovery requests between replicas.
+    if matches!(
+        req.uri().path(),
+        "/api/drain-active" | "/api/drain-progress"
+    ) {
+        return next.run(req).await;
+    }
 
     // Resolve (build-or-reuse, single-flighted per subject) this caller's own
     // backend, refreshing the token via the IdP on the way through if it's
@@ -152,14 +179,22 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
         .resolved_tokens(&subject)
         .await
         .unwrap_or(cookie_tokens);
-    let sealed = seal_session(&fresh, &key);
-    if let Ok(v) = HeaderValue::from_str(&set_cookie(
-        SESSION_COOKIE,
-        &sealed,
-        state.config.secure_cookies(),
-        604_800,
-    )) {
-        resp.headers_mut().append(header::SET_COOKIE, v);
+    let has_forwarded_session = resp
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .any(|value| value.starts_with(&format!("{SESSION_COOKIE}=")));
+    if !has_forwarded_session {
+        let sealed = seal_session(&fresh, &key);
+        if let Ok(v) = HeaderValue::from_str(&set_cookie(
+            SESSION_COOKIE,
+            &sealed,
+            state.config.secure_cookies(),
+            604_800,
+        )) {
+            resp.headers_mut().append(header::SET_COOKIE, v);
+        }
     }
     resp
 }

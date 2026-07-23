@@ -33,6 +33,7 @@ use mobile::MobileShell;
 use overlays::access_review::AccessReview;
 use overlays::confirm::{Confirm, ConfirmDialog};
 use overlays::context_menu::ContextMenu;
+use overlays::delete::{DeleteDialog, DeleteRequest};
 use overlays::drain::DrainOverlay;
 use overlays::exec::ExecWindow;
 use overlays::ns_palette::NsPalette;
@@ -205,6 +206,7 @@ pub fn App() -> impl IntoView {
     let tick = RwSignal::new(0u32);
     let only_problems = RwSignal::new(false);
     let confirm = RwSignal::new(None::<Confirm>);
+    let delete_confirm = RwSignal::new(None::<DeleteRequest>);
     let toast = RwSignal::new(None::<Toast>);
     let pod_modal = RwSignal::new(None::<DetailTarget>);
     provide_context(PodModalTarget(pod_modal));
@@ -233,6 +235,7 @@ pub fn App() -> impl IntoView {
     provide_context(Tick(tick));
     provide_context(OnlyProblems(only_problems));
     provide_context(confirm);
+    provide_context(delete_confirm);
     provide_context(toast);
     provide_context(selected_kind);
     provide_context(selected_ns);
@@ -551,6 +554,7 @@ pub fn App() -> impl IntoView {
                         <NsPalette />
                         <ContextMenu />
                         <ConfirmDialog />
+                        <DeleteDialog />
                         <DrainOverlay />
                         <PodModal />
                         <ExecWindow />

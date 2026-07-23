@@ -11,6 +11,7 @@ use roder_core::ObjectDetail;
 use crate::app::components::table::ScaleControl;
 use crate::app::logs::LogsView;
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
+use crate::app::overlays::delete::{ask_delete, delete_extra, DeleteRequest};
 use crate::app::state::{DetailTarget, DrainOpen, DrainTarget, ExecOpen, ExecTarget};
 use crate::app::util::format::parse_key;
 use crate::app::util::json::selector_from;
@@ -103,7 +104,7 @@ pub(crate) fn RowDetail(
     on_delete: impl Fn() + Copy + 'static + Send + Sync,
 ) -> impl IntoView {
     let requested_tab = expect_context::<RwSignal<Option<Tab>>>();
-    let confirm = expect_context::<RwSignal<Option<Confirm>>>();
+    let delete_confirm = expect_context::<RwSignal<Option<DeleteRequest>>>();
     let status = RwSignal::new(None::<Result<String, String>>);
     let yaml = RwSignal::new(String::new());
     // Honor a tab requested via the context menu (e.g. "Logs"), then clear it.
@@ -302,7 +303,9 @@ pub(crate) fn RowDetail(
                 })}
                 {move || can_delete().then(|| view! {
                     <button class="act danger" on:click=move |_| {
-                        ask_confirm(confirm, "Delete this resource?", "Delete", move || run("delete", serde_json::json!({})));
+                        ask_delete(delete_confirm, "Delete this resource?", move |force, propagation| {
+                            run("delete", delete_extra(force, propagation));
+                        });
                     }>"Delete"</button>
                 })}
                 {move || status.get().map(|s| match s {

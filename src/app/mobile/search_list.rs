@@ -7,7 +7,7 @@ use std::sync::Arc;
 use leptos::prelude::*;
 use roder_core::{ResourceKind, WatchEvent};
 
-use crate::app::events::fire_action;
+use crate::app::events::make_do_delete_multi;
 use crate::app::hooks::{use_table_state, Coalescer};
 use crate::app::mobile::bulk_bar::MobileBulkBar;
 use crate::app::mobile::row_card::{use_select_mode, CardFields, MobileRowCard};
@@ -182,22 +182,8 @@ pub(crate) fn MobileSearchList() -> impl IntoView {
     let selected = t.selected;
     let select_mode = use_select_mode(selected);
 
-    let do_bulk = move |action: &'static str| {
-        let uids = selected.get_untracked();
-        let targets: Vec<DetailTarget> = merged_rows.with_untracked(|m| {
-            uids.iter()
-                .filter_map(|uid| {
-                    m.get(uid).map(|mr| DetailTarget {
-                        key: mr.kind.key.clone(),
-                        namespace: mr.row.namespace.clone(),
-                        name: mr.row.name.clone(),
-                    })
-                })
-                .collect()
-        });
-        fire_action(toast, action, &targets);
-        select_mode.set(false);
-    };
+    let do_delete =
+        make_do_delete_multi(toast, merged_rows, selected, move || select_mode.set(false));
     let on_logs = Callback::new(move |_| {
         let uids = selected.get_untracked();
         merged_rows.with_untracked(|m| {
@@ -279,7 +265,8 @@ pub(crate) fn MobileSearchList() -> impl IntoView {
                 selected=selected
                 select_mode=select_mode
                 all_uids=move || shown_uids.get()
-                do_bulk=do_bulk
+                do_bulk=move |_: &'static str| {}
+                do_delete=do_delete
                 on_logs=on_logs />
         </div>
     }

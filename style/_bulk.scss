@@ -30,6 +30,28 @@
     outline: 1px solid var(--accent);
     outline-offset: 2px;
   }
+
+  // Standalone use (option toggles in dialogs — drain, delete — outside the
+  // selectable table): always visible, checked state driven by the native
+  // `:checked` pseudo rather than an ancestor row's `.selected` class.
+  &.check-static {
+    width: 15px;
+    border-width: 1px;
+    opacity: 1;
+    &:checked {
+      background: color-mix(in srgb, var(--accent) 9%, var(--bg));
+      border-color: var(--accent);
+      &::after {
+        content: "";
+        position: absolute;
+        width: 5px;
+        height: 5px;
+        inset: 0;
+        margin: auto;
+        background: var(--accent);
+      }
+    }
+  }
 }
 .grid-table.selecting .check,
 .grid-row.row.selected .check {

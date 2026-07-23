@@ -6,7 +6,7 @@ use leptos::prelude::*;
 use roder_core::{ResourceKind, RowStatus};
 
 use crate::app::events::{fire_action, fire_action_with};
-use crate::app::overlays::confirm::{ask_confirm, Confirm};
+use crate::app::overlays::delete::{ask_delete, delete_extra, DeleteRequest};
 use crate::app::overlays::toast::{show_toast, Toast, ToastKind};
 use crate::app::state::{
     open_logs, Catalog, CtxMenu, DetailTarget, ExecOpen, ExecTarget, LogPods, LogTarget, TableRows,
@@ -23,7 +23,7 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
     let detail = expect_context::<RwSignal<Option<DetailTarget>>>();
     let selected_kind = expect_context::<RwSignal<Option<ResourceKind>>>();
     let selected_ns = expect_context::<RwSignal<Option<String>>>();
-    let confirm = expect_context::<RwSignal<Option<Confirm>>>();
+    let delete_confirm = expect_context::<RwSignal<Option<DeleteRequest>>>();
     let catalog = expect_context::<Catalog>().0;
     let log_pods = expect_context::<LogPods>().0;
     let exec_open = expect_context::<ExecOpen>().0;
@@ -178,8 +178,8 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
                     let n = ts.len();
                     let label = if n == 1 { "Delete this resource?".to_string() }
                                 else { format!("Delete {n} resources?") };
-                    ask_confirm(confirm, label, "Delete", move || {
-                        fire_action(toast, "delete", &ts);
+                    ask_delete(delete_confirm, label, move |force, propagation| {
+                        fire_action_with(toast, "delete", &ts, delete_extra(force, propagation));
                         if let Some(sel) = table_selected.get_value() { sel.set(Default::default()); }
                     });
                     do_close();

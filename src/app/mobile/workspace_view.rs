@@ -8,14 +8,14 @@ use std::collections::HashMap;
 use leptos::prelude::*;
 use roder_core::{ResourceKind, WatchEvent};
 
-use crate::app::events::{fire_action, RowMap};
+use crate::app::events::{make_bulk_open_logs, make_do_bulk, make_do_delete, RowMap};
 use crate::app::hooks::{use_table_state, Coalescer};
 use crate::app::mobile::bulk_bar::MobileBulkBar;
 use crate::app::mobile::row_card::{use_select_mode, CardFields, MobileRowCard};
 use crate::app::overlays::toast::Toast;
 use crate::app::state::{
-    open_logs, Catalog, ConnectionState, Connectivity, CtxMenu, DetailTarget, LogPods, LogTarget,
-    OnlyProblems, SortKey, Tick, WorkspaceConf,
+    Catalog, ConnectionState, Connectivity, CtxMenu, DetailTarget, LogPods, OnlyProblems, SortKey,
+    Tick, WorkspaceConf,
 };
 use crate::app::table_logic;
 use crate::app::util::predicate::KindKind;
@@ -205,24 +205,18 @@ fn MobilePane(kind: ResourceKind, rows: RowMap) -> impl IntoView {
     let key_sv = StoredValue::new(kind.key.clone());
     let columns_sv = StoredValue::new(kind.columns.clone());
 
-    let do_bulk = move |action: &'static str| {
-        let key = key_sv.get_value();
-        let uids = selected.get_untracked();
-        let targets = rows.with_untracked(|v| table_logic::bulk_targets(&key, v, &uids));
-        fire_action(toast, action, &targets);
-        select_mode.set(false);
-    };
-    let on_logs = Callback::new(move |_| {
-        let uids = selected.get_untracked();
-        let key = key_sv.get_value();
-        let agg = !is_pod_kind;
-        rows.with_untracked(|v| {
-            for r in v.values().filter(|r| uids.contains(&r.uid)) {
-                open_logs(log_pods, LogTarget::from_row(&key, r, agg));
-            }
-        });
-        select_mode.set(false);
-    });
+    let reset_selection = move || select_mode.set(false);
+    let do_bulk = make_do_bulk(toast, key_sv, rows, selected, reset_selection);
+    let do_delete = make_do_delete(toast, key_sv, rows, selected, reset_selection);
+    let do_logs = make_bulk_open_logs(
+        log_pods,
+        key_sv,
+        rows,
+        selected,
+        is_pod_kind,
+        reset_selection,
+    );
+    let on_logs = Callback::new(move |()| do_logs());
 
     view! {
         <div class="mobile-list-head">
@@ -269,6 +263,7 @@ fn MobilePane(kind: ResourceKind, rows: RowMap) -> impl IntoView {
             select_mode=select_mode
             all_uids=move || shown_uids.get()
             do_bulk=do_bulk
+            do_delete=do_delete
             on_logs=on_logs
             show_logs=is_pod_kind || bulk_workload
             bulk_workload=bulk_workload

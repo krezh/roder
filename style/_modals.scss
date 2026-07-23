@@ -581,6 +581,54 @@
   }
 }
 
+/* ---- shared option row (checkbox + label + hint) — drain and delete dialogs ---- */
+// The checkbox itself reuses the table's `.check` swatch (`.check-static`
+// variant); this rule only owns the row's grid layout.
+.opt-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.02rem 0.5rem;
+  align-items: start;
+  padding: 0.38rem 0;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  > input {
+    grid-row: 1 / span 2;
+    margin: 0.12rem 0 0;
+  }
+  > span:not(.hint) {
+    font-size: 0.8rem;
+    font-weight: 500;
+  }
+  .hint {
+    grid-column: 2;
+    margin: 0;
+    font-size: 0.72rem;
+    line-height: 1.3;
+  }
+}
+
+/* ---- delete confirmation (cascade propagation + force) ---- */
+.delete-modal {
+  .delete-options {
+    margin-bottom: 1rem;
+  }
+  // Propagation: label + the shared `Dropdown` component (same trigger/menu
+  // as the topbar identity menu).
+  .delete-opt {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.4rem 0;
+    border-bottom: 1px solid var(--border);
+    > span {
+      font-size: 0.8rem;
+      font-weight: 500;
+    }
+  }
+}
+
 /* ---- drain dialog + progress ---- */
 .drain-modal {
   width: min(520px, 92vw);
@@ -640,32 +688,6 @@
   }
   .drain-options {
     margin-bottom: 0.75rem;
-  }
-  .drain-opt {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    gap: 0.02rem 0.5rem;
-    align-items: start;
-    padding: 0.38rem 0;
-    border-bottom: 1px solid var(--border);
-    cursor: pointer;
-    > input {
-      grid-row: 1 / span 2;
-      width: 14px;
-      height: 14px;
-      margin: 0.12rem 0 0;
-      accent-color: var(--accent);
-    }
-    > span:not(.hint) {
-      font-size: 0.8rem;
-      font-weight: 500;
-    }
-    .hint {
-      grid-column: 2;
-      margin: 0;
-      font-size: 0.72rem;
-      line-height: 1.3;
-    }
   }
   .drain-numbers {
     display: grid;
@@ -729,11 +751,11 @@
     .drain-log-line { word-break: break-word; }
   }
   // Retry footer shown once a `Blocked` event lands: re-uses `.drain-warning`
-  // and `.drain-opt` above it, plus the shared `.modal-actions` for its own
+  // and `.opt-row` above it, plus the shared `.modal-actions` for its own
   // "Retry" button — just needs separation from the log it follows.
   .drain-blocked {
     margin-top: 0.7rem;
-    .drain-opt:last-of-type { margin-bottom: 0.55rem; }
+    .opt-row:last-of-type { margin-bottom: 0.55rem; }
   }
 }
 

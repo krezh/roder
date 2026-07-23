@@ -9,9 +9,9 @@ use roder_core::{ResourceKind, RowStatus, Trend};
 
 use crate::app::components::table::{cmp_str, sortable_th, FlashTd};
 use crate::app::components::table_row::{NameCell, ResourceRow as ResourceRowView};
-use crate::app::events::fire_action;
+use crate::app::events::make_do_delete_multi;
 use crate::app::hooks::{table_window, use_table_state, Coalescer};
-use crate::app::overlays::confirm::{ask_confirm, Confirm};
+use crate::app::overlays::delete::{ask_delete, DeleteRequest};
 use crate::app::overlays::toast::Toast;
 use crate::app::search_state::{self, MergedRow};
 use crate::app::state::{
@@ -134,7 +134,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
     let tick = expect_context::<Tick>().0;
     let only_problems = expect_context::<OnlyProblems>().0;
     let resource_filter = expect_context::<ResourceFilter>().0;
-    let confirm = expect_context::<RwSignal<Option<Confirm>>>();
+    let delete_confirm = expect_context::<RwSignal<Option<DeleteRequest>>>();
     let toast = expect_context::<RwSignal<Option<Toast>>>();
 
     let t = use_table_state();
@@ -422,23 +422,9 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
         });
     });
 
-    // Bulk action helper
-    let do_bulk = move |action: &'static str| {
-        let uids = selected.get_untracked();
-        let targets: Vec<DetailTarget> = merged_rows.with_untracked(|m| {
-            uids.iter()
-                .filter_map(|uid| {
-                    m.get(uid).map(|mr| DetailTarget {
-                        key: mr.kind.key.clone(),
-                        namespace: mr.row.namespace.clone(),
-                        name: mr.row.name.clone(),
-                    })
-                })
-                .collect()
-        });
-        fire_action(toast, action, &targets);
-        selected.set(std::collections::BTreeSet::new());
-    };
+    let do_delete = make_do_delete_multi(toast, merged_rows, selected, move || {
+        selected.set(std::collections::BTreeSet::new())
+    });
 
     let clear_search = move |_| {
         #[cfg(target_arch = "wasm32")]
@@ -479,7 +465,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                     }>"Logs"</button>
                     <button class="act danger" on:click=move |_| {
                         let n = selected.get_untracked().len();
-                        ask_confirm(confirm, format!("Delete {n} resources?"), "Delete", move || do_bulk("delete"));
+                        ask_delete(delete_confirm, format!("Delete {n} resources?"), do_delete);
                     }>"Delete"</button>
                 </div>
             </div>

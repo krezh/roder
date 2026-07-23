@@ -3,10 +3,9 @@ use roder_core::{ResourceKind, RowStatus, Trend};
 
 use crate::app::components::table::{sortable_th, FlashTd};
 use crate::app::components::table_row::{NameCell, ResourceRow as ResourceRowView};
-use crate::app::events::fire_action;
-use crate::app::events::RowMap;
+use crate::app::events::{make_bulk_open_logs, make_do_bulk, make_do_delete, RowMap};
 use crate::app::hooks::{table_window, use_sse_subscription, use_table_state};
-use crate::app::overlays::confirm::{ask_confirm, Confirm};
+use crate::app::overlays::delete::{ask_delete, DeleteRequest};
 use crate::app::overlays::toast::{show_toast, Toast, ToastKind};
 use crate::app::state::{
     open_logs, CtxMenu, DetailTarget, FilterFocus, LogPods, LogTarget, OnlyProblems,
@@ -53,7 +52,7 @@ pub(crate) fn KindTable(
     let only_problems = expect_context::<OnlyProblems>().0;
     let resource_filter = expect_context::<ResourceFilter>().0;
     let log_pods = expect_context::<LogPods>().0;
-    let confirm = expect_context::<RwSignal<Option<Confirm>>>();
+    let delete_confirm = expect_context::<RwSignal<Option<DeleteRequest>>>();
     let toast = expect_context::<RwSignal<Option<Toast>>>();
     let selected_ns_ctx = use_context::<RwSignal<Option<String>>>();
 
@@ -273,13 +272,17 @@ pub(crate) fn KindTable(
     let press = t.press;
     let table_ref = t.table_ref;
 
-    let do_bulk = move |action: &'static str| {
-        let key = key_sv.get_value();
-        let uids = selected.get_untracked();
-        let targets = rows.with_untracked(|v| table_logic::bulk_targets(&key, v, &uids));
-        fire_action(toast, action, &targets);
-        selected.set(std::collections::BTreeSet::new());
-    };
+    let reset_selection = move || selected.set(std::collections::BTreeSet::new());
+    let do_bulk = make_do_bulk(toast, key_sv, rows, selected, reset_selection);
+    let do_delete = make_do_delete(toast, key_sv, rows, selected, reset_selection);
+    let do_logs = make_bulk_open_logs(
+        log_pods,
+        key_sv,
+        rows,
+        selected,
+        is_pod_kind,
+        reset_selection,
+    );
 
     // Grid track count follows the live column count, so the grid reflows when
     // columns change.
@@ -542,17 +545,7 @@ pub(crate) fn KindTable(
                     <button class="act" on:click=move |_| selected.set(shown_uids.get().into_iter().collect())>"Select all"</button>
                     <button class="act" on:click=move |_| selected.set(std::collections::BTreeSet::new())>"Clear"</button>
                     {(is_pod_kind || bulk_workload).then(|| view! {
-                        <button class="act" on:click=move |_| {
-                            let uids = selected.get_untracked();
-                            let key = key_sv.get_value();
-                            let agg = !is_pod_kind;
-                            rows.with_untracked(|v| {
-                                for r in v.values().filter(|r| uids.contains(&r.uid)) {
-                                    open_logs(log_pods, LogTarget::from_row(&key, r, agg));
-                                }
-                            });
-                            selected.set(std::collections::BTreeSet::new());
-                        }>"Logs"</button>
+                        <button class="act" on:click=move |_| do_logs()>"Logs"</button>
                     })}
                     {bulk_workload.then(|| view! {
                         <button class="act" on:click=move |_| do_bulk("restart")>"Restart"</button>
@@ -575,7 +568,7 @@ pub(crate) fn KindTable(
                     })}
                     <button class="act danger" on:click=move |_| {
                         let n = selected.get_untracked().len();
-                        ask_confirm(confirm, format!("Delete {n} resources?"), "Delete", move || do_bulk("delete"));
+                        ask_delete(delete_confirm, format!("Delete {n} resources?"), do_delete);
                     }>"Delete"</button>
                 </div>
             </div>

@@ -2,17 +2,38 @@
 //! server-side apply, ESO force-sync, and manual CronJob triggering.
 
 use k8s_openapi::api::core::v1::Pod;
-use kube::api::{Api, DeleteParams, DynamicObject, EvictParams, Patch, PatchParams, PostParams};
-use roder_core::ResourceKind;
+use kube::api::{
+    Api, DeleteParams, DynamicObject, EvictParams, Patch, PatchParams, PostParams,
+    PropagationPolicy,
+};
+use roder_core::{DeletePropagation, ResourceKind};
 use serde_json::json;
 
 use super::{api_err, now_rfc3339, Backend};
 use crate::client::K8sError;
 
 impl Backend {
-    pub async fn delete(&self, key: &str, ns: Option<&str>, name: &str) -> Result<(), K8sError> {
+    /// `force` maps to `kubectl delete --force` (grace period of zero, i.e.
+    /// no graceful termination wait); `propagation` maps to `--cascade`.
+    pub async fn delete(
+        &self,
+        key: &str,
+        ns: Option<&str>,
+        name: &str,
+        force: bool,
+        propagation: Option<DeletePropagation>,
+    ) -> Result<(), K8sError> {
+        let params = DeleteParams {
+            grace_period_seconds: force.then_some(0),
+            propagation_policy: propagation.map(|p| match p {
+                DeletePropagation::Orphan => PropagationPolicy::Orphan,
+                DeletePropagation::Background => PropagationPolicy::Background,
+                DeletePropagation::Foreground => PropagationPolicy::Foreground,
+            }),
+            ..DeleteParams::default()
+        };
         self.dyn_api(key, ns)?
-            .delete(name, &DeleteParams::default())
+            .delete(name, &params)
             .await
             .map_err(api_err)?;
         Ok(())

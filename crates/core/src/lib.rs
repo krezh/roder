@@ -500,6 +500,19 @@ impl DrainOptions {
     }
 }
 
+/// Cascade behavior for a delete request, mirroring `kubectl delete --cascade`.
+/// `None` (the default) leaves it up to the API server's own default for the
+/// resource type rather than forcing a specific policy.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum DeletePropagation {
+    /// Delete the object now, leaving its dependents in place (`--cascade=orphan`).
+    Orphan,
+    /// Delete dependents in the background, after the owner is removed (`--cascade=background`).
+    Background,
+    /// Delete dependents first, then the owner, once they're gone (`--cascade=foreground`).
+    Foreground,
+}
+
 /// One pod blocking a drain, and which [`DrainOptions`] field would clear it.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DrainBlocker {

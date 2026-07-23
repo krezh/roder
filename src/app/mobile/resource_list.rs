@@ -5,14 +5,13 @@
 use leptos::prelude::*;
 use roder_core::ResourceKind;
 
-use crate::app::events::fire_action;
+use crate::app::events::{make_bulk_open_logs, make_do_bulk, make_do_delete};
 use crate::app::hooks::{use_sse_subscription, use_table_state};
 use crate::app::mobile::bulk_bar::MobileBulkBar;
 use crate::app::mobile::row_card::{use_select_mode, CardFields, MobileRowCard};
 use crate::app::overlays::toast::Toast;
 use crate::app::state::{
-    open_logs, CtxMenu, DetailTarget, LogPods, LogTarget, OnlyProblems, SortKey, TableRows,
-    TableSelected, Tick,
+    CtxMenu, DetailTarget, LogPods, OnlyProblems, SortKey, TableRows, TableSelected, Tick,
 };
 use crate::app::table_logic;
 use crate::app::util::predicate::KindKind;
@@ -120,24 +119,18 @@ fn MobileKindList(
     let selected = t.selected;
     let select_mode = use_select_mode(selected);
 
-    let do_bulk = move |action: &'static str| {
-        let key = key_sv.get_value();
-        let uids = selected.get_untracked();
-        let targets = rows.with_untracked(|v| table_logic::bulk_targets(&key, v, &uids));
-        fire_action(toast, action, &targets);
-        select_mode.set(false);
-    };
-    let on_logs = Callback::new(move |_| {
-        let uids = selected.get_untracked();
-        let key = key_sv.get_value();
-        let agg = !is_pod_kind;
-        rows.with_untracked(|v| {
-            for r in v.values().filter(|r| uids.contains(&r.uid)) {
-                open_logs(log_pods, LogTarget::from_row(&key, r, agg));
-            }
-        });
-        select_mode.set(false);
-    });
+    let reset_selection = move || select_mode.set(false);
+    let do_bulk = make_do_bulk(toast, key_sv, rows, selected, reset_selection);
+    let do_delete = make_do_delete(toast, key_sv, rows, selected, reset_selection);
+    let do_logs = make_bulk_open_logs(
+        log_pods,
+        key_sv,
+        rows,
+        selected,
+        is_pod_kind,
+        reset_selection,
+    );
+    let on_logs = Callback::new(move |()| do_logs());
 
     view! {
         <div class="mobile-list">
@@ -201,6 +194,7 @@ fn MobileKindList(
                 select_mode=select_mode
                 all_uids=move || shown_uids.get()
                 do_bulk=do_bulk
+                do_delete=do_delete
                 on_logs=on_logs
                 bulk_workload=bulk_workload
                 bulk_flux=bulk_flux

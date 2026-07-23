@@ -1,3 +1,4 @@
+pub(crate) mod dropdown;
 pub(crate) mod icons;
 pub(crate) mod kind_table;
 pub(crate) mod sidebar;

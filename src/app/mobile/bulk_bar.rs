@@ -5,7 +5,7 @@
 use leptos::prelude::*;
 
 use crate::app::events::UidSet;
-use crate::app::overlays::confirm::{ask_confirm, Confirm};
+use crate::app::overlays::delete::{ask_delete, DeleteRequest};
 
 #[component]
 pub(crate) fn MobileBulkBar(
@@ -18,6 +18,9 @@ pub(crate) fn MobileBulkBar(
     all_uids: impl Fn() -> Vec<String> + Copy + Send + Sync + 'static,
     /// Dispatches a bulk action by name (mirrors desktop's `do_bulk`/`fire_action`).
     do_bulk: impl Fn(&'static str) + Copy + Send + Sync + 'static,
+    /// Dispatches the bulk delete with its force/propagation options (mirrors
+    /// desktop's `do_delete`/`fire_action_with`).
+    do_delete: impl Fn(bool, Option<roder_core::DeletePropagation>) + Copy + Send + Sync + 'static,
     /// Opens logs for the selection. Always supplied; gated by `show_logs`
     /// (rather than made optional) since a runtime bool can't be threaded
     /// through an `Option<Callback<_>>` prop slot at the call site.
@@ -28,7 +31,7 @@ pub(crate) fn MobileBulkBar(
     #[prop(default = false)] bulk_helmrelease: bool,
     #[prop(default = false)] bulk_has_source_ref: bool,
 ) -> impl IntoView {
-    let confirm = expect_context::<RwSignal<Option<Confirm>>>();
+    let delete_confirm = expect_context::<RwSignal<Option<DeleteRequest>>>();
 
     view! {
         <div class="mobile-bulkbar-wrap" class:open=move || !selected.get().is_empty()>
@@ -56,7 +59,7 @@ pub(crate) fn MobileBulkBar(
                 })}
                 <button class="act danger" on:click=move |_| {
                     let n = selected.get_untracked().len();
-                    ask_confirm(confirm, format!("Delete {n} resources?"), "Delete", move || do_bulk("delete"));
+                    ask_delete(delete_confirm, format!("Delete {n} resources?"), do_delete);
                 }>"Delete"</button>
             </div>
         </div>

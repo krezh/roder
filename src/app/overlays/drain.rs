@@ -190,26 +190,26 @@ fn DrainForm(
                         </div>
                     })}
                     <div class="drain-options">
-                        <label class="drain-opt">
-                            <input type="checkbox" prop:checked=move || force.get()
+                        <label class="opt-row">
+                            <input type="checkbox" class="check check-static" prop:checked=move || force.get()
                                 on:change=move |e| force.set(event_target_checked(&e)) />
                             <span>"Force"</span>
                             <span class="hint">"Evict pods not managed by a controller."</span>
                         </label>
-                        <label class="drain-opt">
-                            <input type="checkbox" prop:checked=move || delete_emptydir.get()
+                        <label class="opt-row">
+                            <input type="checkbox" class="check check-static" prop:checked=move || delete_emptydir.get()
                                 on:change=move |e| delete_emptydir.set(event_target_checked(&e)) />
                             <span>"Delete emptyDir data"</span>
                             <span class="hint">"Evict pods using emptyDir volumes."</span>
                         </label>
-                        <label class="drain-opt">
-                            <input type="checkbox" prop:checked=move || ignore_daemonsets.get()
+                        <label class="opt-row">
+                            <input type="checkbox" class="check check-static" prop:checked=move || ignore_daemonsets.get()
                                 on:change=move |e| ignore_daemonsets.set(event_target_checked(&e)) />
                             <span>"Ignore DaemonSets"</span>
                             <span class="hint">"Proceed while leaving DaemonSet pods in place."</span>
                         </label>
-                        <label class="drain-opt">
-                            <input type="checkbox" prop:checked=move || disable_eviction.get()
+                        <label class="opt-row">
+                            <input type="checkbox" class="check check-static" prop:checked=move || disable_eviction.get()
                                 on:change=move |e| disable_eviction.set(event_target_checked(&e)) />
                             <span>"Disable eviction"</span>
                             <span class="hint">"Delete pods directly, bypassing PodDisruptionBudgets."</span>
@@ -529,8 +529,8 @@ fn DrainProgress(
                             let (key, checked) = item;
                             let label = clearable_by_label(&key);
                             view! {
-                                <label class="drain-opt">
-                                    <input type="checkbox" prop:checked=move || checked.get()
+                                <label class="opt-row">
+                                    <input type="checkbox" class="check check-static" prop:checked=move || checked.get()
                                         on:change=move |e| checked.set(event_target_checked(&e)) />
                                     <span>{label}</span>
                                 </label>

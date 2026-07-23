@@ -3,12 +3,15 @@
 use std::collections::HashMap;
 
 use leptos::prelude::*;
-use roder_core::{ResourceRow, WatchEvent};
+use roder_core::{DeletePropagation, ResourceRow, WatchEvent};
 
+use crate::app::overlays::delete::delete_extra;
 use crate::app::overlays::toast::{
     show_toast, show_toast_detail, show_toast_full, show_toast_list, Toast, ToastKind,
 };
-use crate::app::state::DetailTarget;
+use crate::app::search_state::MergedRow;
+use crate::app::state::{open_logs, DetailTarget, LogTarget};
+use crate::app::table_logic;
 use crate::data;
 
 pub(crate) type UidSet = RwSignal<std::collections::BTreeSet<String>>;
@@ -130,6 +133,93 @@ pub(crate) fn fire_action_with(
                 }
             }
         });
+    }
+}
+
+/// Build a `do_bulk`-style dispatcher for a single-kind table/list: resolve
+/// the current selection into targets via `table_logic::bulk_targets`, fire
+/// `action`, then run `reset` (e.g. clearing `selected` or `select_mode`).
+/// Shared by `KindTable` and the mobile single-kind resource/workspace lists.
+pub(crate) fn make_do_bulk(
+    toast: RwSignal<Option<Toast>>,
+    key_sv: StoredValue<String>,
+    rows: RowMap,
+    selected: UidSet,
+    reset: impl Fn() + Copy + Send + Sync + 'static,
+) -> impl Fn(&'static str) + Copy + Send + Sync + 'static {
+    move |action: &'static str| {
+        let key = key_sv.get_value();
+        let uids = selected.get_untracked();
+        let targets = rows.with_untracked(|v| table_logic::bulk_targets(&key, v, &uids));
+        fire_action(toast, action, &targets);
+        reset();
+    }
+}
+
+/// Same shape as [`make_do_bulk`] but for delete's force/propagation options.
+pub(crate) fn make_do_delete(
+    toast: RwSignal<Option<Toast>>,
+    key_sv: StoredValue<String>,
+    rows: RowMap,
+    selected: UidSet,
+    reset: impl Fn() + Copy + Send + Sync + 'static,
+) -> impl Fn(bool, Option<DeletePropagation>) + Copy + Send + Sync + 'static {
+    move |force, propagation| {
+        let key = key_sv.get_value();
+        let uids = selected.get_untracked();
+        let targets = rows.with_untracked(|v| table_logic::bulk_targets(&key, v, &uids));
+        fire_action_with(toast, "delete", &targets, delete_extra(force, propagation));
+        reset();
+    }
+}
+
+/// [`make_do_delete`]'s counterpart for the mixed-kind search views, whose
+/// rows live in a `MergedRow` map keyed by uid rather than a single-kind
+/// `RowMap` sharing one `key`.
+pub(crate) fn make_do_delete_multi(
+    toast: RwSignal<Option<Toast>>,
+    merged_rows: RwSignal<HashMap<String, MergedRow>>,
+    selected: UidSet,
+    reset: impl Fn() + Copy + Send + Sync + 'static,
+) -> impl Fn(bool, Option<DeletePropagation>) + Copy + Send + Sync + 'static {
+    move |force, propagation| {
+        let uids = selected.get_untracked();
+        let targets: Vec<DetailTarget> = merged_rows.with_untracked(|m| {
+            uids.iter()
+                .filter_map(|uid| {
+                    m.get(uid).map(|mr| DetailTarget {
+                        key: mr.kind.key.clone(),
+                        namespace: mr.row.namespace.clone(),
+                        name: mr.row.name.clone(),
+                    })
+                })
+                .collect()
+        });
+        fire_action_with(toast, "delete", &targets, delete_extra(force, propagation));
+        reset();
+    }
+}
+
+/// Open logs for the current bulk selection of a single-kind list, then run
+/// `reset`. Shared by `KindTable` and the mobile single-kind lists.
+pub(crate) fn make_bulk_open_logs(
+    log_pods: RwSignal<Vec<LogTarget>>,
+    key_sv: StoredValue<String>,
+    rows: RowMap,
+    selected: UidSet,
+    is_pod_kind: bool,
+    reset: impl Fn() + Copy + Send + Sync + 'static,
+) -> impl Fn() + Copy + Send + Sync + 'static {
+    move || {
+        let uids = selected.get_untracked();
+        let key = key_sv.get_value();
+        let agg = !is_pod_kind;
+        rows.with_untracked(|v| {
+            for r in v.values().filter(|r| uids.contains(&r.uid)) {
+                open_logs(log_pods, LogTarget::from_row(&key, r, agg));
+            }
+        });
+        reset();
     }
 }
 

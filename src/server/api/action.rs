@@ -25,6 +25,7 @@ pub struct ActionRequest {
     replicas: Option<i32>,
     yaml: Option<String>,
     pub(crate) force: Option<bool>,
+    pub(crate) propagation: Option<roder_core::DeletePropagation>,
     reset: Option<bool>,
     pub(crate) service: Option<String>,
     pub(crate) drain: Option<bool>,
@@ -167,7 +168,10 @@ pub async fn action(
             return (StatusCode::BAD_REQUEST, "missing key or name").into_response();
         };
         match req.action.as_str() {
-            "delete" => b.delete(key, ns, name).await,
+            "delete" => {
+                b.delete(key, ns, name, req.force.unwrap_or(false), req.propagation)
+                    .await
+            }
             "evict" => {
                 let Some(ns) = ns else {
                     return (StatusCode::BAD_REQUEST, "missing namespace").into_response();
@@ -238,6 +242,7 @@ mod tests {
             replicas: None,
             yaml: None,
             force: None,
+            propagation: None,
             reset: None,
             service: None,
             drain: None,

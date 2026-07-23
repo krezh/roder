@@ -150,6 +150,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             let has_source_ref = targets_all(&targets, |kind| kind.has_source_ref());
             let is_eso = targets_all(&targets, |kind| kind.is_eso());
             let is_cronjob = targets_all(&targets, |kind| kind.is_cronjob());
+            let is_kopiur_snapshot_policy = targets_all(&targets, |kind| kind.is_kopiur_snapshot_policy());
             let is_node = targets_all(&targets, |kind| kind.is_node());
             // `RowStatus::Warn` is reserved for the suspended case in the Flux
             // projector (see `ready_message_cells`), so it doubles as the signal
@@ -252,6 +253,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             let resume    = bulk_act!("flux-resume");
             let refresh   = bulk_act!("eso-refresh");
             let trigger   = bulk_act!("cronjob-trigger");
+            let snapshot_now = bulk_act!("kopiur-snapshot-now");
             let cordon    = bulk_act!("cordon");
             let uncordon  = bulk_act!("uncordon");
             // Opens the drain options dialog (`overlays::drain`) rather than
@@ -472,6 +474,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                         }
                     })}
                     {is_cronjob.then(|| view! { <button class="ctx-item" on:click=trigger>"Trigger"</button> })}
+                    {is_kopiur_snapshot_policy.then(|| view! { <button class="ctx-item" on:click=snapshot_now>"Snapshot Now"</button> })}
                     {is_flux.then(|| view! {
                         <div class="ctx-item ctx-reconcile">
                             <button class="ctx-reconcile-btn" on:click=reconcile>"Reconcile"</button>

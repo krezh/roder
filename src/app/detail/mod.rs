@@ -142,6 +142,7 @@ pub(crate) fn RowDetail(
     // Pod-owning resources get a live "Pods" tab listing their pods by selector.
     let has_pods = is_workload || kk.is_job();
     let is_cronjob = kk.is_cronjob();
+    let is_kopiur_snapshot_policy = kk.is_kopiur_snapshot_policy();
     let ns = target.namespace.clone().unwrap_or_default();
     let pod = target.name.clone();
     let exec_open = expect_context::<ExecOpen>().0;
@@ -284,6 +285,11 @@ pub(crate) fn RowDetail(
                 {is_cronjob.then(|| view! {
                     <Show when=can_patch fallback=|| ()>
                         <button class="act" on:click=move |_| run("cronjob-trigger", serde_json::json!({}))>"Trigger"</button>
+                    </Show>
+                })}
+                {is_kopiur_snapshot_policy.then(|| view! {
+                    <Show when=can_patch fallback=|| ()>
+                        <button class="act" on:click=move |_| run("kopiur-snapshot-now", serde_json::json!({}))>"Snapshot Now"</button>
                     </Show>
                 })}
                 {is_pod.then(|| {

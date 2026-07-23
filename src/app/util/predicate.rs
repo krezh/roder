@@ -44,6 +44,10 @@ impl<'a> KindKind<'a> {
         self.group == "external-secrets.io"
     }
 
+    pub(crate) fn is_kopiur_snapshot_policy(&self) -> bool {
+        self.group == "kopiur.home-operations.com" && self.kind == "SnapshotPolicy"
+    }
+
     /// Scalable workloads have spec.replicas (DaemonSets do not).
     pub(crate) fn is_scalable(&self) -> bool {
         self.group == "apps" && matches!(self.kind, "Deployment" | "StatefulSet" | "ReplicaSet")
@@ -104,6 +108,24 @@ mod tests {
     fn is_kustomization_false_for_non_flux_group() {
         let kk = KindKind::new("apps", "Kustomization");
         assert!(!kk.is_kustomization());
+    }
+
+    #[test]
+    fn is_kopiur_snapshot_policy_true_for_kopiur_snapshotpolicy() {
+        let kk = KindKind::new("kopiur.home-operations.com", "SnapshotPolicy");
+        assert!(kk.is_kopiur_snapshot_policy());
+    }
+
+    #[test]
+    fn is_kopiur_snapshot_policy_false_for_other_kopiur_kinds() {
+        let kk = KindKind::new("kopiur.home-operations.com", "Snapshot");
+        assert!(!kk.is_kopiur_snapshot_policy());
+    }
+
+    #[test]
+    fn is_kopiur_snapshot_policy_false_for_non_kopiur_group() {
+        let kk = KindKind::new("external-secrets.io", "SnapshotPolicy");
+        assert!(!kk.is_kopiur_snapshot_policy());
     }
 
     #[test]

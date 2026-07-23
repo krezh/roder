@@ -28,6 +28,7 @@ pub use drain::DrainSession;
 mod exec;
 mod flux;
 mod helm_release;
+mod kopiur;
 mod logs;
 mod mutations;
 mod overview;

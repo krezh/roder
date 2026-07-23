@@ -89,6 +89,7 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
             let has_source_ref = targets_all(&targets, |kind| kind.has_source_ref());
             let is_eso = targets_all(&targets, |kind| kind.is_eso());
             let is_cronjob = targets_all(&targets, |kind| kind.is_cronjob());
+            let is_kopiur_snapshot_policy = targets_all(&targets, |kind| kind.is_kopiur_snapshot_policy());
             let suspend_state: Option<bool> = rows_opt.and_then(|rows| {
                 rows.with_untracked(|rm| {
                     let mut states = target_uids.iter().filter_map(|uid| rm.get(uid)).map(|r| r.status == RowStatus::Warn);
@@ -171,6 +172,7 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
             let resume    = bulk_act!("flux-resume");
             let refresh   = bulk_act!("eso-refresh");
             let trigger   = bulk_act!("cronjob-trigger");
+            let snapshot_now = bulk_act!("kopiur-snapshot-now");
             let delete = {
                 let ts = targets.clone();
                 move |_| {
@@ -240,6 +242,7 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
                         }
                     })}
                     {is_cronjob.then(|| view! { <button class="sheet-item" on:click=trigger>"Trigger"</button> })}
+                    {is_kopiur_snapshot_policy.then(|| view! { <button class="sheet-item" on:click=snapshot_now>"Snapshot Now"</button> })}
                     {is_flux.then(|| view! {
                         <button class="sheet-item" on:click=reconcile>"Reconcile"</button>
                         {has_source_ref.then(|| view! {

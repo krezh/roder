@@ -213,6 +213,7 @@ pub async fn action(
             "flux-reset" => b.flux_reset(key, ns, name).await,
             "eso-refresh" => b.eso_refresh(key, ns, name).await,
             "cronjob-trigger" => b.cronjob_trigger(key, ns, name).await,
+            "kopiur-snapshot-now" => b.kopiur_snapshot_now(key, ns, name).await,
             other => {
                 return (StatusCode::BAD_REQUEST, format!("unknown action: {other}"))
                     .into_response()

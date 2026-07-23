@@ -37,6 +37,7 @@ fn action_label(action: &str) -> &str {
         "uncordon" => "Uncordoned",
         "eso-refresh" => "Refreshed",
         "cronjob-trigger" => "Triggered",
+        "kopiur-snapshot-now" => "Snapshot triggered",
         other => other,
     }
 }

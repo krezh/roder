@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.36](https://github.com/krezh/roder/compare/0.1.35...0.1.36) (2026-07-23)
+
+
+### Features
+
+* **cargo:** update rust crate base64 (0.22.1 ➔ 0.23.0) ([#116](https://github.com/krezh/roder/issues/116)) ([a95e7f3](https://github.com/krezh/roder/commit/a95e7f3398311c8cd79113abf8f165cce0fa9b92))
+* **delete:** add propagation policy and force options ([436fbff](https://github.com/krezh/roder/commit/436fbff3ca08dd9dbd7b1210a3bff2a694068474))
+* **kopiur:** trigger manual snapshots on a SnapshotPolicy ([52f3c03](https://github.com/krezh/roder/commit/52f3c0326e9448b10f36fef21245da67d5fef0bb))
+
 ## [0.1.35](https://github.com/krezh/roder/compare/0.1.34...0.1.35) (2026-07-23)
 
 

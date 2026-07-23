@@ -376,6 +376,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "base64"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b25655df2c3cdd83c5e5b293b88acd880332b2ddadd7c30ac43144fdc0033da9"
+
+[[package]]
 name = "base64ct"
 version = "1.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3700,7 +3706,7 @@ version = "0.1.35"
 dependencies = [
  "aes-gcm",
  "axum",
- "base64 0.22.1",
+ "base64 0.23.0",
  "console_error_panic_hook",
  "futures",
  "gloo-net 0.7.0",
@@ -3738,7 +3744,7 @@ dependencies = [
 name = "roder-auth"
 version = "0.1.35"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.0",
  "openidconnect",
  "reqwest 0.13.4",
  "rustls",
@@ -3763,7 +3769,7 @@ name = "roder-k8s"
 version = "0.1.35"
 dependencies = [
  "arc-swap",
- "base64 0.22.1",
+ "base64 0.23.0",
  "flate2",
  "futures",
  "http",
@@ -3787,7 +3793,7 @@ name = "roder-talos"
 version = "0.1.35"
 dependencies = [
  "async-stream",
- "base64 0.22.1",
+ "base64 0.23.0",
  "futures",
  "hex",
  "prost",

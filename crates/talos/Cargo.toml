@@ -11,7 +11,7 @@ talos-api-rs = "0.2"
 tonic = { version = "0.14", features = ["transport", "tls-ring"] }
 tonic-prost = "0.14"
 prost = "0.14"
-base64 = "0.22"
+base64 = "0.23"
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = "0.9"

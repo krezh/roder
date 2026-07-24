@@ -101,8 +101,9 @@ fn MobileKindList(
         let problems = only_problems.get();
         let filter_text = text_filter.get().to_lowercase();
         let (sort_key, asc) = t.sort.get();
-        t.rows
-            .with(|m| table_logic::shown_uids(m.values(), sort_key, asc, problems, &filter_text))
+        t.rows.with(|m| {
+            table_logic::shown_uids(m.values(), sort_key, asc, problems, None, &filter_text)
+        })
     });
 
     let is_pod_kind = kind.group.is_empty() && kind.kind == "Pod";

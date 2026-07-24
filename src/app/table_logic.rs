@@ -62,11 +62,13 @@ pub(crate) fn shown_uids<'a>(
     sort_key: SortKey,
     asc: bool,
     only_problems: bool,
+    status_filter: Option<RowStatus>,
     filter_text_lower: &str,
 ) -> Vec<String> {
     let mut v: Vec<&ResourceRow> = rows
         .into_iter()
         .filter(|r| !only_problems || matches!(r.status, RowStatus::Error | RowStatus::Warn))
+        .filter(|r| status_filter.is_none_or(|f| r.status == f))
         .filter(|r| {
             filter_text_lower.is_empty() || r.name.to_lowercase().contains(filter_text_lower)
         })
@@ -89,6 +91,7 @@ pub(crate) fn shown_row_keys<'a>(
     sort_key: SortKey,
     asc: bool,
     only_problems: bool,
+    status_filter: Option<RowStatus>,
     filter_text_lower: &str,
 ) -> Vec<String> {
     let mut rows = rows
@@ -96,6 +99,7 @@ pub(crate) fn shown_row_keys<'a>(
         .filter(|(_, row)| {
             !only_problems || matches!(row.status, RowStatus::Error | RowStatus::Warn)
         })
+        .filter(|(_, row)| status_filter.is_none_or(|f| row.status == f))
         .filter(|(_, row)| {
             filter_text_lower.is_empty() || row.name.to_lowercase().contains(filter_text_lower)
         })
@@ -323,6 +327,7 @@ mod tests {
             crate::app::state::SortKey::Name,
             true,
             false,
+            None,
             "",
         );
 

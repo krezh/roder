@@ -174,6 +174,7 @@ pub(crate) fn MobileSearchList() -> impl IntoView {
                 sort_key,
                 asc,
                 problems,
+                None,
                 &filter_text,
             )
         })

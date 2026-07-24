@@ -44,6 +44,16 @@
   &.empty {
     opacity: 0.48;
   }
+  &:not(.strip-total) {
+    cursor: pointer;
+    &:hover {
+      background: var(--panel-2);
+    }
+    &.active {
+      background: var(--panel-2);
+      border-color: var(--accent);
+    }
+  }
 }
 .strip-lbl {
   font-size: 0.68rem;

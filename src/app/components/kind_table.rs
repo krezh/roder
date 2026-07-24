@@ -166,6 +166,8 @@ pub(crate) fn KindTable(
         });
     }
 
+    let status_filter = RwSignal::new(None::<RowStatus>);
+
     // Filtered + sorted UIDs. Uses per-pane text_filter if provided, global otherwise.
     let shown_uids = Memo::new(move |_| {
         let problems = only_problems.get();
@@ -176,8 +178,16 @@ pub(crate) fn KindTable(
         }
         .to_lowercase();
         let (sort_key, asc) = t.sort.get();
-        t.rows
-            .with(|m| table_logic::shown_uids(m.values(), sort_key, asc, problems, &filter_text))
+        t.rows.with(|m| {
+            table_logic::shown_uids(
+                m.values(),
+                sort_key,
+                asc,
+                problems,
+                status_filter.get(),
+                &filter_text,
+            )
+        })
     });
 
     let window = table_window(t, shown_uids);
@@ -493,7 +503,11 @@ pub(crate) fn KindTable(
                     <span class="strip-lbl">"Total"</span>
                     <span class="strip-val">{move || status_counts.get().0}</span>
                 </div>
-                <div class="strip-seg" class:empty=move || status_counts.get().1[0] == 0>
+                <div class="strip-seg"
+                    class:empty=move || status_counts.get().1[0] == 0
+                    class:active=move || status_filter.get() == Some(RowStatus::Ok)
+                    on:click=move |_| status_filter.update(|f| *f = if *f == Some(RowStatus::Ok) { None } else { Some(RowStatus::Ok) })
+                >
                     <span class="strip-marker ok" aria-hidden="true"></span>
                     <span class="strip-lbl">"OK"</span>
                     <span class="strip-val ok">{move || status_counts.get().1[0]}</span>
@@ -502,7 +516,11 @@ pub(crate) fn KindTable(
                         format!("width:{:.1}%", counts[0] as f64 / total.max(1) as f64 * 100.0)
                     }></span>
                 </div>
-                <div class="strip-seg" class:empty=move || status_counts.get().1[1] == 0>
+                <div class="strip-seg"
+                    class:empty=move || status_counts.get().1[1] == 0
+                    class:active=move || status_filter.get() == Some(RowStatus::Pending)
+                    on:click=move |_| status_filter.update(|f| *f = if *f == Some(RowStatus::Pending) { None } else { Some(RowStatus::Pending) })
+                >
                     <span class="strip-marker pending" aria-hidden="true"></span>
                     <span class="strip-lbl">"Pending"</span>
                     <span class="strip-val pending">{move || status_counts.get().1[1]}</span>
@@ -511,7 +529,11 @@ pub(crate) fn KindTable(
                         format!("width:{:.1}%", counts[1] as f64 / total.max(1) as f64 * 100.0)
                     }></span>
                 </div>
-                <div class="strip-seg" class:empty=move || status_counts.get().1[2] == 0>
+                <div class="strip-seg"
+                    class:empty=move || status_counts.get().1[2] == 0
+                    class:active=move || status_filter.get() == Some(RowStatus::Warn)
+                    on:click=move |_| status_filter.update(|f| *f = if *f == Some(RowStatus::Warn) { None } else { Some(RowStatus::Warn) })
+                >
                     <span class="strip-marker warn" aria-hidden="true"></span>
                     <span class="strip-lbl">"Warn"</span>
                     <span class="strip-val warn">{move || status_counts.get().1[2]}</span>
@@ -520,7 +542,11 @@ pub(crate) fn KindTable(
                         format!("width:{:.1}%", counts[2] as f64 / total.max(1) as f64 * 100.0)
                     }></span>
                 </div>
-                <div class="strip-seg" class:empty=move || status_counts.get().1[3] == 0>
+                <div class="strip-seg"
+                    class:empty=move || status_counts.get().1[3] == 0
+                    class:active=move || status_filter.get() == Some(RowStatus::Error)
+                    on:click=move |_| status_filter.update(|f| *f = if *f == Some(RowStatus::Error) { None } else { Some(RowStatus::Error) })
+                >
                     <span class="strip-marker err" aria-hidden="true"></span>
                     <span class="strip-lbl">"Error"</span>
                     <span class="strip-val err">{move || status_counts.get().1[3]}</span>
@@ -529,7 +555,11 @@ pub(crate) fn KindTable(
                         format!("width:{:.1}%", counts[3] as f64 / total.max(1) as f64 * 100.0)
                     }></span>
                 </div>
-                <div class="strip-seg" class:empty=move || status_counts.get().1[4] == 0>
+                <div class="strip-seg"
+                    class:empty=move || status_counts.get().1[4] == 0
+                    class:active=move || status_filter.get() == Some(RowStatus::Done)
+                    on:click=move |_| status_filter.update(|f| *f = if *f == Some(RowStatus::Done) { None } else { Some(RowStatus::Done) })
+                >
                     <span class="strip-marker done" aria-hidden="true"></span>
                     <span class="strip-lbl">"Completed"</span>
                     <span class="strip-val done">{move || status_counts.get().1[4]}</span>

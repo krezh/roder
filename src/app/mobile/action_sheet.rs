@@ -199,6 +199,7 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
                         container: None,
                         pending: false,
                         node_shell: false,
+                        image: String::new(),
                     }));
                     do_close();
                 }

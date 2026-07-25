@@ -4,6 +4,16 @@
   nix: {
     enabled: true,
   },
+  customManagers: [
+    {
+      customType: "regex",
+      fileMatch: ["^crates/xterm-vendor/src/lib\\.rs$"],
+      matchStrings: [
+        '// renovate: depName=(?<depName>\\S+)\\s+pub const \\w+: &str = "(?<currentValue>[^"]+)"',
+      ],
+      datasourceTemplate: "npm",
+    },
+  ],
   lockFileMaintenance: {
     enabled: true,
     schedule: ["after 1am and before 2am"],

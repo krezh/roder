@@ -30,7 +30,7 @@ pub struct DebugShellRequest {
 }
 
 /// Injects the configured debug container into a pod and waits for it to reach
-/// Running, then returns `{"container": "<name>"}`.
+/// Running, then returns `{"container": "<name>", "image": "<image>"}`.
 pub async fn debug_shell(
     Extension(b): Extension<Arc<Backend>>,
     Json(request): Json<DebugShellRequest>,
@@ -39,7 +39,11 @@ pub async fn debug_shell(
         .inject_debug_container(&request.namespace, &request.pod)
         .await
     {
-        Ok(container) => Json(serde_json::json!({ "container": container })).into_response(),
+        Ok((container, image)) => Json(serde_json::json!({
+            "container": container,
+            "image": image,
+        }))
+        .into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
@@ -50,15 +54,19 @@ pub struct NodeShellRequest {
 }
 
 /// Creates a privileged debug pod on `node` and waits for it to reach
-/// Running, then returns `{"namespace": .., "pod": ..}` for use with `/api/exec`.
+/// Running, then returns `{"namespace": .., "pod": .., "image": ..}` for use
+/// with `/api/exec`.
 pub async fn node_shell_create(
     Extension(b): Extension<Arc<Backend>>,
     Json(request): Json<NodeShellRequest>,
 ) -> Response {
     match b.create_node_shell(&request.node).await {
-        Ok((namespace, pod)) => {
-            Json(serde_json::json!({ "namespace": namespace, "pod": pod })).into_response()
-        }
+        Ok((namespace, pod, image)) => Json(serde_json::json!({
+            "namespace": namespace,
+            "pod": pod,
+            "image": image,
+        }))
+        .into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
@@ -198,6 +206,33 @@ async fn exec_session(socket: axum::extract::ws::WebSocket, b: Arc<Backend>, q: 
 /// Serves the xterm.js terminal page loaded in the exec overlay iframe.
 pub async fn terminal_page() -> impl IntoResponse {
     axum::response::Html(include_str!("../terminal.html"))
+}
+
+pub async fn terminal_xterm_css() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+        xterm_vendor::XTERM_CSS,
+    )
+}
+
+pub async fn terminal_xterm_js() -> impl IntoResponse {
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        xterm_vendor::XTERM_JS,
+    )
+}
+
+pub async fn terminal_xterm_addon_fit_js() -> impl IntoResponse {
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        xterm_vendor::XTERM_ADDON_FIT_JS,
+    )
 }
 
 #[cfg(test)]

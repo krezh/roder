@@ -40,20 +40,18 @@ pub(crate) fn ExecWindow() -> impl IntoView {
                     let node_shell = target.node_shell;
                     let src = format!("/terminal?namespace={ns}&pod={pod}&container={ctr}&node_shell={node_shell}");
                     if target.pending {
+                        let image = target.image.rsplit_once("@sha256:")
+                            .map(|(repo, _)| repo.to_string())
+                            .unwrap_or_else(|| target.image.clone());
                         let pending_text = if target.node_shell {
-                            "Creating privileged debug pod"
+                            format!("Creating node shell ({image})")
                         } else {
-                            "Injecting nicolaka/netshoot"
+                            format!("Injecting {image}")
                         };
                         view! {
                             <div class="exec-pending">
                                 <span class="exec-spinner"></span>
-                                <span class="exec-pending-text">
-                                    {pending_text}
-                                    <span class="exec-dot" style="animation-delay:0s">"."</span>
-                                    <span class="exec-dot" style="animation-delay:0.3s">"."</span>
-                                    <span class="exec-dot" style="animation-delay:0.6s">"."</span>
-                                </span>
+                                <span class="exec-pending-text">{pending_text}</span>
                             </div>
                         }.into_any()
                     } else {

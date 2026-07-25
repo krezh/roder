@@ -8,8 +8,8 @@ use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::overlays::delete::{ask_delete, delete_extra, DeleteRequest};
 use crate::app::overlays::toast::{show_toast, show_toast_detail, Toast, ToastKind};
 use crate::app::state::{
-    open_logs, Catalog, CtxMenu, DetailTarget, DrainOpen, DrainTarget, ExecOpen, ExecTarget,
-    LogPods, LogTarget, TableRows, TableSelected, TableTargets, TreeOpen,
+    open_logs, Catalog, CtxMenu, DebugImage, DetailTarget, DrainOpen, DrainTarget, ExecOpen,
+    ExecTarget, LogPods, LogTarget, TableRows, TableSelected, TableTargets, TreeOpen,
 };
 use crate::app::table_logic::{resolve_action_targets, targets_all};
 use crate::app::util::clipboard::copy_to_clipboard;
@@ -27,6 +27,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
     let catalog = expect_context::<Catalog>().0;
     let log_pods = expect_context::<LogPods>().0;
     let exec_open = expect_context::<ExecOpen>().0;
+    let debug_image = expect_context::<DebugImage>().0;
     let tree_open = expect_context::<TreeOpen>().0;
     let drain_open = expect_context::<DrainOpen>().0;
     // Provided at App level; ResourceView fills in the Option on mount.
@@ -314,6 +315,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                         container: None,
                         pending: false,
                         node_shell: false,
+                        image: String::new(),
                     }));
                     do_close();
                 }
@@ -350,6 +352,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                                 container: None,
                                 pending: true,
                                 node_shell: false,
+                                image: debug_image.get_untracked(),
                             }));
                             leptos::task::spawn_local(async move {
                                 let still_pending = || {
@@ -379,6 +382,11 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                                                     container: Some(ctr.to_string()),
                                                     pending: false,
                                                     node_shell: false,
+                                                    image: resp
+                                                        .get("image")
+                                                        .and_then(|v| v.as_str())
+                                                        .unwrap_or("")
+                                                        .to_string(),
                                                 }));
                                             } else {
                                                 exec_open.set(None);
@@ -406,6 +414,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                                 container: None,
                                 pending: true,
                                 node_shell: true,
+                                image: debug_image.get_untracked(),
                             }));
                             leptos::task::spawn_local(async move {
                                 let still_pending = || {
@@ -433,6 +442,11 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                                                     container: Some("shell".to_string()),
                                                     pending: false,
                                                     node_shell: true,
+                                                    image: resp
+                                                        .get("image")
+                                                        .and_then(|v| v.as_str())
+                                                        .unwrap_or("")
+                                                        .to_string(),
                                                 }));
                                             } else {
                                                 exec_open.set(None);

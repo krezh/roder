@@ -21,7 +21,10 @@ mod watch;
 
 pub use action::action;
 pub use drain::{active_drain, drain_progress};
-pub use exec::{debug_shell, exec_ws, node_shell_create, terminal_page};
+pub use exec::{
+    debug_shell, exec_ws, node_shell_create, terminal_page, terminal_xterm_addon_fit_js,
+    terminal_xterm_css, terminal_xterm_js,
+};
 pub use logs::{logs, metrics_history};
 pub use misc::{alerts, features, health, namespaces, overview, resources};
 pub use resource_reads::{access_review, detail, permissions, resource_tree};

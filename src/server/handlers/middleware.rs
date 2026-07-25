@@ -189,6 +189,32 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
     resp
 }
 
+/// Peer routing headers are meaningful only after the dedicated listener has
+/// authenticated the caller's client certificate.
+pub async fn reject_peer_headers(req: Request, next: Next) -> Response {
+    if req
+        .headers()
+        .contains_key(crate::server::ha::INTERNAL_HEADER)
+        || req
+            .headers()
+            .contains_key(crate::server::ha::FORWARDED_AUTH_HEADER)
+    {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    next.run(req).await
+}
+
+pub async fn require_peer_request(req: Request, next: Next) -> Response {
+    let authenticated_peer = req
+        .headers()
+        .get(crate::server::ha::INTERNAL_HEADER)
+        .is_some_and(|value| value == "1");
+    if !authenticated_peer {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    next.run(req).await
+}
+
 #[cfg(test)]
 mod tests {
     //! The `require_auth` middleware across dev/prod and with/without a
@@ -198,7 +224,7 @@ mod tests {
     use super::super::fixtures::*;
     use super::*;
     use axum::body::Body;
-    use axum::middleware::from_fn_with_state;
+    use axum::middleware::{from_fn, from_fn_with_state};
     use axum::routing::get;
     use axum::Extension;
     use axum::Json;
@@ -386,5 +412,53 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    }
+
+    #[tokio::test]
+    async fn public_listener_rejects_peer_headers() {
+        let app = Router::new()
+            .route("/", get(|| async { "ok" }))
+            .layer(from_fn(reject_peer_headers));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .header(crate::server::ha::INTERNAL_HEADER, "1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn peer_listener_requires_internal_marker() {
+        let app = Router::new()
+            .route("/", get(|| async { "ok" }))
+            .layer(from_fn(require_peer_request));
+        let response = app
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn peer_listener_accepts_internal_marker_after_transport_auth() {
+        let app = Router::new()
+            .route("/", get(|| async { "ok" }))
+            .layer(from_fn(require_peer_request));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .header(crate::server::ha::INTERNAL_HEADER, "1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 }

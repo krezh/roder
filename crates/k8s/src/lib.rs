@@ -21,7 +21,9 @@ mod test_alloc;
 pub use alertmanager::{discover_alertmanager, AlertsCache};
 pub use backend::{Backend, DrainSession};
 pub use client::{ClusterAccess, K8sError};
-pub use coordination::{AcquireError, HeldNodeLease, NodeCoordinator, RoderPod};
+pub use coordination::{
+    AcquireError, HeldNodeLease, NodeCoordinator, RoderPod, TLS_FINGERPRINT_ANNOTATION,
+};
 pub use informers::WatchHandle;
 pub use kube::api::{AttachedProcess, TerminalSize};
 pub use shared::SharedCluster;

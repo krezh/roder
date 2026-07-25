@@ -71,9 +71,15 @@ backends:
   # Idle seconds before a user's backend with no active streams is reaped.
   backendIdleSecs: 1200
 
+# Internal replica-to-replica mTLS. The port is bound only when replicaCount is
+# greater than one and is never exposed through the public Service.
+ha:
+  peerPort: 8443
+
 # ClusterRole + binding for roder's ServiceAccount. Grants API discovery and
 # read/watch on CRDs (to harvest additionalPrinterColumns up front), plus the
-# shared, cluster-wide enrichment reads roder performs as this ServiceAccount:
+# shared, cluster-wide enrichment reads roder performs as this ServiceAccount,
+# plus namespace-local Pod list/patch and Lease access for HA coordination:
 # pod metrics (metrics.k8s.io/pods) and node listing + kubelet stats (nodes,
 # nodes/proxy) for PVC usage. All per-user OBJECT data is still read with each
 # user's passthrough OIDC token, never this ServiceAccount. Disable if you

@@ -15,7 +15,7 @@ spec:
     metadata:
       labels:
         {{- include "roder.selectorLabels" . | nindent 8 }}
-        roder.io/ha-protocol: "1"
+        roder.io/ha-protocol: "2"
         {{- with .Values.podLabels }}{{- toYaml . | nindent 8 }}{{- end }}
       {{- with .Values.podAnnotations }}
       annotations:
@@ -35,6 +35,9 @@ spec:
             - name: http
               containerPort: 8080
               protocol: TCP
+            - name: peer-tls
+              containerPort: {{ .Values.ha.peerPort }}
+              protocol: TCP
           env:
             - name: LEPTOS_SITE_ADDR
               value: "0.0.0.0:8080"
@@ -52,8 +55,10 @@ spec:
                   fieldPath: metadata.uid
             - name: RODER_HA_ENABLED
               value: {{ gt (int .Values.replicaCount) 1 | quote }}
+            - name: RODER_PEER_PORT
+              value: {{ .Values.ha.peerPort | quote }}
             - name: RODER_POD_LABEL_SELECTOR
-              value: {{ printf "app.kubernetes.io/name=%s,app.kubernetes.io/instance=%s,roder.io/ha-protocol=1" (include "roder.name" .) .Release.Name | quote }}
+              value: {{ printf "app.kubernetes.io/name=%s,app.kubernetes.io/instance=%s,roder.io/ha-protocol=2" (include "roder.name" .) .Release.Name | quote }}
             - name: RODER_HA_SCOPE
               value: {{ printf "%s/%s" .Release.Namespace .Release.Name | quote }}
             {{- if .Values.talos.enabled }}

@@ -46,6 +46,6 @@ ENV LEPTOS_SITE_ROOT=/app/site \
     # jemalloc tuning (tikv-jemallocator reads the _RJEM_-prefixed var)
     _RJEM_MALLOC_CONF=background_thread:true,dirty_decay_ms:5000,muzzy_decay_ms:5000
 
-EXPOSE 8080
+EXPOSE 8080 8443
 USER 65532
 ENTRYPOINT ["/app/roder"]

@@ -1,5 +1,57 @@
 #![recursion_limit = "512"]
 
+#[cfg(feature = "ssr")]
+async fn serve_peer(
+    listener: tokio::net::TcpListener,
+    tls_config: std::sync::Arc<rustls::ServerConfig>,
+    app: axum::Router,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) {
+    use axum::body::Body;
+    use hyper::body::Incoming;
+    use hyper::server::conn::http1;
+    use hyper::service::service_fn;
+    use hyper_util::rt::TokioIo;
+    use tokio_rustls::TlsAcceptor;
+    use tower::ServiceExt;
+
+    let acceptor = TlsAcceptor::from(tls_config);
+    loop {
+        let accepted = tokio::select! {
+            _ = shutdown.changed() => break,
+            accepted = listener.accept() => accepted,
+        };
+        let (stream, address) = match accepted {
+            Ok(accepted) => accepted,
+            Err(error) => {
+                tracing::warn!("peer listener accept failed: {error}");
+                continue;
+            }
+        };
+        let acceptor = acceptor.clone();
+        let app = app.clone();
+        tokio::spawn(async move {
+            let stream = match acceptor.accept(stream).await {
+                Ok(stream) => stream,
+                Err(error) => {
+                    tracing::warn!(%address, "peer mTLS handshake failed: {error}");
+                    return;
+                }
+            };
+            let service = service_fn(move |request: hyper::Request<Incoming>| {
+                let app = app.clone();
+                async move { app.oneshot(request.map(Body::new)).await }
+            });
+            if let Err(error) = http1::Builder::new()
+                .serve_connection(TokioIo::new(stream), service)
+                .await
+            {
+                tracing::debug!(%address, "peer HTTP connection ended: {error}");
+            }
+        });
+    }
+}
+
 // Server binary uses jemalloc: much lower RSS and fragmentation than glibc
 // malloc for roder's long-lived, watch-heavy allocation pattern. Behind the
 // `jemalloc` feature (enabled only in the production image) so local NixOS dev
@@ -15,7 +67,7 @@ async fn main() {
         .install_default()
         .expect("Failed to install rustls crypto provider");
 
-    use axum::middleware::from_fn_with_state;
+    use axum::middleware::{from_fn, from_fn_with_state};
     use axum::routing::{get, post};
     use axum::Router;
     use leptos::logging::log;
@@ -44,6 +96,19 @@ async fn main() {
         }
     };
     set_asset_version(state.asset_version.to_string());
+
+    let peer_listener = if let Some(ha) = state.ha.as_ref() {
+        let address = std::net::SocketAddr::from(([0, 0, 0, 0], ha.peer_listener_port()));
+        match tokio::net::TcpListener::bind(address).await {
+            Ok(listener) => Some(listener),
+            Err(error) => {
+                tracing::error!(%address, "failed to bind peer mTLS listener: {error}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
 
     // App pages + private API, gated behind a valid session.
     let protected = Router::new()
@@ -84,6 +149,14 @@ async fn main() {
         })
         .route_layer(from_fn_with_state(state.clone(), handlers::require_auth));
 
+    let peer_app = Router::new()
+        .route("/api/action", post(api::action))
+        .route("/api/drain-active", get(api::active_drain))
+        .route("/api/drain-progress", get(api::drain_progress))
+        .route_layer(from_fn_with_state(state.clone(), handlers::require_auth))
+        .route_layer(from_fn(handlers::require_peer_request))
+        .with_state(state.clone());
+
     let app = Router::new()
         // Public endpoints.
         .route("/health", get(handlers::health))
@@ -100,6 +173,7 @@ async fn main() {
             state.clone(),
             handlers::security_headers,
         ))
+        .layer(from_fn(handlers::reject_peer_headers))
         .with_state(state.clone());
 
     log!("roder listening on http://{addr}");
@@ -109,10 +183,28 @@ async fn main() {
     // in-flight HTTP requests gracefully instead of waiting for SIGKILL.
     // Required because this binary is PID 1 in the container — Linux ignores
     // SIGTERM for PID 1 unless an explicit handler is registered.
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let peer_task = peer_listener.map(|listener| {
+        let ha = state
+            .ha
+            .as_ref()
+            .expect("HA state exists for peer listener");
+        tracing::info!(
+            port = ha.peer_listener_port(),
+            "Roder peer mTLS listener ready"
+        );
+        tokio::spawn(serve_peer(
+            listener,
+            ha.server_config.clone(),
+            peer_app,
+            shutdown_rx,
+        ))
+    });
     let shutdown = async move {
         let sigterm = tokio::signal::unix::SignalKind::terminate();
         tokio::signal::unix::signal(sigterm).unwrap().recv().await;
         tracing::info!("SIGTERM received — shutting down");
+        let _ = shutdown_tx.send(true);
         // Drop all per-user backends (informers + watchers) so long-lived SSE
         // connections can drain; the runtime will cancel remaining tasks on
         // `main` exit.
@@ -124,6 +216,9 @@ async fn main() {
         .with_graceful_shutdown(shutdown)
         .await
         .unwrap();
+    if let Some(peer_task) = peer_task {
+        let _ = peer_task.await;
+    }
 }
 
 // When building the wasm (hydrate) binary target, `main` is a no-op: the entry

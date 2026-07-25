@@ -19,7 +19,18 @@ pub struct RoderPod {
     pub node: String,
     pub ip: String,
     pub ready: bool,
+    /// SHA-256 fingerprint of this pod's self-signed mTLS cert (annotation
+    /// `roder.io/tls-fingerprint`). `None` if the pod hasn't published it
+    /// yet — typically only briefly at startup before the first patch
+    /// completes. Peer connections to such a pod fail their TLS handshake
+    /// until the watcher refreshes.
+    pub tls_fingerprint: Option<String>,
 }
+
+/// Annotation key under which each roder pod publishes the SHA-256 fingerprint
+/// of its self-signed mTLS certificate. Read by `NodeCoordinator::pods()` and
+/// written once at pod startup by the roder binary itself.
+pub const TLS_FINGERPRINT_ANNOTATION: &str = "roder.io/tls-fingerprint";
 
 #[derive(Debug, thiserror::Error)]
 pub enum AcquireError {
@@ -77,12 +88,17 @@ impl NodeCoordinator {
                             condition.type_ == "Ready" && condition.status == "True"
                         })
                     });
+                let tls_fingerprint =
+                    pod.metadata.annotations.as_ref().and_then(|annotations| {
+                        annotations.get(TLS_FINGERPRINT_ANNOTATION).cloned()
+                    });
                 Some(RoderPod {
                     name: pod.metadata.name?,
                     uid: pod.metadata.uid?,
                     node: pod.spec?.node_name?,
                     ip: status.pod_ip?,
                     ready,
+                    tls_fingerprint,
                 })
             })
             .collect())
@@ -354,6 +370,7 @@ mod tests {
             node: "node-a".into(),
             ip: "10.0.0.1".into(),
             ready: false,
+            tls_fingerprint: None,
         }];
         assert!(holder_pod_exists("roder-a/uid-a", &pods));
         assert!(!holder_pod_exists("roder-a/old-uid", &pods));

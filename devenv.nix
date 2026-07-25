@@ -88,6 +88,7 @@
       exec = ''
         helm lint helm
         helm template roder helm >/dev/null
+        helm template roder-ha helm --set replicaCount=2 >/dev/null
       '';
       before = [ "devenv:enterTest" ];
     };

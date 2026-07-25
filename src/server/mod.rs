@@ -13,11 +13,33 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
 use axum::extract::FromRef;
+use kube::api::{Api, Patch, PatchParams};
 use leptos::prelude::LeptosOptions;
 use roder_auth::OidcProvider;
 use tokio::sync::{Mutex, RwLock};
 
 pub use config::ServerConfig;
+
+/// Publish the mTLS fingerprint as an annotation on this pod so peers can pin
+/// to it. Idempotent: an OTP-on-startup patch (merge of the annotation map).
+async fn publish_fingerprint(
+    client: &kube::Client,
+    pod_name: &str,
+    fingerprint: &str,
+) -> Result<(), String> {
+    let pods: Api<k8s_openapi::api::core::v1::Pod> = Api::default_namespaced(client.clone());
+    let patch = serde_json::json!({
+        "metadata": {
+            "annotations": {
+                roder_k8s::TLS_FINGERPRINT_ANNOTATION: fingerprint
+            }
+        }
+    });
+    pods.patch(pod_name, &PatchParams::default(), &Patch::Merge(patch))
+        .await
+        .map_err(|e| format!("patch pod annotation: {e}"))?;
+    Ok(())
+}
 
 /// Deterministically hash the built WASM bundle's bytes so a redeploy (which
 /// always changes these bytes) yields a new value, while an unchanged image
@@ -131,10 +153,45 @@ pub async fn build_state(leptos_options: LeptosOptions) -> Result<AppState, Stri
             .map_err(|_| "RODER_HA_ENABLED requires RODER_POD_LABEL_SELECTOR".to_string())?;
         let scope = std::env::var("RODER_HA_SCOPE").unwrap_or_else(|_| selector.clone());
         let holder = format!("{pod_name}/{pod_uid}");
-        Some(Arc::new(ha::HaState::new(
-            roder_k8s::NodeCoordinator::new(shared.sa_client(), selector, holder, scope),
+        let peer_port = match std::env::var("RODER_PEER_PORT") {
+            Ok(value) => value
+                .parse::<u16>()
+                .ok()
+                .filter(|port| *port != 0)
+                .ok_or_else(|| "RODER_PEER_PORT must be an integer from 1 to 65535".to_string())?,
+            Err(std::env::VarError::NotPresent) => ha::DEFAULT_PEER_PORT,
+            Err(error) => return Err(format!("failed to read RODER_PEER_PORT: {error}")),
+        };
+
+        let coordinator =
+            roder_k8s::NodeCoordinator::new(shared.sa_client(), selector, holder, scope);
+
+        let cert = roder_mtls::PeerCert::mint(&pod_name)
+            .map_err(|error| format!("failed to mint peer mTLS certificate: {error}"))?;
+        let verifier = Arc::new(roder_mtls::PinnedVerifier::new());
+        let client_cfg = roder_mtls::client_config(&cert, verifier.clone())
+            .map_err(|error| format!("failed to build peer mTLS client config: {error}"))?;
+        let server_cfg = roder_mtls::server_config(&cert, verifier.clone())
+            .map_err(|error| format!("failed to build peer mTLS server config: {error}"))?;
+        publish_fingerprint(&shared.sa_client(), &pod_name, &cert.fingerprint)
+            .await
+            .map_err(|error| format!("failed to publish peer mTLS fingerprint: {error}"))?;
+
+        let ha = Arc::new(ha::HaState::new(
+            coordinator,
             pod_name,
-        )))
+            peer_port,
+            verifier,
+            Arc::new(client_cfg),
+            Arc::new(server_cfg),
+        ));
+        let peer_count = ha
+            .refresh_fingerprints()
+            .await
+            .map_err(|error| format!("failed to load peer mTLS fingerprints: {error}"))?;
+        tracing::info!(peer_count, "initialized peer mTLS trust set");
+        ha.spawn_fingerprint_refresh();
+        Some(ha)
     } else {
         None
     };

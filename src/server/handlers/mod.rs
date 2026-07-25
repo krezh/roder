@@ -5,7 +5,7 @@
 mod middleware;
 mod oidc;
 
-pub use middleware::{require_auth, security_headers};
+pub use middleware::{reject_peer_headers, require_auth, require_peer_request, security_headers};
 pub use oidc::{callback, health, login, logout, me, CallbackParams};
 
 /// Shared test fixtures (fake `AppState`s, tokens, cookie helpers) used by

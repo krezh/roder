@@ -148,7 +148,7 @@ tikv-jemallocator = { version = "0.7", optional = true }
 
 [dev-dependencies]
 time = "0.3"
-serial_test = "3"
+serial_test = "4"
 
 [features]
 default = ["ssr"]

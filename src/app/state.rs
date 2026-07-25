@@ -80,10 +80,18 @@ pub(crate) struct ExecTarget {
     /// True for a node-shell session: `pod` is a throw-away privileged pod
     /// entered via `nsenter`, torn down when the session ends.
     pub(crate) node_shell: bool,
+    /// Resolved debug-image reference (for the loading text). Empty when a
+    /// session already existed (e.g. exec into a real container).
+    pub(crate) image: String,
 }
 
 #[derive(Clone, Copy)]
 pub(crate) struct ExecOpen(pub(crate) RwSignal<Option<ExecTarget>>);
+
+/// Resolved debug-image reference, populated from `/api/features` at startup
+/// so the exec overlay can show the actual image during the spinner.
+#[derive(Clone, Copy)]
+pub(crate) struct DebugImage(pub(crate) RwSignal<String>);
 
 /// Which Kustomization/HelmRelease the resource-tree overlay is open for.
 #[derive(Clone, Copy)]

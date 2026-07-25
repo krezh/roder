@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/k8s", "crates/auth", "crates/talos"]
+members = ["crates/core", "crates/k8s", "crates/auth", "crates/talos", "crates/xterm-vendor"]
 
 # Shared by the workspace member crates (roder-core, roder-k8s, roder-auth).
 # Each member inlines its own `version` so release-please can rewrite it
@@ -16,6 +16,7 @@ roder-core = { path = "crates/core" }
 roder-k8s = { path = "crates/k8s" }
 roder-auth = { path = "crates/auth" }
 roder-talos = { path = "crates/talos" }
+xterm-vendor = { path = "crates/xterm-vendor" }
 
 # Frontend / SSR
 leptos = "0.8"
@@ -72,6 +73,7 @@ roder-core = { workspace = true }
 roder-k8s = { workspace = true, optional = true }
 roder-auth = { workspace = true, optional = true }
 roder-talos = { workspace = true, optional = true }
+xterm-vendor = { workspace = true, optional = true }
 
 leptos = { workspace = true }
 leptos_meta = { workspace = true }
@@ -176,6 +178,7 @@ ssr = [
   "dep:roder-k8s",
   "dep:roder-auth",
   "dep:roder-talos",
+  "dep:xterm-vendor",
   "dep:rand",
   "dep:rustls",
   "dep:tokio-stream",

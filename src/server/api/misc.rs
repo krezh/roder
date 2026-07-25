@@ -87,6 +87,7 @@ pub async fn namespaces(Extension(b): Extension<Arc<Backend>>) -> Response {
 pub async fn features(
     State(state): State<AppState>,
     Extension(identity): Extension<Identity>,
+    Extension(b): Extension<Arc<Backend>>,
 ) -> Response {
     let alertmanager =
         state.alerts.read().await.is_some() && state.config.can_read_alerts(&identity.groups);
@@ -94,6 +95,7 @@ pub async fn features(
     Json(serde_json::json!({
         "talos": talos,
         "alertmanager": alertmanager,
+        "debug_image": b.debug_image(),
     }))
     .into_response()
 }

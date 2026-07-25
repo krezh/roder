@@ -14,10 +14,16 @@ use crate::client::K8sError;
 /// `kubectl debug node/<name>`'s own default namespace.
 const NODE_SHELL_NAMESPACE: &str = "default";
 const DEBUG_IMAGE_ENV: &str = "RODER_DEBUG_IMAGE";
-const DEFAULT_DEBUG_IMAGE: &str =
-    "docker.io/nicolaka/netshoot@sha256:b09d9b21381f47a79b3cbcb30da25266dc17186ea00ae65e99fdc51396f48e70";
+const DEFAULT_DEBUG_IMAGE: &str = "ghcr.io/nicolaka/netshoot:v0.16@sha256:b09d9b21381f47a79b3cbcb30da25266dc17186ea00ae65e99fdc51396f48e70";
 
 impl Backend {
+    /// The resolved debug image reference (`RODER_DEBUG_IMAGE` or the built-in
+    /// default), already validated. Returns the empty string if the env var
+    /// is misconfigured — the inject/node-shell calls still surface the error.
+    pub fn debug_image(&self) -> String {
+        debug_image().unwrap_or_default()
+    }
+
     /// Open an interactive exec session into a pod container. Returns an
     /// `AttachedProcess` whose stdin/stdout can be proxied over a WebSocket.
     /// Probes for the best available shell (bash › sh › ash) before opening
@@ -45,7 +51,11 @@ impl Backend {
 
     /// Inject the `RODER_DEBUG_IMAGE` ephemeral container into `pod`, wait for it
     /// to reach Running, and return its name for use with [`exec`].
-    pub async fn inject_debug_container(&self, ns: &str, pod: &str) -> Result<String, K8sError> {
+    pub async fn inject_debug_container(
+        &self,
+        ns: &str,
+        pod: &str,
+    ) -> Result<(String, String), K8sError> {
         let image = debug_image()?;
         let api: Api<Pod> = Api::namespaced(self.client(), ns);
 
@@ -125,7 +135,7 @@ impl Backend {
                             && cs.state.as_ref().and_then(|s| s.running.as_ref()).is_some()
                     });
                 if running {
-                    return Ok(name);
+                    return Ok((name, image));
                 }
             }
         }
@@ -137,7 +147,10 @@ impl Backend {
     /// nodes have no shell or coreutils of their own to `nsenter --mount` into,
     /// so entering the host mount namespace would leave nothing exec-able.
     /// Returns `(namespace, pod_name)` for use with [`exec_node_shell`].
-    pub async fn create_node_shell(&self, node: &str) -> Result<(String, String), K8sError> {
+    pub async fn create_node_shell(
+        &self,
+        node: &str,
+    ) -> Result<(String, String, String), K8sError> {
         let image = debug_image()?;
         let ns = NODE_SHELL_NAMESPACE;
         let api: Api<Pod> = Api::namespaced(self.client(), ns);
@@ -227,7 +240,7 @@ impl Backend {
                         .await);
                     }
                     if running {
-                        return Ok((ns.to_string(), name));
+                        return Ok((ns.to_string(), name, image));
                     }
                 }
                 Err(error) => match classify_kube_error(&error) {
@@ -334,11 +347,15 @@ mod tests {
     #[test]
     fn debug_image_requires_a_complete_sha256_digest() {
         let digest = "a".repeat(64);
-        assert!(validate_debug_image(&format!("nicolaka/netshoot@sha256:{digest}")).is_ok());
-        assert!(validate_debug_image("nicolaka/netshoot:latest").is_err());
-        assert!(validate_debug_image("nicolaka/netshoot@sha256:abcd").is_err());
         assert!(
-            validate_debug_image(&format!("nicolaka/netshoot@sha256:{}", "z".repeat(64))).is_err()
+            validate_debug_image(&format!("ghcr.io/nicolaka/netshoot@sha256:{digest}")).is_ok()
         );
+        assert!(validate_debug_image("ghcr.io/nicolaka/netshoot:latest").is_err());
+        assert!(validate_debug_image("ghcr.io/nicolaka/netshoot@sha256:abcd").is_err());
+        assert!(validate_debug_image(&format!(
+            "ghcr.io/nicolaka/netshoot@sha256:{}",
+            "z".repeat(64)
+        ))
+        .is_err());
     }
 }

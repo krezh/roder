@@ -303,6 +303,7 @@ pub(crate) fn RowDetail(
                                 container: None,
                                 pending: false,
                                 node_shell: false,
+                                image: String::new(),
                             }));
                         }>"Shell"</button>
                     }

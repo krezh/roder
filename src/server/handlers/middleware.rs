@@ -73,9 +73,9 @@ pub async fn security_headers(State(state): State<AppState>, req: Request, next:
     let csp = if is_terminal {
         format!(
             "default-src 'self'; \
-             script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; \
-             style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; \
-             img-src 'self' data:; font-src 'self' https://cdn.jsdelivr.net; \
+             script-src 'self' 'unsafe-inline'; \
+             style-src 'self' 'unsafe-inline'; \
+             img-src 'self' data:; font-src 'self'; \
              {connect_src}; frame-ancestors 'self'; base-uri 'self'"
         )
     } else {

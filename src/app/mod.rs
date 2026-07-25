@@ -44,10 +44,10 @@ use overlays::tree::ResourceTreeWindow;
 use overlays::AlertsPanel;
 use state::{
     AccessReviewOpen, AlertsData, AlertsLastRefresh, AlertsOpen, Catalog, ConnectionState,
-    Connectivity, CtxMenu, DrainOpen, DrainTarget, ExecOpen, ExecTarget, FilterFocus, LogPods,
-    LogTarget, NavOpen, NsPaletteOpen, OnlyProblems, PaletteOpen, PodModalTarget, ResourceFilter,
-    ShortcutsOpen, TableRows, TableSelected, TableTargets, Tick, TreeOpen, WorkspaceConf,
-    WorkspaceConfig,
+    Connectivity, CtxMenu, DebugImage, DrainOpen, DrainTarget, ExecOpen, ExecTarget, FilterFocus,
+    LogPods, LogTarget, NavOpen, NsPaletteOpen, OnlyProblems, PaletteOpen, PodModalTarget,
+    ResourceFilter, ShortcutsOpen, TableRows, TableSelected, TableTargets, Tick, TreeOpen,
+    WorkspaceConf, WorkspaceConfig,
 };
 use views::resource::ResourceView;
 use views::search::SearchResultsView;
@@ -227,6 +227,8 @@ pub fn App() -> impl IntoView {
     let alerts_last_refresh = RwSignal::new(None::<f64>);
     provide_context(AlertsLastRefresh(alerts_last_refresh));
     let _alertmanager_enabled = RwSignal::new(false);
+    let debug_image = RwSignal::new(String::new());
+    provide_context(DebugImage(debug_image));
     let resource_filter = RwSignal::new(String::new());
     provide_context(ResourceFilter(resource_filter));
     provide_context(FilterFocus(RwSignal::new(0u32)));
@@ -405,12 +407,20 @@ pub fn App() -> impl IntoView {
     // integrations stay invisible and produce no background request noise.
     #[cfg(target_arch = "wasm32")]
     leptos::task::spawn_local(async move {
-        let enabled = data::fetch_json::<serde_json::Value>("/api/features")
+        let features = data::fetch_json::<serde_json::Value>("/api/features")
             .await
-            .ok()
+            .ok();
+        let enabled = features
+            .as_ref()
             .and_then(|v| v.get("alertmanager").and_then(|v| v.as_bool()))
             .unwrap_or(false);
         _alertmanager_enabled.set(enabled);
+        if let Some(img) = features
+            .as_ref()
+            .and_then(|v| v.get("debug_image").and_then(|v| v.as_str()))
+        {
+            debug_image.set(img.to_string());
+        }
         if !enabled {
             alerts_data.set(None);
             data::storage_remove("roder.alerts");

@@ -72,6 +72,12 @@ async fn main() {
         .route("/api/debug-shell", post(api::debug_shell))
         .route("/api/node-shell", post(api::node_shell_create))
         .route("/terminal", get(api::terminal_page))
+        .route("/terminal/xterm.css", get(api::terminal_xterm_css))
+        .route("/terminal/xterm.js", get(api::terminal_xterm_js))
+        .route(
+            "/terminal/xterm-addon-fit.js",
+            get(api::terminal_xterm_addon_fit_js),
+        )
         .leptos_routes(&state, routes, {
             let leptos_options = leptos_options.clone();
             move || shell(leptos_options.clone())

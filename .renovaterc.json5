@@ -1,54 +1,63 @@
 {
-  $schema: "https://docs.renovatebot.com/renovate-schema.json",
-  extends: ["local>krezh/renovate-config"],
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: [
+    'local>krezh/renovate-config',
+  ],
   nix: {
     enabled: true,
   },
   customManagers: [
     {
-      customType: "regex",
-      fileMatch: ["^crates/xterm-vendor/src/lib\\.rs$"],
+      customType: 'regex',
+      managerFilePatterns: [
+        '/^crates/xterm-vendor/src/lib\\.rs$/',
+      ],
       matchStrings: [
         '// renovate: depName=(?<depName>\\S+)\\s+pub const \\w+: &str = "(?<currentValue>[^"]+)"',
       ],
-      datasourceTemplate: "npm",
+      datasourceTemplate: 'npm',
     },
   ],
   lockFileMaintenance: {
     enabled: true,
-    schedule: ["after 1am and before 2am"],
+    schedule: [
+      'after 1am and before 2am',
+    ],
     automerge: true,
-    automergeType: "pr",
+    automergeType: 'pr',
     ignoreTests: false,
   },
   packageRules: [
     {
-      matchManagers: ["cargo"],
+      matchManagers: [
+        'cargo',
+      ],
       automerge: true,
-      automergeType: "pr",
+      automergeType: 'pr',
       ignoreTests: false,
     },
     {
       matchPackageNames: [
-        "wasm-bindgen",
-        "wasm-bindgen-futures",
-        "js-sys",
-        "web-sys",
+        'wasm-bindgen',
+        'wasm-bindgen-futures',
+        'js-sys',
+        'web-sys',
       ],
-      groupName: "wasm-bindgen",
+      groupName: 'wasm-bindgen',
       automerge: true,
-      automergeType: "pr",
+      automergeType: 'pr',
       ignoreTests: false,
     },
-    // kube and k8s-openapi release in lockstep; separateMajorMinor: false keeps them
-    // in one bucket so they satisfy minimumGroupSize: 2 and land in a single PR.
     {
-      matchPackageNames: ["kube", "k8s-openapi"],
-      groupName: "kube",
+      matchPackageNames: [
+        'kube',
+        'k8s-openapi',
+      ],
+      groupName: 'kube',
       minimumGroupSize: 2,
       separateMajorMinor: false,
       automerge: true,
-      automergeType: "pr",
+      automergeType: 'pr',
       ignoreTests: false,
     },
   ],

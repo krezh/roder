@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.37](https://github.com/krezh/roder/compare/0.1.36...0.1.37) (2026-07-26)
+
+
+### Features
+
+* **cargo:** Update Rust crate serial_test (3.5.0 ➔ 4.0.1) ([#123](https://github.com/krezh/roder/issues/123)) ([d3b613a](https://github.com/krezh/roder/commit/d3b613a289bf92942ec6a65962079554fe7542d9))
+* **ha:** self-signed mTLS between roder peers ([bb1a390](https://github.com/krezh/roder/commit/bb1a390fd59ff673c1d24dfec257739842831b64))
+* make status indicators clickable as filter ([bb0d781](https://github.com/krezh/roder/commit/bb0d781d35fd96ed32f46a568b527ae0b83d48e3))
+* **terminal:** vendor xterm via build-time crate and surface debug image ([ff9e611](https://github.com/krezh/roder/commit/ff9e6113a8f583a2fad4e01fa513b16575590785))
+
+
+### Miscellaneous Chores
+
+* **cargo:** lock file maintenance cargo.lock ([#119](https://github.com/krezh/roder/issues/119)) ([aaab75e](https://github.com/krezh/roder/commit/aaab75e044db9a902d6f6cf670866fd9cb9e7f03))
+* **cargo:** lock file maintenance cargo.lock ([#122](https://github.com/krezh/roder/issues/122)) ([6ee3c7a](https://github.com/krezh/roder/commit/6ee3c7a9c2e0e12f412c7db6ac971eba207757ca))
+* **config:** migrate config .renovaterc.json5 ([#127](https://github.com/krezh/roder/issues/127)) ([1f37fc4](https://github.com/krezh/roder/commit/1f37fc4da44ab35db8ced19d97d667b609274c01))
+
 ## [0.1.36](https://github.com/krezh/roder/compare/0.1.35...0.1.36) (2026-07-23)
 
 

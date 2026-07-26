@@ -14,4 +14,3 @@ spec:
       protocol: TCP
   selector:
     {{- include "roder.selectorLabels" . | nindent 4 }}
-    roder.io/ha-protocol: "1"

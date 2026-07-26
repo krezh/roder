@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.38](https://github.com/krezh/roder/compare/0.1.37...0.1.38) (2026-07-26)
+
+
+### Bug Fixes
+
+* **helm:** stop filtering service endpoints by HA protocol ([8c68bbd](https://github.com/krezh/roder/commit/8c68bbd48b36a86b0e08b36cb81fce23a43c50cd))
+* update reqwest ([22adace](https://github.com/krezh/roder/commit/22adace9b60a41be98d9a08988972536cdbba291))
+
 ## [0.1.37](https://github.com/krezh/roder/compare/0.1.36...0.1.37) (2026-07-26)
 
 

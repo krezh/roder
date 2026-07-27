@@ -1,19 +1,11 @@
-//! Value-shaping helpers: relative-age formatting, access-mode abbreviations,
-//! endpoint flattening, and HPA target rendering.
+//! Value-shaping helpers: access-mode abbreviations, endpoint flattening, and
+//! HPA target rendering. (RFC3339 timestamps are passed through raw and
+//! live-humanized on the client, so this module no longer needs a
+//! server-side `humanize_since`.)
 
 use serde_json::Value;
 
 use super::accessors::int_at;
-
-/// Relative age of an RFC3339 timestamp ("5m", "2h3m", "1d4h"). Empty if unparsable.
-pub(crate) fn humanize_since(ts: &str) -> String {
-    use time::format_description::well_known::Rfc3339;
-    let Ok(t) = time::OffsetDateTime::parse(ts, &Rfc3339) else {
-        return String::new();
-    };
-    let secs = (time::OffsetDateTime::now_utc() - t).whole_seconds().max(0) as u64;
-    roder_core::format_age_secs(secs)
-}
 
 /// Render a byte count using the binary (Ki/Mi/Gi/Ti) suffixes that match how
 /// Kubernetes itself quantises storage. `0.0` or sub-1-KiB returns the raw

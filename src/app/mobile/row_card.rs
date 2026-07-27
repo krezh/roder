@@ -39,12 +39,28 @@ impl CardFields {
         kind_label: Option<String>,
         age: String,
     ) -> Self {
+        // Surfaced cells may include RFC3339 timestamps (e.g. a CRD `date`
+        // column or ExternalSecret "Last Sync"). Humanize them here so the
+        // card shows "5m" rather than the raw timestamp; the parent `Memo`
+        // re-runs every tick (see `MobileKindList`), so they stay live —
+        // mirroring the desktop table's tick-driven age cell.
+        let extra = table_logic::surfaced_cells(columns, &row.cells)
+            .into_iter()
+            .map(|(label, value, colored)| {
+                let value = if crate::data::looks_like_rfc3339(&value) {
+                    crate::data::humanize_cell(&value)
+                } else {
+                    value
+                };
+                (label, value, colored)
+            })
+            .collect();
         Self {
             name: row.name.clone(),
             status: row.status,
             namespace: row.namespace.clone(),
             kind_label,
-            extra: table_logic::surfaced_cells(columns, &row.cells),
+            extra,
             age,
         }
     }

@@ -20,6 +20,11 @@ pub struct PrinterCol {
     pub name: String,
     pub json_path: String,
     /// OpenAPI column type: string | integer | number | boolean | date.
+    /// Currently unused at runtime — RFC3339 values are detected on the
+    /// client via `data::looks_like_rfc3339` (mirrors the built-in Age
+    /// column's render path). Retained so a future typed-metadata push to
+    /// the client can flag date columns without re-reving `CrdLite`.
+    #[allow(dead_code)]
     pub col_type: String,
 }
 

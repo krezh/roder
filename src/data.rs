@@ -457,6 +457,41 @@ pub fn humanize_age(_created: &Option<String>) -> String {
     String::new()
 }
 
+/// Cheap structural check for an RFC3339 timestamp: `YYYY-MM-DDTHH:MM:SS…`.
+/// Used to decide whether a cell value should be live-humanized on the tick
+/// (mirroring the dedicated `Age` column) rather than rendered as a static
+/// string. Kubernetes timestamp fields are reliably RFC3339, so the risk of a
+/// false positive on a non-date column is negligible.
+pub fn looks_like_rfc3339(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() >= 20
+        && b.len() <= 35
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && b[10] == b'T'
+        && b[13] == b':'
+        && b[16] == b':'
+        // year is digits
+        && b[0..4].iter().all(|c| c.is_ascii_digit())
+}
+
+/// If `s` is an RFC3339 timestamp, return its live humanized age; otherwise
+/// return `s` unchanged. The caller must read the global `Tick` so the
+/// returned value re-renders each second.
+#[cfg(target_arch = "wasm32")]
+pub fn humanize_cell(s: &str) -> String {
+    if looks_like_rfc3339(s) {
+        humanize_age(&Some(s.to_string()))
+    } else {
+        s.to_string()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn humanize_cell(s: &str) -> String {
+    s.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -507,5 +542,31 @@ mod tests {
             u,
             "/api/detail?key=v1/Pod&namespace=kube%20system&name=my%3Dpod"
         );
+    }
+
+    #[test]
+    fn rfc3339_detector_accepts_kubernetes_timestamps() {
+        // The forms k8s actually emits: with `Z` or a numeric offset, with
+        // and without sub-second precision.
+        assert!(looks_like_rfc3339("2024-03-01T12:34:56Z"));
+        assert!(looks_like_rfc3339("2024-03-01T12:34:56.000000Z"));
+        assert!(looks_like_rfc3339("2024-03-01T12:34:56+00:00"));
+        assert!(looks_like_rfc3339("2024-03-01T12:34:56.123456789+02:00"));
+    }
+
+    #[test]
+    fn rfc3339_detector_rejects_non_dates() {
+        // Phase, status, numeric metrics, plain text — none of these have the
+        // RFC3339 shape, so a non-date cell is left untouched.
+        assert!(!looks_like_rfc3339("Running"));
+        assert!(!looks_like_rfc3339("True"));
+        assert!(!looks_like_rfc3339("42"));
+        assert!(!looks_like_rfc3339("3.14Gi"));
+        assert!(!looks_like_rfc3339("2024-03-01"));
+        assert!(!looks_like_rfc3339(""));
+        // An ISO date without the `T` separator isn't RFC3339 — the form k8s
+        // stamps onto objects always carries the `T`, so this guard keeps the
+        // heuristic narrow.
+        assert!(!looks_like_rfc3339("2024-03-01 12:34:56Z"));
     }
 }

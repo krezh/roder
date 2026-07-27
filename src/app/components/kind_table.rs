@@ -340,9 +340,18 @@ pub(crate) fn KindTable(
                         name_max_w = w;
                     }
                     for (i, c) in r.cells.iter().take(ncells).enumerate() {
-                        let w = text_width(c);
+                        // Timestamp cells are stored as raw RFC3339 but rendered
+                        // humanized (e.g. "5m"); size the track by the rendered
+                        // form so date columns don't get sized to the long raw
+                        // timestamp string.
+                        let rendered = if data::looks_like_rfc3339(c) {
+                            data::humanize_cell(c)
+                        } else {
+                            c.clone()
+                        };
+                        let w = text_width(&rendered);
                         if w > cell_max_w[i] {
-                            cell_maxes[i] = c.clone();
+                            cell_maxes[i] = rendered;
                             cell_max_w[i] = w;
                         }
                         if matches!(r.trends.get(i), Some(Trend::Up | Trend::Down)) {
@@ -726,7 +735,19 @@ pub(crate) fn KindTable(
                                             view! { <FlashTd value=val flash=flash pill=true
                                                 color=Signal::derive(move || dot_class(row.get().map(|r| r.status).unwrap_or(RowStatus::Unknown))) /> }.into_any()
                                         } else {
-                                            view! { <FlashTd value=val flash=flash trend=trend_sig /> }.into_any()
+                                            view! {
+                                                <FlashTd
+                                                    value=move || {
+                                                        let v = val();
+                                                        if data::looks_like_rfc3339(&v) {
+                                                            tick.get();
+                                                            data::humanize_cell(&v)
+                                                        } else {
+                                                            v
+                                                        }
+                                                    }
+                                                    flash=flash trend=trend_sig />
+                                            }.into_any()
                                         }
                                     }).collect_view()}
                                     <div class="cell cell-age">

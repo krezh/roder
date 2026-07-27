@@ -34,7 +34,6 @@ use self::core::{
 };
 use self::eso::{eso_generic_cells, external_secret_cells};
 pub(crate) use self::flux::ready_message_cells;
-use self::format::humanize_since;
 use self::gateway::{gateway_cells, gatewayclass_cells, httproute_cells};
 use self::pods::pod_cells;
 use self::rbac::rolebinding_cells;
@@ -247,16 +246,13 @@ fn project_cells(
     }
 
     // CRD's own columns, evaluating each declared jsonPath against the object.
+    // `date`-typed columns are passed through as raw RFC3339 — the client
+    // live-humanizes them on its tick (same path as the built-in Age column),
+    // so "Last Used"-style fields stay relative instead of freezing at the
+    // projection instant.
     let cells: Vec<String> = crd
         .iter()
-        .map(|c| {
-            let raw = printer_columns::eval(&c.json_path, data);
-            if c.col_type.eq_ignore_ascii_case("date") && !raw.is_empty() {
-                humanize_since(&raw)
-            } else {
-                raw
-            }
-        })
+        .map(|c| printer_columns::eval(&c.json_path, data))
         .collect();
 
     // Keep a hand-written projector's tuned row color where we have one; else derive

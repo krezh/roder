@@ -388,8 +388,18 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
             for mr in m.values() {
                 for (i, col) in cols.iter().enumerate() {
                     let val = cell_value_str(col, mr);
-                    if val.len() > col_maxes[i].len() {
-                        col_maxes[i] = val.to_string();
+                    // Timestamp cells are stored as raw RFC3339 but rendered
+                    // humanized (e.g. "5m"); size the track by the rendered
+                    // form so date columns don't get sized to the long raw
+                    // timestamp string. ("Age" falls in the same bucket — its
+                    // cell_value_str returns the raw RFC3339 too.)
+                    let rendered = if data::looks_like_rfc3339(val) {
+                        data::humanize_cell(val)
+                    } else {
+                        val.to_string()
+                    };
+                    if rendered.len() > col_maxes[i].len() {
+                        col_maxes[i] = rendered;
                     }
                     if matches!(mr.row.trends.get(i), Some(Trend::Up | Trend::Down)) {
                         col_has_trend[i] = true;
@@ -648,12 +658,18 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                                                         view! {
                                                             <FlashTd value=move || {
                                                                 let cn = col_name_sv.get_value();
-                                                                merged.get()
+                                                                let v = merged.get()
                                                                     .and_then(|mr| {
                                                                         let i = mr.kind.columns.iter().position(|c| c.as_str() == cn.as_str())?;
                                                                         mr.row.cells.get(i).cloned()
                                                                     })
-                                                                    .unwrap_or_default()
+                                                                    .unwrap_or_default();
+                                                                if data::looks_like_rfc3339(&v) {
+                                                                    tick.get();
+                                                                    data::humanize_cell(&v)
+                                                                } else {
+                                                                    v
+                                                                }
                                                             } no_flash=col_is_metric trend=trend_sig />
                                                         }.into_any()
                                                     }

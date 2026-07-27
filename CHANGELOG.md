@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.39](https://github.com/krezh/roder/compare/0.1.38...0.1.39) (2026-07-27)
+
+
+### Features
+
+* **client:** live-render timestamp columns on the age tick ([e91b37b](https://github.com/krezh/roder/commit/e91b37bb6b872041cfe56ece701a90e469854f46))
+
+
+### Miscellaneous Chores
+
+* **cargo:** lock file maintenance cargo.lock ([#129](https://github.com/krezh/roder/issues/129)) ([568f0f9](https://github.com/krezh/roder/commit/568f0f9e5f1a0fd0c7617dc067d283ad71123cb2))
+
 ## [0.1.38](https://github.com/krezh/roder/compare/0.1.37...0.1.38) (2026-07-26)
 
 

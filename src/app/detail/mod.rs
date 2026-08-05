@@ -626,7 +626,7 @@ fn TalosNodeView(node: String, key: String, actions: bool, config: bool) -> impl
                             <details class="talos-section">
                             <summary><span>"Network"</span><span class="talos-section-meta">{network_summary}</span></summary>
                             <div class="talos-section-body">
-                            <table class="cond talos-data-table"><thead><tr><th>"Interface"</th><th>"Link"</th><th>"Addresses"</th><th>"Hardware"</th><th>"RX / TX"</th><th>"Errors / Drops"</th></tr></thead>
+                            <table class="cond talos-data-table talos-network-table"><thead><tr><th>"Interface"</th><th>"Link"</th><th>"Addresses"</th><th>"Hardware"</th><th>"RX / TX"</th><th>"Errors / Drops"</th></tr></thead>
                                 <tbody>{interfaces.into_iter().map(|i| view! {
                                     <tr><td><b>{i.name}</b>{i.kind.map(|kind| view! { <div class="muted">{kind}</div> })}</td>
                                         <td class=if i.link_up == Some(false) { "error" } else { "" }>
@@ -634,7 +634,7 @@ fn TalosNodeView(node: String, key: String, actions: bool, config: bool) -> impl
                                             {i.speed_mbps.map(|speed| view! { <div class="muted">{format!("{speed} Mbps {}", i.duplex.unwrap_or_default())}</div> })}
                                         </td>
                                         <td class="font-mono">{if i.addresses.is_empty() { "—".into() } else { i.addresses.join(" · ") }}</td>
-                                        <td>{i.hardware_address.unwrap_or_else(|| "—".into())}{i.mtu.map(|mtu| view! { <div class="muted">{format!("MTU {mtu}")}</div> })}</td>
+                                        <td class="font-mono">{i.hardware_address.unwrap_or_else(|| "—".into())}{i.mtu.map(|mtu| view! { <div class="muted">{format!("MTU {mtu}")}</div> })}</td>
                                         <td>{format!("{} / {}", format_bytes(i.rx_bytes), format_bytes(i.tx_bytes))}</td>
                                         <td>{format!("{} / {}", i.rx_errors + i.tx_errors, i.rx_dropped + i.tx_dropped)}</td></tr>
                                 }).collect_view()}</tbody>

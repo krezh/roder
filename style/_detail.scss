@@ -519,15 +519,37 @@ table.cond {
     letter-spacing: 0.05em;
   }
 }
+// Every talos-* table shares one convention: columns whose content has a
+// known minimum get a fixed rem width sized to that content (not a
+// percentage — those don't track real text width at all); the free-text
+// columns (Model, Serial/WWID, Volume name, Addresses, Hardware) are left
+// unset so fixed layout hands them whatever's left. None of these columns —
+// headers included — force `white-space: nowrap`, so long values simply
+// wrap onto more lines (growing the row) instead of being cut off; wrapping
+// is exactly as safe against overflow as truncating, since a wrapped cell
+// never exceeds its column's width.
+//
+// 30rem is the shared floor, chosen to sit under the default 560px drawer's
+// content width once `.info`/`.talos-section`/`.talos-section-body`
+// padding and borders are subtracted (verified in-browser, not by hand —
+// the app's root font-size is 13px, not the 16px a plain rem-to-px
+// conversion assumes). Below this floor the table can't shrink further, so
+// `.info`'s own `overflow: auto` (not `.talos-section-body`'s — that one
+// never actually ends up narrower than its content) takes over and the
+// whole panel scrolls sideways together, instead of cells squeezing past
+// their content minimum and overlapping.
 .talos-data-table {
   table-layout: fixed;
-
-  &:not(.talos-service-table) th { width: calc(100% / 6); }
+  min-width: 30rem;
 }
 .talos-service-table {
-  th:first-child, td:first-child { width: calc(100% / 6); }
-  th:nth-child(2), td:nth-child(2) { width: calc(100% / 6); }
-  .talos-service-actions { width: calc(100% / 6); white-space: nowrap; }
+  th:nth-child(1), td:nth-child(1) { width: 7.5rem; }
+  th:nth-child(2), td:nth-child(2) { width: 4.5rem; }
+  // Sized for "Stop" + "Restart" side by side (~8.5rem needed including
+  // button padding and gap). Actions is a flex button group (`.actions`
+  // already wraps), so it doesn't need `white-space: nowrap` — that only
+  // fought the wrap, it never prevented overflow.
+  .talos-service-actions { width: 10rem; }
 }
 .talos-health {
   font-size: 0.76rem;
@@ -538,16 +560,34 @@ table.cond {
   &.unhealthy { color: var(--error); }
 }
 .talos-volume-table {
-  th:nth-child(2), td:nth-child(2) { white-space: nowrap; }
+  th:nth-child(2), td:nth-child(2) { width: 7.5rem; }
+  th:nth-child(3), td:nth-child(3) { width: 3.5rem; }
+  th:nth-child(4), td:nth-child(4) { width: 4rem; }
+  // Usage: sized to fit the shrunk `.talos-usage` widget plus cell padding.
+  th:nth-child(5), td:nth-child(5) { width: 6.5rem; }
+  th:nth-child(6), td:nth-child(6) { width: 3.5rem; }
 }
 .talos-disk-table {
-  th:first-child, td:first-child { white-space: nowrap; }
+  th:nth-child(1), td:nth-child(1) { width: 7.5rem; }
+  th:nth-child(3), td:nth-child(3) { width: 4rem; }
+  th:nth-child(4), td:nth-child(4) { width: 4rem; }
+  // Lifetime I/O: sized to fit the shrunk `.talos-disk-io` widget plus cell
+  // padding — otherwise it overflows the column and overlaps the next.
+  th:nth-child(5), td:nth-child(5) { width: 6rem; }
 }
+.talos-network-table {
+  th:nth-child(1), td:nth-child(1) { width: 5rem; }
+  th:nth-child(2), td:nth-child(2) { width: 5rem; }
+  th:nth-child(5), td:nth-child(5) { width: 4.5rem; }
+  th:nth-child(6), td:nth-child(6) { width: 3.5rem; }
+}
+// Stacked (R over W) rather than side-by-side — side-by-side needed ~11.15rem
+// of guaranteed column width, which left no budget for the free-text disk
+// columns under a drawer-width-safe table floor.
 .talos-disk-io {
-  display: grid;
-  grid-template-columns: repeat(2, 5.4rem);
-  gap: 0.35rem;
-  width: max-content;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 
@@ -555,6 +595,7 @@ table.cond {
     display: grid;
     grid-template-columns: 0.75rem auto;
     align-items: baseline;
+    column-gap: 0.3rem;
   }
   i {
     color: var(--muted);
@@ -565,10 +606,10 @@ table.cond {
 }
 .talos-usage {
   display: grid;
-  grid-template-columns: minmax(70px, 1fr) 3.5rem;
+  grid-template-columns: minmax(40px, 1fr) 2.6rem;
   align-items: center;
-  gap: 0.55rem;
-  min-width: 145px;
+  gap: 0.4rem;
+  min-width: 5.5rem;
 
   > span {
     height: 4px;

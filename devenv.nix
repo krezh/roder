@@ -1,4 +1,4 @@
-{ pkgs, ... }: {
+{ pkgs, lib, ... }: {
 
   packages = [
     pkgs.openssl
@@ -18,11 +18,11 @@
     };
     playwright = {
       type = "stdio";
-      command = "${pkgs.playwright-mcp}/bin/playwright-mcp";
+      command = lib.getExe pkgs.playwright-mcp;
       args = [
         "--headless"
         "--isolated"
-        "--allowed-hosts=localhost:8080"
+        "--allowed-hosts=localhost:8888"
       ];
     };
   };
@@ -51,7 +51,7 @@
   tasks = {
     "tools:wasm-bindgen" = {
       exec = ''
-        WBG_VER=$(grep -E '^wasm-bindgen\s*=' Cargo.toml | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+        WBG_VER=$(${lib.getExe pkgs.yq-go} .workspace.dependencies.wasm-bindgen Cargo.toml)
         INSTALLED_VER=$(wasm-bindgen --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
         if [ "$INSTALLED_VER" != "$WBG_VER" ]; then
           echo "Installing wasm-bindgen-cli $WBG_VER..."

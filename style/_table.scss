@@ -169,6 +169,7 @@
 .cwi {
   min-height: 0;
   overflow: hidden;
+  text-overflow: ellipsis;
   line-height: var(--row-h);
 }
 /* Name text truncates with an ellipsis when its column is squeezed. */

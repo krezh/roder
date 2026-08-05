@@ -309,3 +309,109 @@ pub(crate) fn table_window(
 
     window
 }
+
+/// Minimum width the single truncated column is ever squeezed to, so it stays
+/// legible (~15-18 chars at the table's monospace font) instead of collapsing
+/// to an unreadable nub. If capping to this floor still isn't enough to fit,
+/// the table falls back to its existing horizontal scroll — no other column
+/// is ever touched.
+#[cfg(target_arch = "wasm32")]
+const TRUNCATE_MIN_PX: f64 = 120.0;
+
+/// Safety margin subtracted from the computed cap so rounding/scrollbar-width
+/// doesn't leave the table re-triggering overflow by a hair.
+#[cfg(target_arch = "wasm32")]
+const TRUNCATE_BUFFER_PX: f64 = 8.0;
+
+/// Watches `.table-wrap`'s rendered width against its content width and, when
+/// the row grid overflows, caps the single widest CRD column's grid track down
+/// to whatever width makes the table fit. Every other column (Namespace, Name,
+/// Age, and every other CRD column) is left at its natural `max-content` size.
+/// Falls back to the table's existing horizontal scroll if capping one column
+/// isn't enough.
+///
+/// `sizer` and `columns` must be the same signals the caller's hidden
+/// `.grid-row.sizer` row and grid-template-columns builder use — this reuses
+/// that row's rendered widths rather than re-deriving text measurements.
+///
+/// Returns `(crd_column_index, cap_px)` reactively, or `None` when nothing
+/// needs truncating. The parameters are only read client-side (ssr has no DOM
+/// to measure), hence the blanket allow on non-wasm32.
+#[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
+pub(crate) fn table_column_truncation(
+    table_ref: NodeRef<Div>,
+    sizer: RwSignal<Vec<String>>,
+    columns: RwSignal<Vec<String>>,
+    namespaced: bool,
+) -> RwSignal<Option<(usize, f64)>> {
+    let truncate_col: RwSignal<Option<(usize, f64)>> = RwSignal::new(None);
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let recompute = move || {
+            // Uncap first so the rAF read below sees this column's true
+            // natural (max-content) width, not whatever it was last capped
+            // to — otherwise a column can never un-cap once room opens up.
+            truncate_col.set(None);
+            request_animation_frame(move || {
+                let Some(Some(wrap)) = table_ref.try_get_untracked() else {
+                    return;
+                };
+                let overflow = wrap.scroll_width() - wrap.client_width();
+                if overflow <= 0 {
+                    return;
+                }
+                let Ok(Some(sizer_row)) = wrap.query_selector(".grid-row.sizer") else {
+                    return;
+                };
+                let cells = sizer_row.children();
+                let base = 1 + usize::from(namespaced);
+                let ncrd = columns.with_untracked(|c| c.len());
+                let mut widest: Option<(usize, f64)> = None;
+                for i in 0..ncrd {
+                    let Some(cell) = cells.item((base + i) as u32) else {
+                        continue;
+                    };
+                    let w = cell.client_width() as f64;
+                    if widest.is_none_or(|(_, mw)| w > mw) {
+                        widest = Some((i, w));
+                    }
+                }
+                let Some((idx, w)) = widest else { return };
+                let cap = (w - overflow as f64 - TRUNCATE_BUFFER_PX).max(TRUNCATE_MIN_PX);
+                truncate_col.set(Some((idx, cap)));
+            });
+        };
+
+        // Recompute whenever the sizer's measured content changes (data or
+        // column-set changes).
+        Effect::new(move |_| {
+            sizer.track();
+            recompute();
+        });
+
+        // Recompute on any real box-size change of `.table-wrap` — window
+        // resize, sidebar collapse/expand, split-pane drags, etc. Follows the
+        // same wasm_bindgen Closure + SendWrapper + on_cleanup pattern as the
+        // scroll listener in `table_window` above.
+        Effect::new(move |_| {
+            use send_wrapper::SendWrapper;
+            use wasm_bindgen::closure::Closure;
+            use wasm_bindgen::JsCast;
+            let Some(wrap) = table_ref.get() else { return };
+            let cb = Closure::<dyn FnMut()>::new(move || recompute());
+            let cb_fn: js_sys::Function = cb.as_ref().unchecked_ref::<js_sys::Function>().clone();
+            let observer =
+                web_sys::ResizeObserver::new(&cb_fn).expect("ResizeObserver constructor");
+            observer.observe(&wrap);
+            let cleanup = SendWrapper::new((observer, cb));
+            on_cleanup(move || {
+                let (observer, cb) = cleanup.take();
+                observer.disconnect();
+                drop(cb);
+            });
+        });
+    }
+
+    truncate_col
+}

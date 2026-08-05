@@ -4,7 +4,9 @@ use roder_core::{ResourceKind, RowStatus, Trend};
 use crate::app::components::table::{sortable_th, FlashTd};
 use crate::app::components::table_row::{NameCell, ResourceRow as ResourceRowView};
 use crate::app::events::{make_bulk_open_logs, make_do_bulk, make_do_delete, RowMap};
-use crate::app::hooks::{table_window, use_sse_subscription, use_table_state};
+use crate::app::hooks::{
+    table_column_truncation, table_window, use_sse_subscription, use_table_state,
+};
 use crate::app::overlays::delete::{ask_delete, DeleteRequest};
 use crate::app::overlays::toast::{show_toast, Toast, ToastKind};
 use crate::app::state::{
@@ -294,15 +296,6 @@ pub(crate) fn KindTable(
         reset_selection,
     );
 
-    // Grid track count follows the live column count, so the grid reflows when
-    // columns change.
-    let tmpl = move || {
-        let n = columns.get().len() + 2 + usize::from(namespaced);
-        format!(
-            "grid-template-columns: {} 1fr;",
-            vec!["max-content"; n].join(" ")
-        )
-    };
     let sizer: RwSignal<Vec<String>> = RwSignal::new(Vec::new());
     {
         Effect::new(move |_| {
@@ -398,6 +391,30 @@ pub(crate) fn KindTable(
             });
         });
     }
+
+    // Caps the single widest CRD column's grid track when the table doesn't
+    // fit `.table-wrap` — see `table_column_truncation` for the mechanism.
+    let truncate_col = table_column_truncation(table_ref, sizer, columns, namespaced);
+    let base_col_offset = 1 + usize::from(namespaced);
+
+    // Grid track count follows the live column count, so the grid reflows when
+    // columns change. The single widest CRD column may be capped to a fixed
+    // pixel width (`truncate_col`) so it truncates with an ellipsis instead of
+    // blowing the table out past its container — every other track keeps its
+    // natural `max-content` size.
+    let tmpl = move || {
+        let ncrd = columns.with(|c| c.len());
+        let n = ncrd + 2 + usize::from(namespaced);
+        let cap = truncate_col.get();
+        let tracks: String = (0..n)
+            .map(|i| match cap {
+                Some((crd_i, px)) if i == base_col_offset + crd_i => format!("{px:.0}px"),
+                _ => "max-content".to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        format!("grid-template-columns: {tracks} 1fr;")
+    };
 
     // Reactive header: the per-column `<th>`s follow the live `columns` signal.
     let header = move || {

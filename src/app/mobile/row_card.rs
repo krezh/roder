@@ -52,6 +52,9 @@ impl CardFields {
                 } else {
                     value
                 };
+                // `\n` marks a list value (see printer_columns::eval) — collapse to
+                // a compact inline form, mirroring the desktop table cell.
+                let value = value.replace('\n', ", ");
                 (label, value, colored)
             })
             .collect();

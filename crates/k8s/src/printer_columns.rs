@@ -220,7 +220,10 @@ pub fn eval(path: &str, root: &Value) -> String {
         .map(|v| render_scalar(v))
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
-        .join(",")
+        // `\n`-joined, not `,` — the table cell/tooltip layer treats `\n` as the
+        // list-value marker: the cell collapses it to a compact ", " form while
+        // the tooltip renders it as a proper line-per-item list on hover.
+        .join("\n")
 }
 
 /// A per-segment selector parsed from the `[...]` suffix, if any.
@@ -314,7 +317,8 @@ fn render_scalar(v: &Value) -> String {
                 })
                 .collect();
             if scalars.len() == a.len() {
-                scalars.join(",")
+                // See the `\n`-join note on `eval`'s [*] expansion above.
+                scalars.join("\n")
             } else {
                 a.len().to_string()
             }
@@ -466,11 +470,11 @@ mod tests {
         // Path ending at an array of scalars → joined
         assert_eq!(
             eval(".status.projects[*].status", &o),
-            "completed,completed,failed"
+            "completed\ncompleted\nfailed"
         );
         // Mixed array with scalars only → joined
         let o2 = json!({"items": ["a", "b", "c"]});
-        assert_eq!(eval(".items", &o2), "a,b,c");
+        assert_eq!(eval(".items", &o2), "a\nb\nc");
     }
 
     #[test]
@@ -482,7 +486,7 @@ mod tests {
         assert_eq!(eval(".status.loadBalancer.ingress[0].ip", &o), "10.0.0.1");
         assert_eq!(
             eval(".status.loadBalancer.ingress[*].ip", &o),
-            "10.0.0.1,10.0.0.2"
+            "10.0.0.1\n10.0.0.2"
         );
         assert_eq!(eval(".spec.replicas", &o), "3");
         assert_eq!(eval(".spec.paused", &o), "true");

@@ -252,6 +252,7 @@ lib-features = ["hydrate"]
 lib-default-features = false
 lib-profile-release = "wasm-release"
 js-minify = true
+hash-files = true
 
 [profile.release]
 codegen-units = 1

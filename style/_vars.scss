@@ -49,6 +49,10 @@
 
 * {
   box-sizing: border-box;
+  // Chromium doesn't propagate these through inheritance despite the spec
+  // marking them inherited, so every element needs the rule directly.
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
 
 input,
@@ -70,6 +74,24 @@ body {
   font-family: "Rubik", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   font-size: 13px;
   line-height: 1.45;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
 }
 
 // 13px suits the desktop's dense grid, but reads as tiny on a phone held at

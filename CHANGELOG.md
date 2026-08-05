@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.1.40](https://github.com/krezh/roder/compare/0.1.39...0.1.40) (2026-08-05)
+
+
+### Features
+
+* **cargo:** update rust crate http (1.4.2 ➔ 1.5.0) ([#136](https://github.com/krezh/roder/issues/136)) ([fccf039](https://github.com/krezh/roder/commit/fccf039bb8a8d5b470b8f49d26e7efaebe449129))
+* **table:** truncate the single widest overflowing column ([9613d8a](https://github.com/krezh/roder/commit/9613d8aae833e34efd9610be41f1db54439bb6ed))
+* **tooltip:** follow the cursor and cover every hover hint app-wide ([6e2c35d](https://github.com/krezh/roder/commit/6e2c35de87e8d1914e5a9a12abb21e1ab092310e))
+
+
+### Bug Fixes
+
+* **cache:** content-hash pkg assets so css updates aren't cached for a year ([7dc8f98](https://github.com/krezh/roder/commit/7dc8f98ebc6bf6c8668f10074f67d37c8160b30c))
+* **cargo:** update rust crate base64 (0.23.0 ➔ 0.23.1) ([#144](https://github.com/krezh/roder/issues/144)) ([aa736c0](https://github.com/krezh/roder/commit/aa736c0a60934ee4337022cab196e959efc173bd))
+* **cargo:** update rust crate rustls (0.23.42 ➔ 0.23.43) ([#137](https://github.com/krezh/roder/issues/137)) ([e32cc65](https://github.com/krezh/roder/commit/e32cc65ab1178e4787023bfb525ba236c8543ac0))
+* **cargo:** update rust crate time (0.3.54 ➔ 0.3.55) ([#140](https://github.com/krezh/roder/issues/140)) ([a89a81c](https://github.com/krezh/roder/commit/a89a81cdca6f21fefbc1e8e173794b2145bb0185))
+* **k8s:** join multi-value printer columns with newlines for list tooltips ([bb573f9](https://github.com/krezh/roder/commit/bb573f9e2c1ad2186a66e618837d4e3d87bfe598))
+* **talos:** stop node detail table columns overlapping on resize ([f540f52](https://github.com/krezh/roder/commit/f540f52684614d83164cca66d1413232c07db416))
+
+
+### Styles
+
+* **ui:** make the sidebar's minimal scrollbar the app-wide default ([6e80a88](https://github.com/krezh/roder/commit/6e80a883afa45e7bf5b6a8449f7e7f44dd9daef1))
+
+
+### Miscellaneous Chores
+
+* **cargo:** lock file maintenance cargo.lock ([#131](https://github.com/krezh/roder/issues/131)) ([18f6f77](https://github.com/krezh/roder/commit/18f6f77b5b9fda9ee7cfdaf8784372ccf050d4c5))
+* **cargo:** lock file maintenance cargo.lock ([#134](https://github.com/krezh/roder/issues/134)) ([8d591bb](https://github.com/krezh/roder/commit/8d591bb59f04202e0b2fc1deaa2678114bcfdd97))
+* **cargo:** lock file maintenance cargo.lock ([#138](https://github.com/krezh/roder/issues/138)) ([5f0e960](https://github.com/krezh/roder/commit/5f0e960d6273c9863e00d1184446fc92da295a7f))
+* **cargo:** lock file maintenance cargo.lock ([#139](https://github.com/krezh/roder/issues/139)) ([9383873](https://github.com/krezh/roder/commit/938387378a03fc7b4a5752f652433273e71ef796))
+* **cargo:** lock file maintenance cargo.lock ([#141](https://github.com/krezh/roder/issues/141)) ([a748885](https://github.com/krezh/roder/commit/a748885885fe1d4ac72162ca978c2af2364cdad7))
+* **cargo:** lock file maintenance cargo.lock ([#142](https://github.com/krezh/roder/issues/142)) ([c7b389f](https://github.com/krezh/roder/commit/c7b389fbb28d30045532eb4fdf018c1fd78d6211))
+* **cargo:** lock file maintenance cargo.lock ([#143](https://github.com/krezh/roder/issues/143)) ([656c378](https://github.com/krezh/roder/commit/656c378709481625ba93faa1b0520791011a6c1e))
+* **cargo:** lock file maintenance cargo.lock ([#145](https://github.com/krezh/roder/issues/145)) ([55ba828](https://github.com/krezh/roder/commit/55ba8281a98e09a133571b0d54f0cca4b7e74d8e))
+
 ## [0.1.39](https://github.com/krezh/roder/compare/0.1.38...0.1.39) (2026-07-27)
 
 

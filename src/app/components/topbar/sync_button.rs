@@ -34,9 +34,8 @@ pub(crate) fn SyncButton() -> impl IntoView {
     };
 
     view! {
-        <button class="sync-btn tip-anchor" on:click=do_sync>
+        <button class="sync-btn" data-tip="Reconcile all Flux resources" on:click=do_sync>
             "Sync"
-            <span class="tooltip">"Reconcile all Flux resources"</span>
         </button>
     }
 }

@@ -74,7 +74,7 @@ pub(crate) fn FailingBadge() -> impl IntoView {
                 };
                 view! {
                     <button class="failbadge" class:closing=move || badge_closing.get() on:click=go
-                        title="Pods failing — click to view">
+                        data-tip="Pods failing — click to view">
                         {n} " Pods"
                     </button>
                 }

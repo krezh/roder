@@ -40,7 +40,7 @@ pub(crate) fn SanitizeButton() -> impl IntoView {
     };
 
     view! {
-        <button class="sweep-btn tip-anchor"
+        <button class="sweep-btn" data-tip="Delete dead pods and finished jobs"
             on:click=move |_| {
                 confirm.set(Some(Confirm {
                     message: "Delete all dead pods and finished jobs?".into(),
@@ -48,7 +48,6 @@ pub(crate) fn SanitizeButton() -> impl IntoView {
                 }));
             }>
             "Sweep"
-            <span class="tooltip">"Delete dead pods and finished jobs"</span>
         </button>
     }
 }

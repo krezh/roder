@@ -254,18 +254,7 @@
 .tree-leaf-disabled {
   cursor: default;
   opacity: 0.5;
-  position: relative;
   &:hover {
     border-color: var(--border);
-  }
-  .tooltip {
-    display: none;
-    position: absolute;
-    top: 100%;
-    left: 0.5rem;
-    margin-top: 4px;
-  }
-  &:hover .tooltip {
-    display: block;
   }
 }

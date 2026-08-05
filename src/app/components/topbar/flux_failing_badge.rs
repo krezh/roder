@@ -106,9 +106,9 @@ pub(crate) fn FluxFailingBadge() -> impl IntoView {
                     }
                 };
                 view! {
-                    <button class="fluxbadge tip-anchor" class:closing=move || badge_closing.get() on:click=go>
+                    <button class="fluxbadge" data-tip="Flux resources failing — click to view"
+                        class:closing=move || badge_closing.get() on:click=go>
                         {label}
-                        <span class="tooltip">"Flux resources failing — click to view"</span>
                     </button>
                 }
             })

@@ -310,6 +310,7 @@ fn LeafChip(node: ResourceTreeNode) -> impl IntoView {
             class="tree-leaf-chip"
             class:tree-leaf-disabled=!clickable
             class:tree-selected=selected
+            data-tip=(!clickable).then_some("Kind not found in this cluster's catalog")
             on:click=open
         >
             <TreeKindIcon category=node.category kind=node.kind.clone() small=true />
@@ -317,7 +318,6 @@ fn LeafChip(node: ResourceTreeNode) -> impl IntoView {
                 <div class="tree-name">{node.name}</div>
                 <div class="tree-kind-line">{node.kind}</div>
             </div>
-            {(!clickable).then(|| view! { <span class="tooltip">"Kind not found in this cluster's catalog"</span> })}
         </div>
     }
 }

@@ -122,8 +122,8 @@ pub(crate) fn TopUsage() -> impl IntoView {
                             <b>{ready}"/"{total}</b>
                         </button>
                         {move || stale.get().then(|| view! {
-                            <span class="tu-warn" aria-label="Usage data is stale">"!"
-                                <span class="tooltip">"Failed to refresh — showing last known values"</span>
+                            <span class="tu-warn" aria-label="Usage data is stale"
+                                data-tip="Failed to refresh — showing last known values">"!"
                             </span>
                         })}
                         <div class="tooltip usage-tip">

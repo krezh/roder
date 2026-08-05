@@ -65,7 +65,7 @@ pub(crate) fn AlertsPanel() -> impl IntoView {
                         <span
                             class="alerts-refreshed"
                             class:error=move || refresh_error.get().is_some()
-                            title=move || refresh_error.get().unwrap_or_default()
+                            data-tip=move || refresh_error.get().unwrap_or_default()
                         >
                             {move || {
                                 tick.track();

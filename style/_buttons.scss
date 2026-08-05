@@ -32,7 +32,6 @@
 
 .palette-btn { @extend %chip-btn; }
 
-// Sweep/Sync also carry `.tip-anchor` in markup for their hover tooltip.
 .sweep-btn { @extend %chip-btn; }
 
 .sync-btn { @extend %chip-btn; }
@@ -112,7 +111,7 @@
 }
 
 // Cluster-wide failing Flux resource count; clicking jumps to Kustomizations
-// or HelmReleases. Carries `.tip-anchor` in markup for its hover tooltip.
+// or HelmReleases.
 .fluxbadge {
   background: color-mix(in srgb, var(--warn) 16%, transparent);
   border: 1px solid var(--warn);

@@ -230,7 +230,6 @@
     display: block;
   }
   .tu-warn {
-    position: relative;
     color: var(--warn);
     width: 1rem;
     height: 1rem;
@@ -240,8 +239,6 @@
     line-height: calc(1rem - 2px);
     text-align: center;
     cursor: default;
-    .tooltip { display: none; position: absolute; top: 100%; right: 0; margin-top: 6px; }
-    &:hover .tooltip { display: block; }
   }
   &.tu-stale {
     .tu-fill { opacity: 0.45; }
@@ -253,24 +250,24 @@
   }
 }
 /* Generic host for a `.tooltip` child: hidden until hover, anchored at the
-   host's bottom-left (`.tip-anchor`) or bottom-right (`.tip-anchor-end`).
-   Add either class alongside the host's own class instead of re-declaring
-   the position/reveal rules per component. */
-.tip-anchor,
+   host's bottom-right. Only the alerts-count breakdown still uses this —
+   every other tooltip is plain text and goes through the global, cursor-
+   following `data-tip`/TooltipLayer mechanism instead (see tooltip.rs). This
+   one stays bespoke because its content is a structured severity breakdown,
+   not a string the global tooltip can render. */
 .tip-anchor-end {
   position: relative;
   .tooltip {
     display: none;
     position: absolute;
     top: 100%;
+    right: 0;
     margin-top: 6px;
   }
   &:hover .tooltip {
     display: block;
   }
 }
-.tip-anchor { .tooltip { left: 0; } }
-.tip-anchor-end { .tooltip { right: 0; } }
 
 /* The one reusable tooltip look — used by the global hover tooltip and by any
    bespoke tooltip bubble (e.g. the cluster-usage per-node popover). */

@@ -215,13 +215,34 @@ pub async fn build_state(leptos_options: LeptosOptions) -> Result<AppState, Stri
     ));
     backends.spawn_reaper();
 
-    // cargo-leptos writes the built bundle to `{site_root}/{site_pkg_dir}/{output_name}.wasm`
-    // (the same layout `HydrationScripts`/`HashedStylesheet` already assume). Hashed once at
-    // startup — a redeploy always restarts this process, so "once at startup" is "once per build".
-    let wasm_path = format!(
-        "{}/{}/{}.wasm",
-        leptos_options.site_root, leptos_options.site_pkg_dir, leptos_options.output_name
-    );
+    // cargo-leptos writes the built bundle to `{site_root}/{site_pkg_dir}/{output_name}.wasm`.
+    // When `hash-files = true` (set in Cargo.toml), the filename includes a content hash:
+    // `{output_name}.{hash}.wasm`. Resolve the hash the same way `leptos_meta::HashedStylesheet`
+    // resolves the CSS hash: from `hash.txt` next to the running executable, which is the
+    // manifest cargo-leptos actually writes for this lookup (not a directory scan, which is
+    // ambiguous whenever a stale hashed build is left behind in `pkg/` from an earlier run).
+    let mut wasm_file_name = leptos_options.output_name.to_string();
+    if leptos_options.hash_files {
+        let hash_path = std::env::current_exe()
+            .map(|path| path.parent().map(|p| p.to_path_buf()).unwrap_or_default())
+            .unwrap_or_default()
+            .join(leptos_options.hash_file.as_ref());
+        if let Ok(hashes) = std::fs::read_to_string(&hash_path) {
+            for line in hashes.lines() {
+                if let Some((file, hash)) = line.trim().split_once(':') {
+                    if file == "wasm" {
+                        wasm_file_name.push('.');
+                        wasm_file_name.push_str(hash.trim());
+                    }
+                }
+            }
+        }
+    }
+    wasm_file_name.push_str(".wasm");
+    let wasm_path = std::path::PathBuf::from(format!(
+        "{}/{}/{}",
+        leptos_options.site_root, leptos_options.site_pkg_dir, wasm_file_name
+    ));
     let asset_version: Arc<str> = match std::fs::read(&wasm_path) {
         Ok(bytes) => compute_asset_version(&bytes).into(),
         Err(e) => {
@@ -230,8 +251,9 @@ pub async fn build_state(leptos_options: LeptosOptions) -> Result<AppState, Stri
             // per process, so equality-based skew detection stays sound even
             // here — it just won't reflect real build content.
             tracing::warn!(
-                "could not read {wasm_path} to compute the asset version ({e}); \
-                 version-skew auto-reload will use a per-process fallback"
+                "could not read {} to compute the asset version ({e}); \
+                 version-skew auto-reload will use a per-process fallback",
+                wasm_path.display()
             );
             let nanos = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

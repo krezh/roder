@@ -28,7 +28,7 @@ jobs:
             with:
               toolchain: stable
               components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: cargo check
         run: cargo check --workspace --features ssr
 
@@ -46,7 +46,7 @@ jobs:
             with:
               toolchain: stable
               components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: cargo test
         run: cargo test --workspace --features ssr
 
@@ -64,7 +64,7 @@ jobs:
             with:
               toolchain: stable
               components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: cargo clippy (ssr)
         run: cargo clippy --workspace --features ssr -- -D warnings
 
@@ -84,7 +84,7 @@ jobs:
               toolchain: stable
               components: clippy, rustfmt
               targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: cargo clippy (hydrate)
         run: cargo clippy -p roder --no-default-features --features hydrate -- -D warnings
 

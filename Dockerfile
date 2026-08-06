@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- build ----------------------------------------------------------------
-FROM ghcr.io/rust-lang/rust:1.97.1-trixie@sha256:1bcff4befb740599103a2c7cb51058e14479b2e35e3a34a3f0dc4ede09927488 AS build
+FROM ghcr.io/rust-lang/rust:1.97.1-trixie@sha256:3382bd20aa942806c533e9a73cd000474fb3ef173f71e684cc9b942675781769 AS build
 
 ARG WB_VERSION
 

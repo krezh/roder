@@ -82,6 +82,79 @@ fn init_status(data: &Value) -> Option<String> {
     None
 }
 
+fn get_last_restart_time(data: &Value) -> Option<time::OffsetDateTime> {
+    let mut restart_time = None;
+
+    let check_state = |state: Option<&Value>, restart_time: &mut Option<time::OffsetDateTime>| {
+        if let Some(state) = state {
+            if let Some(running) = state.get("running") {
+                if let Some(started_at) = running.get("startedAt").and_then(|s| s.as_str()) {
+                    if let Ok(t) = time::OffsetDateTime::parse(
+                        started_at,
+                        &time::format_description::well_known::Rfc3339,
+                    ) {
+                        if restart_time.is_none() || Some(t) > *restart_time {
+                            *restart_time = Some(t);
+                        }
+                    }
+                }
+            }
+            if let Some(terminated) = state.get("terminated") {
+                if let Some(started_at) = terminated.get("startedAt").and_then(|s| s.as_str()) {
+                    if let Ok(t) = time::OffsetDateTime::parse(
+                        started_at,
+                        &time::format_description::well_known::Rfc3339,
+                    ) {
+                        if restart_time.is_none() || Some(t) > *restart_time {
+                            *restart_time = Some(t);
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    let check_last_state =
+        |state: Option<&Value>, restart_time: &mut Option<time::OffsetDateTime>| {
+            if let Some(state) = state {
+                if let Some(terminated) = state.get("terminated") {
+                    if let Some(finished_at) = terminated.get("finishedAt").and_then(|s| s.as_str())
+                    {
+                        if let Ok(t) = time::OffsetDateTime::parse(
+                            finished_at,
+                            &time::format_description::well_known::Rfc3339,
+                        ) {
+                            if restart_time.is_none() || Some(t) > *restart_time {
+                                *restart_time = Some(t);
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+    let statuses = data
+        .get("status")
+        .and_then(|s| s.get("containerStatuses"))
+        .and_then(|c| c.as_array());
+
+    let init_statuses = data
+        .get("status")
+        .and_then(|s| s.get("initContainerStatuses"))
+        .and_then(|c| c.as_array());
+
+    for arr in [statuses, init_statuses].into_iter().flatten() {
+        for c in arr {
+            if c.get("restartCount").and_then(|n| n.as_i64()).unwrap_or(0) > 0 {
+                check_state(c.get("state"), &mut restart_time);
+                check_last_state(c.get("lastState"), &mut restart_time);
+            }
+        }
+    }
+
+    restart_time
+}
+
 pub(crate) fn pod_cells(
     data: &Value,
     deleting: bool,
@@ -135,6 +208,19 @@ pub(crate) fn pod_cells(
                     .sum::<i64>()
             })
             .unwrap_or(0);
+
+    let restarts_cell = if restarts > 0 {
+        if let Some(t) = get_last_restart_time(data) {
+            let diff = time::OffsetDateTime::now_utc() - t;
+            let secs = diff.whole_seconds().max(0) as u64;
+            format!("{}\x1f{} ago", restarts, roder_core::format_age_secs(secs))
+        } else {
+            restarts.to_string()
+        }
+    } else {
+        "0".to_string()
+    };
+
     let node = str_at(data, &["spec", "nodeName"]).unwrap_or_default();
     let phase = str_at(data, &["status", "phase"]).unwrap_or_default();
 
@@ -227,7 +313,7 @@ pub(crate) fn pod_cells(
         vec![
             format!("{ready}/{total}"),
             reason,
-            restarts.to_string(),
+            restarts_cell,
             cpu_cell,
             pct(cpu_used, cpu_r),
             pct(cpu_used, cpu_l),

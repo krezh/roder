@@ -157,6 +157,10 @@ where
                                 })}
                             </div>
                         }.into_any()
+                    } else if let Some((main, hint)) = v.split_once('\x1f') {
+                        view! {
+                            <span>{main.to_string()} <span class="hint" style="font-size: 0.85em; opacity: 0.8; margin-left: 0.5ch;">{hint.to_string()}</span></span>
+                        }.into_any()
                     } else {
                         v.into_any()
                     }

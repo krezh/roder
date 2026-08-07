@@ -79,7 +79,7 @@ proc-macro-error2 = { git = "https://github.com/fgardt/proc-macro-error-2", rev 
 
 [package]
 name = "roder"
-version = "0.1.40"
+version = "0.1.41"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

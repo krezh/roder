@@ -29,8 +29,8 @@ jobs:
       - name: Resolve wasm-bindgen version
         id: wb
         run: |
-          WB_VERSION="$(yq '.workspace.dependencies.wasm-bindgen' Cargo.toml)"
-          test -n "${WB_VERSION}"
+          WB_VERSION="$(yq -e '.workspace.dependencies.wasm-bindgen' Cargo.toml)"
+          test -n "${WB_VERSION}" && [ "${WB_VERSION}" != "null" ]
           echo "value=${WB_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx

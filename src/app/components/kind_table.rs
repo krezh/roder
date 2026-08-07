@@ -340,7 +340,7 @@ pub(crate) fn KindTable(
                         let rendered = if data::looks_like_rfc3339(c) {
                             data::humanize_cell(c)
                         } else {
-                            c.clone()
+                            c.replace('\x1f', " ")
                         };
                         let w = text_width(&rendered);
                         if w > cell_max_w[i] {

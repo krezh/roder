@@ -7,11 +7,12 @@ use roder_core::{RowStatus, Trend};
 use crate::app::state::SortKey;
 use crate::app::util::color::dot_class;
 
-/// Compare two cell string values, numerically when both parse as numbers.
 pub(crate) fn cmp_str(a: &str, b: &str) -> std::cmp::Ordering {
-    match (a.parse::<f64>(), b.parse::<f64>()) {
+    let a_val = a.split_once('\x1f').map(|x| x.0).unwrap_or(a);
+    let b_val = b.split_once('\x1f').map(|x| x.0).unwrap_or(b);
+    match (a_val.parse::<f64>(), b_val.parse::<f64>()) {
         (Ok(x), Ok(y)) => x.partial_cmp(&y).unwrap_or(std::cmp::Ordering::Equal),
-        _ => a.cmp(b),
+        _ => a_val.cmp(b_val),
     }
 }
 
@@ -124,7 +125,7 @@ where
     };
     view! {
         <div class=format!("cell {class}") class:flash=move || flash_state.get()
-            data-tip=value
+            data-tip=move || value().replace('\x1f', " ")
             style=move || color.map(|c| {
                 let v = c.get();
                 if v.is_empty() { return String::new(); }

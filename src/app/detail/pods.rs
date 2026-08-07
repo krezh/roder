@@ -105,7 +105,14 @@ pub(crate) fn PodsTab(namespace: String, selector: String) -> impl IntoView {
                                     {move || row.get().and_then(|r| r.cells.get(1).cloned()).unwrap_or_default()}
                                 </span>
                                 <span class="pm-num">{move || row.get().and_then(|r| r.cells.first().cloned()).unwrap_or_default()}</span>
-                                <span class="pm-num">{move || format!("⟳ {}", row.get().and_then(|r| r.cells.get(2).cloned()).unwrap_or_default())}</span>
+                                <span class="pm-num">{move || {
+                                    let v = row.get().and_then(|r| r.cells.get(2).cloned()).unwrap_or_default();
+                                    if let Some((main, hint)) = v.split_once('\x1f') {
+                                        format!("⟳ {main} ({hint})")
+                                    } else {
+                                        format!("⟳ {v}")
+                                    }
+                                }}</span>
                                 <span class="pm-num">{move || { tick.get(); data::humanize_age(&row.get().and_then(|r| r.created)) }}</span>
                             </div>
                         }

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.41](https://github.com/krezh/roder/compare/0.1.40...0.1.41) (2026-08-07)
+
+
+### Bug Fixes
+
+* **container:** update image ghcr.io/rust-lang/rust (1bcff4b ➔ 3382bd2) ([#148](https://github.com/krezh/roder/issues/148)) ([5a6a615](https://github.com/krezh/roder/commit/5a6a615056cd8e3d57bbb5013ae35fbfa4190c75))
+* resolve hashed wasm filename from hash.txt manifest ([7b9ad38](https://github.com/krezh/roder/commit/7b9ad3828ede4f86193972268a851dc5f7a5f2f4))
+
+
+### Miscellaneous Chores
+
+* **cargo:** lock file maintenance cargo.lock ([#146](https://github.com/krezh/roder/issues/146)) ([753f55e](https://github.com/krezh/roder/commit/753f55e7e759d4d2fc17bc76d8bc1a3d45e6502f))
+* **cargo:** lock file maintenance cargo.lock ([#150](https://github.com/krezh/roder/issues/150)) ([0cd6a59](https://github.com/krezh/roder/commit/0cd6a59507c71519dbe82bd5ae4a39978fee59c5))
+
 ## [0.1.40](https://github.com/krezh/roder/compare/0.1.39...0.1.40) (2026-08-05)
 
 

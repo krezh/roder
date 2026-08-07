@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.42](https://github.com/krezh/roder/compare/0.1.41...0.1.42) (2026-08-07)
+
+
+### Features
+
+* **ui:** display time since last pod restart ([5debadd](https://github.com/krezh/roder/commit/5debadd0ff3bd0db4192a8dc0761e40db5bd2e22))
+
+
+### Bug Fixes
+
+* **docker:** copy hash.txt and set LEPTOS_HASH_FILES so pkg assets resolve ([50a5370](https://github.com/krezh/roder/commit/50a53704bbf96132bb9e36544a6b8cb94a1c5537))
+
+
+### Continuous Integration
+
+* **e2e:** add headless-Chromium browser smoke test ([#154](https://github.com/krezh/roder/issues/154)) ([1f604f9](https://github.com/krezh/roder/commit/1f604f9e416cef4af1f63ab4452f49cd48ad501c))
+
 ## [0.1.41](https://github.com/krezh/roder/compare/0.1.40...0.1.41) (2026-08-07)
 
 

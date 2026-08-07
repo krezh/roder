@@ -8,22 +8,25 @@
     pkgs.heaptrack
     pkgs.cargo-leptos
     pkgs.kubernetes-helm
+    pkgs.act
   ];
 
-  claude.code.enable = true;
-  claude.code.mcpServers = {
-    "mcp.devenv.sh" = {
-      type = "http";
-      url = "https://mcp.devenv.sh";
-    };
-    playwright = {
-      type = "stdio";
-      command = lib.getExe pkgs.playwright-mcp;
-      args = [
-        "--headless"
-        "--isolated"
-        "--allowed-hosts=localhost:8888"
-      ];
+  claude.code = {
+    enable = true;
+    mcpServers = {
+      "mcp.devenv.sh" = {
+        type = "http";
+        url = "https://mcp.devenv.sh";
+      };
+      playwright = {
+        type = "stdio";
+        command = lib.getExe pkgs.playwright-mcp;
+        args = [
+          "--headless"
+          "--isolated"
+          "--allowed-hosts=localhost:8888"
+        ];
+      };
     };
   };
 
@@ -41,10 +44,12 @@
     targets = [ "wasm32-unknown-unknown" ];
   };
 
-  env.RODER_DEV_MODE = "1";
-  env.RUST_LOG = "info";
-  env.RODER_BASE_URL = "http://127.0.0.1:8080";
-  env.RODER_ALERTMANAGER_URL = "https://alertmanager.plexuz.xyz";
+  env = {
+    RODER_DEV_MODE = "1";
+    RUST_LOG = "info";
+    RODER_BASE_URL = "http://127.0.0.1:8080";
+    RODER_ALERTMANAGER_URL = "https://alertmanager.plexuz.xyz";
+  };
 
   processes.dev.exec = "cargo leptos watch";
 
@@ -95,6 +100,7 @@
 
     "test:docker" = {
       exec = "docker buildx build -t roder:test .";
+      before = [ "devenv:enterTest" ];
     };
   };
   enterShell = ''
@@ -105,14 +111,9 @@
     echo "  sass: $(sass --version)"
     echo ""
     echo "Available commands:"
-    echo "  dev          - Start dev server with hot-reload (auth bypassed)"
-    echo "  dev-auth     - Start dev server with real OIDC auth (needs Infisical)"
     echo "  check        - Type-check the workspace (ssr)"
     echo "  fmt          - Format all code"
     echo "  lint         - Lint (ssr + hydrate)"
     echo "  test         - Run workspace tests"
-    echo "  docker-build - Build debug image [tag]"
-    echo "  docker-release - Build release image [tag]"
-    echo "  docker-run   - Build & run dev image [tag]"
   '';
 }

@@ -26,10 +26,12 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     export LEPTOS_ENV=PROD LEPTOS_SITE_ROOT=/app/site-out && \
     if [ "$RELEASE" = "true" ]; then \
         cargo leptos build --release --bin-features ssr,jemalloc \
-        && cp /app/target/release/roder /app/roder-bin; \
+        && cp /app/target/release/roder /app/roder-bin \
+        && cp /app/target/release/hash.txt /app/hash.txt; \
     else \
         cargo leptos build --bin-features ssr,jemalloc \
-        && cp /app/target/debug/roder /app/roder-bin; \
+        && cp /app/target/debug/roder /app/roder-bin \
+        && cp /app/target/debug/hash.txt /app/hash.txt; \
     fi
 
 # ---- runtime --------------------------------------------------------------
@@ -37,11 +39,13 @@ FROM gcr.io/distroless/cc-debian13@sha256:ed7c407fd64eb0af9dddb9456b94cee188a40a
 
 WORKDIR /app
 COPY --from=build /app/roder-bin /app/roder
+COPY --from=build /app/hash.txt /app/hash.txt
 COPY --from=build /app/site-out /app/site
 
 ENV LEPTOS_SITE_ROOT=/app/site \
     LEPTOS_SITE_PKG_DIR=pkg \
     LEPTOS_SITE_ADDR=0.0.0.0:8080 \
+    LEPTOS_HASH_FILES=true \
     RUST_LOG=info \
     # jemalloc tuning (tikv-jemallocator reads the _RJEM_-prefixed var)
     _RJEM_MALLOC_CONF=background_thread:true,dirty_decay_ms:5000,muzzy_decay_ms:5000

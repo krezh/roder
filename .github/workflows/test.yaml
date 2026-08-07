@@ -102,3 +102,178 @@ jobs:
             run: helm lint helm
           - name: helm template (render + schema check)
             run: helm template roder helm >/dev/null
+
+  docker-assets:
+    name: docker image asset hashing
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve wasm-bindgen version
+        id: wb
+        run: |
+          WB_VERSION="$(yq '.workspace.dependencies.wasm-bindgen' Cargo.toml)"
+          test -n "${WB_VERSION}"
+          echo "value=${WB_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      # RELEASE=true (default) matches release.yaml — that's the build that
+      # must place hash.txt correctly.
+      - name: Build image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          build-args: WB_VERSION=${{ steps.wb.outputs.value }}
+          tags: roder:docker-assets-check
+          cache-from: type=gha,scope=roder-docker-assets
+          cache-to: type=gha,scope=roder-docker-assets,mode=max
+
+      # Regression guard: cargo-leptos writes hash.txt next to the compiled
+      # binary, not into the site bundle, so a naive image copy drops it and
+      # every static asset 404s in prod.
+      - name: Verify hashed asset wiring
+        run: |
+          set -euo pipefail
+
+          echo "--- checking LEPTOS_HASH_FILES ---"
+          if ! docker inspect roder:docker-assets-check \
+              --format '{{range .Config.Env}}{{println .}}{{end}}' \
+              | grep -qx 'LEPTOS_HASH_FILES=true'; then
+            echo "::error::LEPTOS_HASH_FILES=true is not set in the runtime image env"
+            exit 1
+          fi
+
+          cid=$(docker create roder:docker-assets-check)
+          trap 'docker rm -f "$cid" >/dev/null' EXIT
+
+          workdir=$(mktemp -d)
+          if ! docker cp "$cid:/app/hash.txt" "$workdir/hash.txt"; then
+            echo "::error::/app/hash.txt is missing from the built image"
+            exit 1
+          fi
+          if ! docker cp "$cid:/app/site/pkg" "$workdir/pkg"; then
+            echo "::error::/app/site/pkg is missing from the built image"
+            exit 1
+          fi
+
+          echo "--- hash.txt ---"
+          cat "$workdir/hash.txt"
+
+          fail=0
+          while IFS=':' read -r kind hash; do
+            kind="$(echo "$kind" | xargs)"
+            hash="$(echo "$hash" | xargs)"
+            [ -z "$kind" ] && continue
+            # Glob rather than hardcode the "roder." output-name prefix, so
+            # renaming package.metadata.leptos.output-name can't produce a
+            # false pass here.
+            match=$(find "$workdir/pkg" -maxdepth 1 -name "*.${hash}.${kind}" -print -quit)
+            if [ -z "$match" ]; then
+              echo "::error::hash.txt declares '${kind}: ${hash}' but no matching *.${hash}.${kind} file exists under /app/site/pkg"
+              fail=1
+            else
+              echo "OK: ${kind} -> $(basename "$match")"
+            fi
+          done < "$workdir/hash.txt"
+
+          exit "$fail"
+
+  e2e-browser:
+    name: browser smoke test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve wasm-bindgen version
+        id: wb
+        run: |
+          WB_VERSION="$(yq '.workspace.dependencies.wasm-bindgen' Cargo.toml)"
+          test -n "${WB_VERSION}"
+          echo "value=${WB_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          build-args: WB_VERSION=${{ steps.wb.outputs.value }}
+          tags: roder:e2e-check
+          cache-from: type=gha,scope=roder-e2e
+          cache-to: type=gha,scope=roder-e2e,mode=max
+
+      # roder needs a real cluster at startup even in dev mode
+      # (SharedCluster::connect_default) — a bare kind cluster satisfies it,
+      # since only apiserver discovery + CRD listing are required.
+      - name: Create kind cluster
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+        with:
+          cluster_name: roder-e2e
+          wait: 90s
+
+      # roder is a sibling container, not inside kind's network namespace, so
+      # it needs the *internal* kubeconfig (Docker DNS name on the shared
+      # `kind` network) — not the host-mapped-localhost one kind-action sets
+      # as $KUBECONFIG.
+      - name: Start roder against the kind cluster
+        run: |
+          set -euo pipefail
+          kind get kubeconfig --name roder-e2e --internal > kubeconfig-internal.yaml
+          chmod 644 kubeconfig-internal.yaml
+
+          docker run -d --name roder-e2e --network kind -p 8080:8080 \
+            -e RODER_DEV_MODE=1 \
+            -v "$(pwd)/kubeconfig-internal.yaml:/home/nonroot/.kube/config:ro" \
+            roder:e2e-check
+
+          for _ in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8080/health >/dev/null; then
+              echo "roder is up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::roder did not become healthy in time"
+          docker logs roder-e2e || true
+          exit 1
+
+      - name: Set up Chrome
+        id: setup-chrome
+        uses: browser-actions/setup-chrome@e574b4b3a21156ab45dd6b5f67e884fd26eed829 # v2.1.2
+
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      # Regression test: drives a real headless Chromium at the app and fails
+      # on any console error or failed request — see tests/browser_smoke.rs
+      # for what it checks and why.
+      - name: Browser smoke test
+        env:
+          RODER_E2E_BASE_URL: http://127.0.0.1:8080/
+          CHROME: ${{ steps.setup-chrome.outputs.chrome-path }}
+        run: cargo test --test browser_smoke -- --nocapture
+
+      - name: Dump roder logs
+        if: failure()
+        run: docker logs roder-e2e || true
+
+      - name: Clean up
+        if: always()
+        run: docker rm -f roder-e2e || true

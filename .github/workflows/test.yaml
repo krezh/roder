@@ -168,7 +168,7 @@ jobs:
           cat "$workdir/hash.txt"
 
           fail=0
-          while IFS=':' read -r kind hash; do
+          while IFS=':' read -r kind hash || [ -n "$kind" ]; do
             kind="$(echo "$kind" | xargs)"
             hash="$(echo "$hash" | xargs)"
             [ -z "$kind" ] && continue

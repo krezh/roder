@@ -4126,7 +4126,7 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 [[package]]
 name = "rustwright"
 version = "0.2.0"
-source = "git+https://github.com/Skyvern-AI/rustwright?rev=58be34b20a4fca22067935740f0da9f1dd1fe3db#58be34b20a4fca22067935740f0da9f1dd1fe3db"
+source = "git+https://github.com/Skyvern-AI/rustwright?rev=eec542ec70bcd1dd483f41dcd190772194f53e6f#eec542ec70bcd1dd483f41dcd190772194f53e6f"
 dependencies = [
  "rustwright-core",
  "serde",
@@ -4136,7 +4136,7 @@ dependencies = [
 [[package]]
 name = "rustwright-core"
 version = "0.2.0"
-source = "git+https://github.com/Skyvern-AI/rustwright?rev=58be34b20a4fca22067935740f0da9f1dd1fe3db#58be34b20a4fca22067935740f0da9f1dd1fe3db"
+source = "git+https://github.com/Skyvern-AI/rustwright?rev=eec542ec70bcd1dd483f41dcd190772194f53e6f#eec542ec70bcd1dd483f41dcd190772194f53e6f"
 dependencies = [
  "base64 0.22.1",
  "futures-util",

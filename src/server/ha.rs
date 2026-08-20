@@ -214,7 +214,11 @@ pub(crate) async fn forward_action_from_target(
             peer.ip,
             ha.peer_port()
         ))
-        .header(INTERNAL_HEADER, HeaderValue::from_static("1"));
+        .header(INTERNAL_HEADER, HeaderValue::from_static("1"))
+        .header(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
     if let Some(forwarded) = forwarded_auth(state, identity).await {
         builder = builder.header(
             FORWARDED_AUTH_HEADER,
@@ -274,6 +278,12 @@ pub(crate) async fn proxy_to_executor(
         .method(method)
         .uri(url)
         .header(INTERNAL_HEADER, HeaderValue::from_static("1"));
+    if body.is_some() {
+        builder = builder.header(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+    }
     if let Some(forwarded) = forwarded.and_then(|f| f.parse::<HeaderValue>().ok()) {
         builder = builder.header(FORWARDED_AUTH_HEADER, forwarded);
     }

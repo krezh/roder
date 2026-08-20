@@ -37,7 +37,9 @@ fn app_loads_without_console_errors_or_failed_requests() {
         // overview, the initial watch subscription, ...) settle.
         std::thread::sleep(Duration::from_millis(2000));
 
-        let console = page.console_records(false, false).map_err(|e| e.to_string())?;
+        let console = page
+            .console_records(false, false)
+            .map_err(|e| e.to_string())?;
         let errors: Vec<_> = console
             .records
             .iter()
@@ -47,7 +49,10 @@ fn app_loads_without_console_errors_or_failed_requests() {
             for e in &errors {
                 eprintln!("console error: {} ({:?})", e.text, e.location);
             }
-            return Err(format!("{} console error(s) during page load", errors.len()));
+            return Err(format!(
+                "{} console error(s) during page load",
+                errors.len()
+            ));
         }
 
         let network = page.network_records(false, false);

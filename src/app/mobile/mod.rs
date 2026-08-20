@@ -24,6 +24,7 @@ use leptos_router::StaticSegment;
 use crate::app::components::sidebar::Sidebar;
 use crate::app::detail::pods::PodModal;
 use crate::app::overlays::confirm::ConfirmDialog;
+use crate::app::overlays::delete::DeleteDialog;
 use crate::app::overlays::drain::DrainOverlay;
 use crate::app::overlays::exec::ExecWindow;
 use crate::app::overlays::ns_palette::NsPalette;
@@ -48,6 +49,8 @@ pub(crate) fn MobileShell() -> impl IntoView {
     view! {
         <div class="mobile-shell" class:nav-open=move || nav_open.get()>
             <MobileHeader />
+            <div class="mobile-sidebar-scrim" class:open=move || nav_open.get()
+                on:click=move |_| nav_open.set(false)></div>
             <Sidebar />
             <main class="mobile-main">
                 <Routes fallback=|| view! { <p class="empty">"Not found."</p> }>
@@ -62,6 +65,7 @@ pub(crate) fn MobileShell() -> impl IntoView {
             <NsPalette />
             <MobileActionSheet />
             <ConfirmDialog />
+            <DeleteDialog />
             <DrainOverlay />
             <PodModal />
             <ExecWindow />

@@ -100,6 +100,23 @@
     transform: translateX(0);
   }
 
+  /* Backdrop behind the drawer so a tap outside it closes it instead of
+     falling through to whatever card/row is underneath — same visual as
+     `.sheet-scrim`/`.palette-scrim`, sitting just below the drawer's z-index. */
+  .mobile-sidebar-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 9;
+    background: rgba(0, 0, 0, 0.5);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.16s ease;
+  }
+  .mobile-sidebar-scrim.open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
   /* ---- resource lists (kind / search / workspace pane) ---- */
   .mobile-list {
     display: flex;

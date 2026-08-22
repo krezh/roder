@@ -25,6 +25,22 @@ pub struct ResolvedBackend {
     pub tokens: Tokens,
 }
 
+/// Backend resolution failed (missing/expired credentials, no OIDC provider
+/// configured, or the cluster connect/token-refresh itself failed). Callers
+/// only branch on success vs failure today, but this is a real error type —
+/// not `()` — so it composes with `?`/`std::error::Error` if a caller ever
+/// needs to report the cause.
+#[derive(Debug)]
+pub struct ResolveError;
+
+impl std::fmt::Display for ResolveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("backend resolution failed")
+    }
+}
+
+impl std::error::Error for ResolveError {}
+
 /// Maps an authenticated subject to their own `Arc<Backend>`, building it
 /// lazily on first use. Wired into `AppState.backends` and resolved by
 /// `require_auth` on every authenticated request.
@@ -72,7 +88,7 @@ impl BackendRegistry {
     /// Resolve dev mode's single implicit backend, building it once (via
     /// default/inferred kubeconfig creds — dev bypasses OIDC entirely, so
     /// there's no bearer token to pass through) and reusing it thereafter.
-    pub async fn resolve_dev(&self) -> Result<Arc<Backend>, ()> {
+    pub async fn resolve_dev(&self) -> Result<Arc<Backend>, ResolveError> {
         self.dev_backend
             .get_or_try_init(|| self.build_dev_backend())
             .await
@@ -80,15 +96,15 @@ impl BackendRegistry {
     }
 
     #[cfg(not(test))]
-    async fn build_dev_backend(&self) -> Result<Arc<Backend>, ()> {
+    async fn build_dev_backend(&self) -> Result<Arc<Backend>, ResolveError> {
         Backend::connect_with_default(self.shared.clone())
             .await
             .map(Arc::new)
-            .map_err(|_| ())
+            .map_err(|_| ResolveError)
     }
 
     #[cfg(test)]
-    async fn build_dev_backend(&self) -> Result<Arc<Backend>, ()> {
+    async fn build_dev_backend(&self) -> Result<Arc<Backend>, ResolveError> {
         Ok(Arc::new(Backend::from_parts_for_test(
             roder_k8s::ClusterAccess::for_test(),
             self.shared.clone(),
@@ -174,10 +190,10 @@ impl BackendRegistry {
     /// Resolve the caller's own `Backend`, building it (single-flight per
     /// subject) and refreshing the token if it's near expiry. Records
     /// last-activity on every successful resolve.
-    pub async fn resolve(&self, tokens: &Tokens) -> Result<ResolvedBackend, ()> {
+    pub async fn resolve(&self, tokens: &Tokens) -> Result<ResolvedBackend, ResolveError> {
         let subject = tokens.identity.subject.clone();
         if subject.is_empty() {
-            return Err(());
+            return Err(ResolveError);
         }
 
         // Fast path: warm, valid backend for this subject.
@@ -201,10 +217,10 @@ impl BackendRegistry {
     /// Resolve token values produced directly by a successful, verified OIDC
     /// exchange. Unlike browser-cookie resolution, this may replace a warm
     /// identity because the caller has just verified the ID token.
-    pub async fn resolve_login(&self, tokens: &Tokens) -> Result<ResolvedBackend, ()> {
+    pub async fn resolve_login(&self, tokens: &Tokens) -> Result<ResolvedBackend, ResolveError> {
         let subject = tokens.identity.subject.clone();
         if subject.is_empty() || tokens.id_token.is_empty() {
-            return Err(());
+            return Err(ResolveError);
         }
 
         let lock = self.subject_lock(&subject).await;
@@ -215,10 +231,17 @@ impl BackendRegistry {
         result
     }
 
-    async fn replace_login(&self, subject: String, tokens: &Tokens) -> Result<ResolvedBackend, ()> {
+    async fn replace_login(
+        &self,
+        subject: String,
+        tokens: &Tokens,
+    ) -> Result<ResolvedBackend, ResolveError> {
         let mut map = self.map.write().await;
         if let Some(entry) = map.get_mut(&subject) {
-            entry.backend.set_token(&tokens.id_token).map_err(|_| ())?;
+            entry
+                .backend
+                .set_token(&tokens.id_token)
+                .map_err(|_| ResolveError)?;
             entry.tokens = tokens.clone();
             entry.last_active = Instant::now();
             return Ok(ResolvedBackend {
@@ -239,12 +262,15 @@ impl BackendRegistry {
         &self,
         subject: String,
         tokens: &Tokens,
-    ) -> Result<ResolvedBackend, ()> {
+    ) -> Result<ResolvedBackend, ResolveError> {
         let live = self.mint_tokens(tokens).await?;
         {
             let mut map = self.map.write().await;
             if let Some(entry) = map.get_mut(&subject) {
-                entry.backend.set_token(&live.id_token).map_err(|_| ())?;
+                entry
+                    .backend
+                    .set_token(&live.id_token)
+                    .map_err(|_| ResolveError)?;
                 entry.tokens = live;
                 entry.last_active = Instant::now();
                 return Ok(ResolvedBackend {
@@ -374,31 +400,31 @@ impl BackendRegistry {
     /// `handlers::middleware::ensure_session`'s refresh branch). In tests this
     /// is a no-op: tokens are returned unchanged.
     #[cfg(not(test))]
-    async fn mint_tokens(&self, tokens: &Tokens) -> Result<Tokens, ()> {
+    async fn mint_tokens(&self, tokens: &Tokens) -> Result<Tokens, ResolveError> {
         if tokens.id_token.is_empty() || tokens.needs_refresh() {
-            let provider = self.provider.clone().ok_or(())?;
-            let rt = tokens.refresh_token.clone().ok_or(())?;
-            provider.refresh(rt).await.map_err(|_| ())
+            let provider = self.provider.clone().ok_or(ResolveError)?;
+            let rt = tokens.refresh_token.clone().ok_or(ResolveError)?;
+            provider.refresh(rt).await.map_err(|_| ResolveError)
         } else {
             Ok(tokens.clone())
         }
     }
 
     #[cfg(test)]
-    async fn mint_tokens(&self, tokens: &Tokens) -> Result<Tokens, ()> {
+    async fn mint_tokens(&self, tokens: &Tokens) -> Result<Tokens, ResolveError> {
         Ok(tokens.clone())
     }
 
     #[cfg(not(test))]
-    async fn build_backend(&self, tokens: &Tokens) -> Result<Arc<Backend>, ()> {
+    async fn build_backend(&self, tokens: &Tokens) -> Result<Arc<Backend>, ResolveError> {
         Backend::connect_with_token(&tokens.id_token, self.shared.clone())
             .await
             .map(Arc::new)
-            .map_err(|_| ())
+            .map_err(|_| ResolveError)
     }
 
     #[cfg(test)]
-    async fn build_backend(&self, _tokens: &Tokens) -> Result<Arc<Backend>, ()> {
+    async fn build_backend(&self, _tokens: &Tokens) -> Result<Arc<Backend>, ResolveError> {
         Ok(Arc::new(Backend::from_parts_for_test(
             roder_k8s::ClusterAccess::for_test(),
             self.shared.clone(),

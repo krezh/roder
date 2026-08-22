@@ -88,18 +88,20 @@ impl HaState {
         self.tls_http.request(req).await
     }
 
-    async fn peer_url(&self, executor: &str, path: &str) -> Result<String, Response> {
+    async fn peer_url(&self, executor: &str, path: &str) -> Result<String, Box<Response>> {
         let peer = self
             .coordinator
             .pod(executor)
             .await
-            .map_err(coordination_error)?
+            .map_err(|error| Box::new(coordination_error(error)))?
             .ok_or_else(|| {
-                (
-                    StatusCode::GONE,
-                    "operation executor is no longer available",
+                Box::new(
+                    (
+                        StatusCode::GONE,
+                        "operation executor is no longer available",
+                    )
+                        .into_response(),
                 )
-                    .into_response()
             })?;
         Ok(format!(
             "{}://{}:{}{path}",
@@ -253,7 +255,7 @@ pub(crate) async fn proxy_to_executor(
     }
     let url = match ha.peer_url(executor, path).await {
         Ok(url) => url,
-        Err(response) => return Some(response),
+        Err(response) => return Some(*response),
     };
     let cookie = forwarding_cookie(state, identity).await;
     let (body, forwarded) = match body {
@@ -305,7 +307,7 @@ pub(crate) async fn active_jobs(
     state: &AppState,
     headers: &HeaderMap,
     identity: &Identity,
-) -> Result<Vec<ActiveDrainJob>, Response> {
+) -> Result<Vec<ActiveDrainJob>, Box<Response>> {
     let Some(ha) = state.ha.as_ref() else {
         return Ok(Vec::new());
     };
@@ -313,7 +315,11 @@ pub(crate) async fn active_jobs(
         return Ok(Vec::new());
     }
     let cookie = forwarding_cookie(state, identity).await;
-    let peers = ha.coordinator.pods().await.map_err(coordination_error)?;
+    let peers = ha
+        .coordinator
+        .pods()
+        .await
+        .map_err(|error| Box::new(coordination_error(error)))?;
     let mut active = Vec::new();
     for peer in peers.into_iter().filter(|peer| peer.name != ha.pod_name) {
         let mut builder = Request::builder()

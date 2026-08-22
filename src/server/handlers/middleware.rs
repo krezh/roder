@@ -109,7 +109,7 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
         // creds) shared by every request.
         let backend = match state.backends.resolve_dev().await {
             Ok(b) => b,
-            Err(()) => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
+            Err(_) => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
         };
         req.extensions_mut().insert(backend);
         req.extensions_mut().insert(Identity {
@@ -161,7 +161,7 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
     // near expiry.
     let resolved = match state.backends.resolve(&cookie_tokens).await {
         Ok(resolved) => resolved,
-        Err(()) => return reject(),
+        Err(_) => return reject(),
     };
     req.extensions_mut().insert(resolved.backend.clone());
     req.extensions_mut()

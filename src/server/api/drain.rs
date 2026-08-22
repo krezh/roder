@@ -368,7 +368,7 @@ pub async fn active_drain(
     let local = state.drain_jobs.active(&caller.owner);
     let remote = match crate::server::ha::active_jobs(&state, &headers, &identity).await {
         Ok(active) => active,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     Json(
         local

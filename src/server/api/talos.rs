@@ -53,16 +53,21 @@ pub(crate) fn talos_capabilities(state: &AppState, identity: &Identity) -> Talos
     }
 }
 
-async fn visible_node(backend: &Backend, node: &str) -> Result<(String, ObjectDetail), Response> {
+async fn visible_node(
+    backend: &Backend,
+    node: &str,
+) -> Result<(String, ObjectDetail), Box<Response>> {
     let key = backend
         .kinds()
         .into_iter()
         .find(|kind| kind.group.is_empty() && kind.kind == "Node")
         .map(|kind| kind.key)
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Node resource unavailable").into_response())?;
+        .ok_or_else(|| {
+            Box::new((StatusCode::NOT_FOUND, "Node resource unavailable").into_response())
+        })?;
     let detail = backend.detail(&key, None, node).await.map_err(|error| {
         tracing::warn!(node, "Talos node validation failed: {error}");
-        (StatusCode::NOT_FOUND, "node is unavailable").into_response()
+        Box::new((StatusCode::NOT_FOUND, "node is unavailable").into_response())
     })?;
     Ok((key, detail))
 }
@@ -97,7 +102,7 @@ pub async fn talos_node(
     }
     let (_, detail) = match visible_node(&backend, &q.node).await {
         Ok(node) => node,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     match talos.node(&q.node).await {
         Ok(mut status) => {
@@ -135,7 +140,7 @@ pub async fn talos_config_diff(
         return StatusCode::NOT_FOUND.into_response();
     };
     if let Err(response) = visible_node(&backend, &q.node).await {
-        return response;
+        return *response;
     }
     let selected = match talos.config_snapshot(&q.node).await {
         Ok(snapshot) => snapshot,
@@ -233,7 +238,7 @@ pub async fn talos_dmesg(
         return StatusCode::FORBIDDEN.into_response();
     }
     if let Err(response) = visible_node(&backend, &q.node).await {
-        return response;
+        return *response;
     }
     let stream: std::pin::Pin<
         Box<dyn futures::Stream<Item = Result<String, roder_talos::TalosError>> + Send>,
@@ -304,7 +309,7 @@ pub(crate) async fn talos_mutation(
     };
     let (node_key, detail) = match visible_node(&backend, node).await {
         Ok(node) => node,
-        Err(response) => return Some(response),
+        Err(response) => return Some(*response),
     };
     if power_action {
         if let Some(response) =

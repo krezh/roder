@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.1.44](https://github.com/krezh/roder/compare/0.1.43...0.1.44) (2026-08-22)
+
+
+### Features
+
+* **container:** update image ghcr.io/rust-lang/rust (1.97.1 ➔ 1.98.0) ([#187](https://github.com/krezh/roder/issues/187)) ([6384b1f](https://github.com/krezh/roder/commit/6384b1f2fc05178d1fe0bdcebe5e010e53d2d365))
+
+
+### Bug Fixes
+
+* **cargo:** update rust crate aes-gcm (0.11.0 ➔ 0.11.1) ([#189](https://github.com/krezh/roder/issues/189)) ([7670068](https://github.com/krezh/roder/commit/767006860ce9060bae92606553dc3e0b448edce4))
+* **clippy:** box Response errors and add real ResolveError type ([#190](https://github.com/krezh/roder/issues/190)) ([5aa684b](https://github.com/krezh/roder/commit/5aa684b905ba3bca31591ecf95f9c5df7b36e909))
+* **container:** update image gcr.io/distroless/cc-debian13 (ed7c407 ➔ e86cf4f) ([#188](https://github.com/krezh/roder/issues/188)) ([dde54af](https://github.com/krezh/roder/commit/dde54afc5f041a97ac71b7634034f70271f8ced2))
+* **ha:** set Content-Type on peer-forwarded drain requests ([8acfb0f](https://github.com/krezh/roder/commit/8acfb0f5e9e7e830524194a3bc66c6d69b0b2899))
+* **mobile:** stop alert/node badges double-firing, mount missing delete dialog, add drawer scrim ([8cc12eb](https://github.com/krezh/roder/commit/8cc12eb961e472bd0cec03e0e4852f95262a57e0))
+* **tooltip:** wrap long text instead of overflowing the bubble ([3655cac](https://github.com/krezh/roder/commit/3655cac150ff112c58488eac9a44dc4246e5a95d))
+
+
+### Styles
+
+* **fmt:** reformat browser_smoke.rs ([ddb85fd](https://github.com/krezh/roder/commit/ddb85fd52e14bc1fcfa8efb44e61175dcb14093e))
+
+
+### Miscellaneous Chores
+
+* **cargo:** lock file maintenance cargo.lock ([#182](https://github.com/krezh/roder/issues/182)) ([702f17a](https://github.com/krezh/roder/commit/702f17aa24b608c045935eb2dfa02b7d88d16f0d))
+* **cargo:** lock file maintenance cargo.lock ([#185](https://github.com/krezh/roder/issues/185)) ([896f70e](https://github.com/krezh/roder/commit/896f70ef444fe67b849175fd311d171dc3a2676a))
+* **cargo:** lock file maintenance cargo.lock ([#186](https://github.com/krezh/roder/issues/186)) ([4d024b7](https://github.com/krezh/roder/commit/4d024b73f46613f299e2b671428c039c9c29ef0b))
+
 ## [0.1.43](https://github.com/krezh/roder/compare/0.1.42...0.1.43) (2026-08-18)
 
 

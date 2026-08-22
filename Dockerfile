@@ -35,7 +35,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     fi
 
 # ---- runtime --------------------------------------------------------------
-FROM gcr.io/distroless/cc-debian13@sha256:ed7c407fd64eb0af9dddb9456b94cee188a40a7f53cf38c9836e1e9ae14fca02 AS runtime
+FROM gcr.io/distroless/cc-debian13@sha256:e86cf4f565c8eee2cbb2be073bb107dafb14734b53d5872da20fdf47418a02f4 AS runtime
 
 WORKDIR /app
 COPY --from=build /app/roder-bin /app/roder

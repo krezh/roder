@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.1.45](https://github.com/krezh/roder/compare/0.1.44...0.1.45) (2026-08-25)
+
+
+### Features
+
+* **alertmanager:** add authorized alert silencing ([906fe91](https://github.com/krezh/roder/commit/906fe91b238c226036b6a3992fa444c32fd98f60))
+* **app:** support browser history navigation ([eaf90d1](https://github.com/krezh/roder/commit/eaf90d1adebcd768e3f446baac9dc71e6e8e6770))
+* **dashboard:** redesign cluster overview ([99443fd](https://github.com/krezh/roder/commit/99443fd7c1274294db71132bb6fcaa4e43097675))
+
+
+### Bug Fixes
+
+* **cargo:** update rustwright digest (af00b37 ➔ 769674b) ([#195](https://github.com/krezh/roder/issues/195)) ([f28ca41](https://github.com/krezh/roder/commit/f28ca4159be1c8ccdca44943f94aef987b51d6e8))
+* **cargo:** update rustwright digest (af71449 ➔ eb88543) ([#193](https://github.com/krezh/roder/issues/193)) ([13b11a2](https://github.com/krezh/roder/commit/13b11a241edcb1c3c602103815c66e7b734defcf))
+* **cargo:** update rustwright digest (eb88543 ➔ af00b37) ([#194](https://github.com/krezh/roder/issues/194)) ([5f3df6d](https://github.com/krezh/roder/commit/5f3df6dfae1629d6bcbf8655d4bb9cc96dfa10a0))
+* **ui:** brighten topbar button text ([7378db1](https://github.com/krezh/roder/commit/7378db1b75af4bbb5478f5bd5543b681f7822874))
+
+
+### Miscellaneous Chores
+
+* **cargo:** lock file maintenance cargo.lock ([#191](https://github.com/krezh/roder/issues/191)) ([a34fcaf](https://github.com/krezh/roder/commit/a34fcaf5bc1b25ff7aa3acc9743fb1f674f288d8))
+* **cargo:** lock file maintenance cargo.lock ([#196](https://github.com/krezh/roder/issues/196)) ([58a031a](https://github.com/krezh/roder/commit/58a031aa71e84d2771b2b2cb7604e09875978ee9))
+
 ## [0.1.44](https://github.com/krezh/roder/compare/0.1.43...0.1.44) (2026-08-22)
 
 

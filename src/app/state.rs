@@ -9,7 +9,7 @@ use roder_core::{FiringAlert, ResourceKind, ResourceRow};
 use serde::{Deserialize, Serialize};
 
 /// The object currently shown in the detail drawer.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DetailTarget {
     pub key: String,
     pub namespace: Option<String>,

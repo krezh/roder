@@ -53,6 +53,10 @@ use views::resource::ResourceView;
 use views::search::SearchResultsView;
 use views::workspace::WorkspaceView;
 
+use util::history::{
+    current_navigation_state, push_navigation_state, replace_navigation_state, NavigationState,
+};
+
 /// Set once at startup (`main.rs`) from `AppState::asset_version` — the
 /// build-time hash embedded into every SSR page so a hydrated tab can detect
 /// when the server it's talking to has been redeployed. A module-level
@@ -165,6 +169,8 @@ pub fn App() -> impl IntoView {
     let selected_kind = RwSignal::new(None::<ResourceKind>);
     let selected_ns = RwSignal::new(None::<String>);
     let detail = RwSignal::new(None::<DetailTarget>);
+    let initial_navigation = current_navigation_state();
+    let last_navigation = StoredValue::new(initial_navigation.clone());
     let nav_open = RwSignal::new(false);
     // Same on server and first client paint (hydration-safe), corrected
     // client-side below by a live `matchMedia` listener.
@@ -319,16 +325,20 @@ pub fn App() -> impl IntoView {
     // Using a ready guard (same pattern as workspace) ensures we never clobber
     // the stored value on startup before the restore effect has run.
     let ns_ready = RwSignal::new(false);
+    let initial_namespace = initial_navigation
+        .as_ref()
+        .map(|state| state.namespace.clone());
     Effect::new(move |_| {
-        // Prefer roder.ns; fall back to roder.nav for backwards compat.
-        let ns = data::storage_get("roder.ns")
-            .and_then(|s| serde_json::from_str::<Option<String>>(&s).ok())
-            .flatten()
-            .or_else(|| {
-                data::storage_get("roder.nav")
-                    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-                    .and_then(|v| v.get("ns").and_then(|x| x.as_str()).map(String::from))
-            });
+        let ns = initial_namespace.clone().unwrap_or_else(|| {
+            data::storage_get("roder.ns")
+                .and_then(|s| serde_json::from_str::<Option<String>>(&s).ok())
+                .flatten()
+                .or_else(|| {
+                    data::storage_get("roder.nav")
+                        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                        .and_then(|v| v.get("ns").and_then(|x| x.as_str()).map(String::from))
+                })
+        });
         if let Some(n) = ns {
             selected_ns.set(Some(n));
         }
@@ -347,10 +357,31 @@ pub fn App() -> impl IntoView {
     // Restore kind/detail from a previous session.
     let saved = data::storage_get("roder.nav")
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
-    let saved_kind = saved
-        .as_ref()
-        .and_then(|v| v.get("kind").and_then(|x| x.as_str()).map(String::from));
-    let saved_detail = saved.as_ref().and_then(|v| v.get("detail").cloned());
+    let saved_kind = initial_navigation.as_ref().map_or_else(
+        || {
+            saved
+                .as_ref()
+                .and_then(|v| v.get("kind").and_then(|x| x.as_str()).map(String::from))
+        },
+        |state| state.kind.clone(),
+    );
+    let saved_detail = initial_navigation.as_ref().map_or_else(
+        || {
+            saved.as_ref().and_then(|v| {
+                v.get("detail").and_then(|detail| {
+                    Some(DetailTarget {
+                        key: detail.get("key")?.as_str()?.to_string(),
+                        namespace: detail
+                            .get("ns")
+                            .and_then(|value| value.as_str())
+                            .map(String::from),
+                        name: detail.get("name")?.as_str()?.to_string(),
+                    })
+                })
+            })
+        },
+        |state| state.detail.clone(),
+    );
     let restored = RwSignal::new(false);
 
     // Load the resource catalog once; restore the selected kind/detail once it loads.
@@ -365,17 +396,8 @@ pub fn App() -> impl IntoView {
                         selected_kind.set(Some(kind));
                     }
                 }
-                if let Some(dv) = saved_detail.as_ref() {
-                    if let (Some(key), Some(name)) = (
-                        dv.get("key").and_then(|x| x.as_str()),
-                        dv.get("name").and_then(|x| x.as_str()),
-                    ) {
-                        detail.set(Some(DetailTarget {
-                            key: key.to_string(),
-                            namespace: dv.get("ns").and_then(|x| x.as_str()).map(String::from),
-                            name: name.to_string(),
-                        }));
-                    }
+                if let Some(target) = saved_detail.as_ref() {
+                    detail.set(Some(target.clone()));
                 }
                 restored.set(true);
             }
@@ -468,6 +490,45 @@ pub fn App() -> impl IntoView {
             "detail": det.map(|t| serde_json::json!({ "key": t.key, "ns": t.namespace, "name": t.name })),
         });
         data::storage_set("roder.nav", &blob.to_string());
+    });
+
+    Effect::new(move |_| {
+        let state = NavigationState {
+            kind: selected_kind.get().map(|kind| kind.key),
+            namespace: selected_ns.get(),
+            detail: detail.get(),
+        };
+        if !restored.get() || last_navigation.get_value().as_ref() == Some(&state) {
+            return;
+        }
+        if last_navigation.get_value().is_none() {
+            replace_navigation_state(&state);
+        } else {
+            push_navigation_state(&state);
+        }
+        last_navigation.set_value(Some(state));
+    });
+
+    Effect::new(move |_| {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let handle = window_event_listener(ev::popstate, move |event| {
+                let Some(state) = util::history::navigation_state(&event.state()) else {
+                    return;
+                };
+                let kind = state.kind.as_ref().and_then(|key| {
+                    catalog
+                        .get_untracked()
+                        .into_iter()
+                        .find(|kind| &kind.key == key)
+                });
+                last_navigation.set_value(Some(state.clone()));
+                selected_kind.set(kind);
+                selected_ns.set(state.namespace);
+                detail.set(state.detail);
+            });
+            on_cleanup(move || handle.remove());
+        }
     });
 
     // Global keyboard shortcuts.

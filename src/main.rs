@@ -130,6 +130,7 @@ async fn main() {
         .route("/api/logs", get(api::logs))
         .route("/api/metrics", get(api::metrics_history))
         .route("/api/alerts", get(api::alerts))
+        .route("/api/alerts/silences", post(api::silence_alert))
         .route("/api/action", post(api::action))
         .route("/api/drain-active", get(api::active_drain))
         .route("/api/drain-progress", get(api::drain_progress))

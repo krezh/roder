@@ -1,10 +1,7 @@
 //! Alertmanager alert cache.
 //!
-//! `RODER_ALERTMANAGER_URL` accepts two forms:
-//!   - A full URL (`http://alertmanager-operated.monitoring.svc.cluster.local:9093`) — fetched
-//!     directly via reqwest, works in-cluster.
-//!   - A kube API proxy path (`/api/v1/namespaces/monitoring/services/http:alertmanager-main:9093/proxy`)
-//!     — proxied through the kube API server, works from a local kubeconfig too.
+//! `RODER_ALERTMANAGER_URL` is a direct HTTP(S) URL, such as
+//! `http://alertmanager-operated.monitoring.svc.cluster.local:9093`.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -15,18 +12,29 @@ use tracing::{info, warn};
 // Discovery
 // ---------------------------------------------------------------------------
 
-/// Returns the Alertmanager URL from `RODER_ALERTMANAGER_URL`, or `None`.
-pub async fn discover_alertmanager(_client: &kube::Client) -> Option<String> {
+/// Returns the direct Alertmanager URL from `RODER_ALERTMANAGER_URL`.
+pub fn alertmanager_url() -> Result<Option<String>, String> {
     match std::env::var("RODER_ALERTMANAGER_URL") {
         Ok(url) => {
+            let url = direct_alertmanager_url(&url)?;
             info!("alertmanager: using {url}");
-            Some(url)
+            Ok(Some(url))
         }
-        Err(_) => {
+        Err(std::env::VarError::NotPresent) => {
             info!("alertmanager: RODER_ALERTMANAGER_URL not set, alerts disabled");
-            None
+            Ok(None)
         }
+        Err(error) => Err(format!("invalid RODER_ALERTMANAGER_URL: {error}")),
     }
+}
+
+fn direct_alertmanager_url(url: &str) -> Result<String, String> {
+    let parsed = reqwest::Url::parse(url)
+        .map_err(|error| format!("invalid RODER_ALERTMANAGER_URL: {error}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err("RODER_ALERTMANAGER_URL must use http or https".to_string());
+    }
+    Ok(url.trim_end_matches('/').to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -46,7 +54,76 @@ struct AmAlert {
 
 #[derive(serde::Deserialize)]
 struct AmAlertStatus {
-    state: String,
+    #[serde(default, rename = "silencedBy")]
+    silenced_by: Vec<String>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SilenceRequest<'a> {
+    matchers: Vec<SilenceMatcher<'a>>,
+    starts_at: String,
+    ends_at: String,
+    created_by: &'a str,
+    comment: &'a str,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SilenceMatcher<'a> {
+    name: &'a str,
+    value: &'a str,
+    is_regex: bool,
+    is_equal: bool,
+}
+
+#[derive(serde::Deserialize)]
+struct SilenceResponse {
+    #[serde(rename = "silenceID")]
+    silence_id: String,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SilenceError {
+    #[error("alert not found")]
+    NotFound,
+    #[error("alert is already silenced")]
+    AlreadySilenced,
+    #[error("{0}")]
+    Upstream(String),
+}
+
+fn silence_request<'a>(
+    labels: &'a HashMap<String, String>,
+    duration: Duration,
+    created_by: &'a str,
+    now: time::OffsetDateTime,
+) -> Result<SilenceRequest<'a>, String> {
+    if labels.is_empty() {
+        return Err("alert has no labels".to_string());
+    }
+    let duration_seconds = i64::try_from(duration.as_secs())
+        .map_err(|_| "silence duration is too large".to_string())?;
+    let format = &time::format_description::well_known::Rfc3339;
+    Ok(SilenceRequest {
+        matchers: labels
+            .iter()
+            .map(|(name, value)| SilenceMatcher {
+                name,
+                value,
+                is_regex: false,
+                is_equal: true,
+            })
+            .collect(),
+        starts_at: now
+            .format(format)
+            .map_err(|error| format!("format silence start: {error}"))?,
+        ends_at: (now + time::Duration::seconds(duration_seconds))
+            .format(format)
+            .map_err(|error| format!("format silence end: {error}"))?,
+        created_by,
+        comment: "Silenced from Roder",
+    })
 }
 
 impl AmAlert {
@@ -62,7 +139,7 @@ impl AmAlert {
                 .cloned()
                 .unwrap_or_default(),
             starts_at: self.starts_at,
-            silenced: self.status.state != "active",
+            silenced: !self.status.silenced_by.is_empty(),
             labels: self.labels,
         }
     }
@@ -72,57 +149,119 @@ const CACHE_TTL: Duration = Duration::from_secs(30);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 
-enum Transport {
-    /// Direct HTTP — `RODER_ALERTMANAGER_URL` is a full `http(s)://` URL.
-    Direct(reqwest::Client),
-    /// Kube API proxy — `RODER_ALERTMANAGER_URL` is a proxy path starting with `/`.
-    KubeProxy,
-}
-
 /// Short-lived cache for the Alertmanager alert list.
 pub struct AlertsCache {
     base_url: String,
-    transport: Transport,
+    http: reqwest::Client,
     cache: tokio::sync::RwLock<Option<(Vec<roder_core::FiringAlert>, Instant)>>,
     refresh_lock: tokio::sync::Mutex<()>,
+    silence_lock: tokio::sync::Mutex<()>,
 }
 
 impl AlertsCache {
     pub fn new(url: String) -> Self {
-        let transport = if url.starts_with("http://") || url.starts_with("https://") {
-            Transport::Direct(
-                reqwest::Client::builder()
-                    .timeout(REQUEST_TIMEOUT)
-                    .build()
-                    .expect("static Alertmanager HTTP client configuration is valid"),
-            )
-        } else {
-            Transport::KubeProxy
-        };
         Self {
             base_url: url,
-            transport,
+            http: reqwest::Client::builder()
+                .timeout(REQUEST_TIMEOUT)
+                .build()
+                .expect("static Alertmanager HTTP client configuration is valid"),
             cache: tokio::sync::RwLock::new(None),
             refresh_lock: tokio::sync::Mutex::new(()),
+            silence_lock: tokio::sync::Mutex::new(()),
         }
     }
 
     /// Return the current alert list, refreshing if the cache is stale.
-    pub async fn get(&self, client: &kube::Client) -> Result<Vec<roder_core::FiringAlert>, String> {
-        self.load(client, None).await
+    pub async fn get(&self) -> Result<Vec<roder_core::FiringAlert>, String> {
+        self.load(None).await
     }
 
     /// Fetch a fresh alert list, coalescing concurrent refresh requests.
-    pub async fn refresh(
+    pub async fn refresh(&self) -> Result<Vec<roder_core::FiringAlert>, String> {
+        self.load(Some(Instant::now())).await
+    }
+
+    pub async fn silence_alert(
         &self,
-        client: &kube::Client,
-    ) -> Result<Vec<roder_core::FiringAlert>, String> {
-        self.load(client, Some(Instant::now())).await
+        fingerprint: &str,
+        duration: Duration,
+        created_by: &str,
+    ) -> Result<String, SilenceError> {
+        let _silence = self.silence_lock.lock().await;
+        let alerts = self.get().await.map_err(SilenceError::Upstream)?;
+        let alert = alerts
+            .into_iter()
+            .find(|alert| alert.fingerprint == fingerprint)
+            .ok_or(SilenceError::NotFound)?;
+        if alert.silenced {
+            return Err(SilenceError::AlreadySilenced);
+        }
+        self.create_silence(&alert.labels, duration, created_by)
+            .await
+            .map_err(SilenceError::Upstream)
+    }
+
+    async fn create_silence(
+        &self,
+        labels: &HashMap<String, String>,
+        duration: Duration,
+        created_by: &str,
+    ) -> Result<String, String> {
+        let payload = silence_request(
+            labels,
+            duration,
+            created_by,
+            time::OffsetDateTime::now_utc(),
+        )?;
+        let body = serde_json::to_vec(&payload)
+            .map_err(|error| format!("serialize Alertmanager silence: {error}"))?;
+        let url = format!("{}/api/v2/silences", self.base_url);
+
+        let response_body = {
+            let response = self
+                .http
+                .post(&url)
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .body(body)
+                .send()
+                .await
+                .map_err(|error| format!("alertmanager silence request: {error}"))?;
+            let mut response = response
+                .error_for_status()
+                .map_err(|error| format!("alertmanager silence response: {error}"))?;
+            let mut bytes = Vec::new();
+            while let Some(chunk) = response
+                .chunk()
+                .await
+                .map_err(|error| format!("alertmanager silence response: {error}"))?
+            {
+                if bytes.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
+                    return Err(format!(
+                        "alertmanager silence response exceeds {MAX_RESPONSE_BYTES} byte limit"
+                    ));
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            String::from_utf8(bytes)
+                .map_err(|error| format!("alertmanager silence response is not UTF-8: {error}"))?
+        };
+        let response: SilenceResponse = serde_json::from_str(&response_body)
+            .map_err(|error| format!("alertmanager silence response: {error}"))?;
+
+        if let Some((alerts, timestamp)) = self.cache.write().await.as_mut() {
+            for alert in alerts {
+                if &alert.labels == labels {
+                    alert.silenced = true;
+                }
+            }
+            *timestamp = Instant::now();
+        }
+        Ok(response.silence_id)
     }
 
     async fn load(
         &self,
-        client: &kube::Client,
         refresh_requested_at: Option<Instant>,
     ) -> Result<Vec<roder_core::FiringAlert>, String> {
         if let Some(data) = self.cached(refresh_requested_at).await {
@@ -138,59 +277,29 @@ impl AlertsCache {
         let url = format!("{}/api/v2/alerts", self.base_url);
         info!("alertmanager: fetching {url}");
 
-        let body = match &self.transport {
-            Transport::Direct(http) => {
-                let response = http.get(&url).send().await.map_err(|e| {
-                    warn!("alertmanager: request failed: {e}");
-                    format!("alertmanager request: {e}")
-                })?;
-                let mut response = response
-                    .error_for_status()
-                    .map_err(|e| format!("alertmanager response: {e}"))?;
-                let mut bytes = Vec::new();
-                while let Some(chunk) = response
-                    .chunk()
-                    .await
-                    .map_err(|e| format!("alertmanager response: {e}"))?
-                {
-                    if bytes.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
-                        return Err(format!(
-                            "alertmanager response exceeds {MAX_RESPONSE_BYTES} byte limit"
-                        ));
-                    }
-                    bytes.extend_from_slice(&chunk);
-                }
-                String::from_utf8(bytes)
-                    .map_err(|e| format!("alertmanager response is not UTF-8: {e}"))?
-            }
-            Transport::KubeProxy => {
-                let req = http::Request::get(&url)
-                    .body(Vec::new())
-                    .map_err(|e| format!("alertmanager request build: {e}"))?;
-                tokio::time::timeout(REQUEST_TIMEOUT, async {
-                    use futures::AsyncReadExt as _;
-
-                    let stream = client.request_stream(req).await.map_err(|e| {
-                        warn!("alertmanager: proxy request failed: {e}");
-                        format!("alertmanager proxy: {e}")
-                    })?;
-                    let mut bytes = Vec::new();
-                    stream
-                        .take((MAX_RESPONSE_BYTES + 1) as u64)
-                        .read_to_end(&mut bytes)
-                        .await
-                        .map_err(|e| format!("alertmanager proxy response: {e}"))?;
-                    if bytes.len() > MAX_RESPONSE_BYTES {
-                        return Err(format!(
-                            "alertmanager response exceeds {MAX_RESPONSE_BYTES} byte limit"
-                        ));
-                    }
-                    String::from_utf8(bytes)
-                        .map_err(|e| format!("alertmanager response is not UTF-8: {e}"))
-                })
+        let body = {
+            let response = self.http.get(&url).send().await.map_err(|e| {
+                warn!("alertmanager: request failed: {e}");
+                format!("alertmanager request: {e}")
+            })?;
+            let mut response = response
+                .error_for_status()
+                .map_err(|e| format!("alertmanager response: {e}"))?;
+            let mut bytes = Vec::new();
+            while let Some(chunk) = response
+                .chunk()
                 .await
-                .map_err(|_| "alertmanager proxy request timed out".to_string())??
+                .map_err(|e| format!("alertmanager response: {e}"))?
+            {
+                if bytes.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
+                    return Err(format!(
+                        "alertmanager response exceeds {MAX_RESPONSE_BYTES} byte limit"
+                    ));
+                }
+                bytes.extend_from_slice(&chunk);
             }
+            String::from_utf8(bytes)
+                .map_err(|e| format!("alertmanager response is not UTF-8: {e}"))?
         };
 
         let raw: Vec<AmAlert> = serde_json::from_str(&body).map_err(|e| {
@@ -238,12 +347,72 @@ fn utf8_prefix(value: &str, max_bytes: usize) -> &str {
 
 #[cfg(test)]
 mod tests {
-    use super::utf8_prefix;
+    use std::collections::HashMap;
+    use std::time::Duration;
+
+    use super::{direct_alertmanager_url, silence_request, utf8_prefix, AmAlert, SilenceResponse};
 
     #[test]
     fn response_preview_truncates_at_utf8_boundary() {
         let value = format!("{}é", "a".repeat(499));
         assert_eq!(utf8_prefix(&value, 500), "a".repeat(499));
         assert_eq!(utf8_prefix(&value, 501), value);
+    }
+
+    #[test]
+    fn silence_uses_every_alert_label_as_an_exact_matcher() {
+        let labels = HashMap::from([
+            ("alertname".to_string(), "PodDown".to_string()),
+            ("namespace".to_string(), "production".to_string()),
+        ]);
+        let now = time::OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
+        let request = silence_request(&labels, Duration::from_secs(3_600), "operator", now)
+            .expect("valid silence request");
+        let value = serde_json::to_value(request).unwrap();
+        let matchers = value["matchers"].as_array().unwrap();
+
+        assert_eq!(matchers.len(), labels.len());
+        assert!(matchers.iter().all(|matcher| {
+            matcher["isRegex"] == false
+                && matcher["isEqual"] == true
+                && labels
+                    .get(matcher["name"].as_str().unwrap())
+                    .map(String::as_str)
+                    == matcher["value"].as_str()
+        }));
+        assert_eq!(value["createdBy"], "operator");
+        assert_eq!(value["comment"], "Silenced from Roder");
+    }
+
+    #[test]
+    fn alertmanager_silence_response_uses_capital_id() {
+        let response: SilenceResponse =
+            serde_json::from_str(r#"{"silenceID":"silence-123"}"#).unwrap();
+        assert_eq!(response.silence_id, "silence-123");
+    }
+
+    #[test]
+    fn inhibited_alert_is_not_reported_as_silenced() {
+        let alert: AmAlert = serde_json::from_value(serde_json::json!({
+            "fingerprint": "abc",
+            "labels": { "alertname": "PodDown", "severity": "warning" },
+            "annotations": {},
+            "startsAt": "2026-01-01T00:00:00Z",
+            "status": { "state": "suppressed", "silencedBy": [], "inhibitedBy": ["def"] }
+        }))
+        .unwrap();
+        assert!(!alert.into_firing().silenced);
+    }
+
+    #[test]
+    fn alertmanager_url_requires_direct_http() {
+        assert_eq!(
+            direct_alertmanager_url("http://alertmanager:9093/").unwrap(),
+            "http://alertmanager:9093"
+        );
+        assert!(direct_alertmanager_url(
+            "/api/v1/namespaces/monitoring/services/alertmanager/proxy"
+        )
+        .is_err());
     }
 }

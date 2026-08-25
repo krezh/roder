@@ -60,6 +60,8 @@ pub(crate) struct OnlyProblems(pub(crate) RwSignal<bool>);
 #[derive(Clone, Copy)]
 pub(crate) struct NavOpen(pub(crate) RwSignal<bool>);
 #[derive(Clone, Copy)]
+pub(crate) struct NavigationRestored(pub(crate) RwSignal<bool>);
+#[derive(Clone, Copy)]
 pub(crate) struct PaletteOpen(pub(crate) RwSignal<bool>);
 #[derive(Clone, Copy)]
 pub(crate) struct NsPaletteOpen(pub(crate) RwSignal<bool>);
@@ -136,6 +138,9 @@ pub(crate) struct AlertsData(pub(crate) RwSignal<Option<Vec<FiringAlert>>>);
 /// Browser time of the last successful alerts API response, in milliseconds.
 #[derive(Clone, Copy)]
 pub(crate) struct AlertsLastRefresh(pub(crate) RwSignal<Option<f64>>);
+
+#[derive(Clone, Copy)]
+pub(crate) struct AlertSilencesEnabled(pub(crate) RwSignal<bool>);
 
 /// `None` = SSE stream is live. `Some(msg)` = disconnected, with the HTTP status
 /// or network error that caused it (e.g. "401 Unauthorized", "Network error").

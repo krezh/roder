@@ -196,9 +196,7 @@ pub async fn build_state(leptos_options: LeptosOptions) -> Result<AppState, Stri
         None
     };
 
-    // Alertmanager discovery uses the SA client (unchanged behavior, now via shared).
-    let am_client = shared.sa_client();
-    let url = roder_k8s::discover_alertmanager(&am_client).await;
+    let url = roder_k8s::alertmanager_url()?;
     *alerts.write().await = url.map(|u| Arc::new(roder_k8s::AlertsCache::new(u)));
 
     // Per-subject backend registry (token passthrough): this is the live

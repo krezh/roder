@@ -11,7 +11,8 @@ use crate::app::mobile::bulk_bar::MobileBulkBar;
 use crate::app::mobile::row_card::{use_select_mode, CardFields, MobileRowCard};
 use crate::app::overlays::toast::Toast;
 use crate::app::state::{
-    CtxMenu, DetailTarget, LogPods, OnlyProblems, SortKey, TableRows, TableSelected, Tick,
+    CtxMenu, DetailTarget, LogPods, NavigationRestored, OnlyProblems, SortKey, TableRows,
+    TableSelected, Tick,
 };
 use crate::app::table_logic;
 use crate::app::util::predicate::KindKind;
@@ -22,9 +23,12 @@ use crate::data;
 pub(crate) fn MobileResourceView() -> impl IntoView {
     let selected_kind = expect_context::<RwSignal<Option<ResourceKind>>>();
     let selected_ns = expect_context::<RwSignal<Option<String>>>();
+    let restored = expect_context::<NavigationRestored>().0;
 
     view! {
-        {move || match selected_kind.get() {
+        {move || if !restored.get() {
+            view! { <div aria-label="Restoring view"></div> }.into_any()
+        } else { match selected_kind.get() {
             None => view! { <Dashboard /> }.into_any(),
             Some(kind) => {
                 let storage_key = format!("roder.filter.{}", kind.key);
@@ -49,7 +53,7 @@ pub(crate) fn MobileResourceView() -> impl IntoView {
                         text_filter=text_filter />
                 }.into_any()
             }
-        }}
+        }}}
     }
 }
 

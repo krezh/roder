@@ -2,6 +2,7 @@ use leptos::prelude::*;
 use roder_core::ResourceKind;
 
 use crate::app::components::kind_table::KindTable;
+use crate::app::state::NavigationRestored;
 use crate::app::views::dashboard::Dashboard;
 use crate::data;
 
@@ -9,9 +10,12 @@ use crate::data;
 pub(crate) fn ResourceView() -> impl IntoView {
     let selected_kind = expect_context::<RwSignal<Option<ResourceKind>>>();
     let selected_ns = expect_context::<RwSignal<Option<String>>>();
+    let restored = expect_context::<NavigationRestored>().0;
 
     view! {
-        {move || match selected_kind.get() {
+        {move || if !restored.get() {
+            view! { <div aria-label="Restoring view"></div> }.into_any()
+        } else { match selected_kind.get() {
             None => view! { <Dashboard /> }.into_any(),
             Some(kind) => {
                 let storage_key = format!("roder.filter.{}", kind.key);
@@ -43,6 +47,6 @@ pub(crate) fn ResourceView() -> impl IntoView {
                         register_global_selection=true />
                 }.into_any()
             }
-        }}
+        }}}
     }
 }

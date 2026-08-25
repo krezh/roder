@@ -315,6 +315,42 @@
   margin-top: 0.5rem;
 }
 
+.alert-silence-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.65rem;
+
+  .alert-duration-input,
+  .alert-silence-submit {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--fg);
+    border-radius: 0;
+    padding: 0.25rem 0.5rem;
+  }
+
+  .alert-duration-input { width: 5.5rem; }
+
+  .alert-silence-submit {
+    cursor: pointer;
+    &:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  }
+
+  .alert-duration-input:disabled,
+  .alert-silence-submit:disabled { color: var(--muted); cursor: wait; }
+}
+
+.alert-silence-error {
+  color: var(--error);
+  font-size: 0.78rem;
+}
+
+.alert-duration-error {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 .label-chip {
   display: inline-flex;
   align-items: center;

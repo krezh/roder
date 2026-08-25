@@ -43,11 +43,11 @@ use overlays::toast::{Toast, ToastView};
 use overlays::tree::ResourceTreeWindow;
 use overlays::AlertsPanel;
 use state::{
-    AccessReviewOpen, AlertsData, AlertsLastRefresh, AlertsOpen, Catalog, ConnectionState,
-    Connectivity, CtxMenu, DebugImage, DrainOpen, DrainTarget, ExecOpen, ExecTarget, FilterFocus,
-    LogPods, LogTarget, NavOpen, NsPaletteOpen, OnlyProblems, PaletteOpen, PodModalTarget,
-    ResourceFilter, ShortcutsOpen, TableRows, TableSelected, TableTargets, Tick, TreeOpen,
-    WorkspaceConf, WorkspaceConfig,
+    AccessReviewOpen, AlertSilencesEnabled, AlertsData, AlertsLastRefresh, AlertsOpen, Catalog,
+    ConnectionState, Connectivity, CtxMenu, DebugImage, DrainOpen, DrainTarget, ExecOpen,
+    ExecTarget, FilterFocus, LogPods, LogTarget, NavOpen, NavigationRestored, NsPaletteOpen,
+    OnlyProblems, PaletteOpen, PodModalTarget, ResourceFilter, ShortcutsOpen, TableRows,
+    TableSelected, TableTargets, Tick, TreeOpen, WorkspaceConf, WorkspaceConfig,
 };
 use views::resource::ResourceView;
 use views::search::SearchResultsView;
@@ -171,6 +171,7 @@ pub fn App() -> impl IntoView {
     let detail = RwSignal::new(None::<DetailTarget>);
     let initial_navigation = current_navigation_state();
     let last_navigation = StoredValue::new(initial_navigation.clone());
+    let restored = RwSignal::new(false);
     let nav_open = RwSignal::new(false);
     // Same on server and first client paint (hydration-safe), corrected
     // client-side below by a live `matchMedia` listener.
@@ -232,6 +233,8 @@ pub fn App() -> impl IntoView {
     provide_context(AlertsData(alerts_data));
     let alerts_last_refresh = RwSignal::new(None::<f64>);
     provide_context(AlertsLastRefresh(alerts_last_refresh));
+    let alert_silences_enabled = RwSignal::new(false);
+    provide_context(AlertSilencesEnabled(alert_silences_enabled));
     let _alertmanager_enabled = RwSignal::new(false);
     let debug_image = RwSignal::new(String::new());
     provide_context(DebugImage(debug_image));
@@ -249,6 +252,7 @@ pub fn App() -> impl IntoView {
     provide_context(selected_ns);
     provide_context(detail);
     provide_context(NavOpen(nav_open));
+    provide_context(NavigationRestored(restored));
     provide_context(PaletteOpen(palette_open));
     provide_context(Catalog(catalog));
     provide_context(ctx_menu);
@@ -382,27 +386,30 @@ pub fn App() -> impl IntoView {
         },
         |state| state.detail.clone(),
     );
-    let restored = RwSignal::new(false);
-
     // Load the resource catalog once; restore the selected kind/detail once it loads.
     let cat_res = LocalResource::new(|| async {
         data::fetch_json::<Vec<ResourceKind>>("/api/resources").await
     });
     Effect::new(move |_| {
-        if let Some(Ok(list)) = cat_res.get() {
-            if !restored.get_untracked() {
-                if let Some(k) = saved_kind.as_ref() {
-                    if let Some(kind) = list.iter().find(|x| &x.key == k).cloned() {
-                        selected_kind.set(Some(kind));
-                    }
+        let Some(result) = cat_res.get() else {
+            return;
+        };
+        let Ok(list) = result else {
+            restored.set(true);
+            return;
+        };
+        if !restored.get_untracked() {
+            if let Some(k) = saved_kind.as_ref() {
+                if let Some(kind) = list.iter().find(|x| &x.key == k).cloned() {
+                    selected_kind.set(Some(kind));
                 }
-                if let Some(target) = saved_detail.as_ref() {
-                    detail.set(Some(target.clone()));
-                }
-                restored.set(true);
             }
-            catalog.set(list);
+            if let Some(target) = saved_detail.as_ref() {
+                detail.set(Some(target.clone()));
+            }
+            restored.set(true);
         }
+        catalog.set(list);
     });
 
     // Periodically re-pull the catalog so newly-installed operators (new CRDs)
@@ -437,6 +444,13 @@ pub fn App() -> impl IntoView {
             .and_then(|v| v.get("alertmanager").and_then(|v| v.as_bool()))
             .unwrap_or(false);
         _alertmanager_enabled.set(enabled);
+        alert_silences_enabled.set(
+            features
+                .as_ref()
+                .and_then(|value| value.get("alertmanager_silences"))
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false),
+        );
         if let Some(img) = features
             .as_ref()
             .and_then(|v| v.get("debug_image").and_then(|v| v.as_str()))

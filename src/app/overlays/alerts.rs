@@ -2,13 +2,15 @@ use leptos::prelude::*;
 use roder_core::FiringAlert;
 
 use super::use_bool_overlay;
-use crate::app::state::{AlertsData, AlertsLastRefresh, AlertsOpen, Tick};
+use crate::app::components::dropdown::{Dropdown, DropdownClose};
+use crate::app::state::{AlertSilencesEnabled, AlertsData, AlertsLastRefresh, AlertsOpen, Tick};
 
 #[component]
 pub(crate) fn AlertsPanel() -> impl IntoView {
     let open = expect_context::<AlertsOpen>().0;
     let data = expect_context::<AlertsData>().0;
     let last_refresh = expect_context::<AlertsLastRefresh>().0;
+    let silences_enabled = expect_context::<AlertSilencesEnabled>().0;
     let tick = expect_context::<Tick>().0;
     let (visible, closing, do_close) = use_bool_overlay(open);
     let show_silenced = RwSignal::new(false);
@@ -95,10 +97,10 @@ pub(crate) fn AlertsPanel() -> impl IntoView {
                     </Show>
                     <For
                         each=move || sorted_alerts.get()
-                        key=|a| a.fingerprint.clone()
+                        key=|a| (a.fingerprint.clone(), a.silenced)
                         let:alert
                     >
-                        <AlertRow alert />
+                        <AlertRow alert data last_refresh silences_enabled />
                     </For>
                 </div>
             </div>
@@ -130,8 +132,33 @@ fn refresh_status(last_refresh_ms: Option<f64>, failed: bool) -> String {
 }
 
 #[component]
-fn AlertRow(alert: FiringAlert) -> impl IntoView {
+#[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
+fn AlertRow(
+    alert: FiringAlert,
+    data: RwSignal<Option<Vec<FiringAlert>>>,
+    last_refresh: RwSignal<Option<f64>>,
+    silences_enabled: RwSignal<bool>,
+) -> impl IntoView {
     let tick = use_context::<crate::app::state::Tick>().map(|t| t.0);
+    let duration_amount = RwSignal::new(1u64);
+    let duration_unit = RwSignal::new(3_600u64);
+    let duration_secs =
+        Memo::new(move |_| duration_amount.get().saturating_mul(duration_unit.get()));
+    let duration_valid = Memo::new(move |_| {
+        (roder_core::MIN_ALERT_SILENCE_SECS..=roder_core::MAX_ALERT_SILENCE_SECS)
+            .contains(&duration_secs.get())
+    });
+    let duration_unit_label = move || {
+        match duration_unit.get() {
+            60 => "minutes",
+            86_400 => "days",
+            604_800 => "weeks",
+            _ => "hours",
+        }
+        .to_string()
+    };
+    let silencing = RwSignal::new(false);
+    let silence_error = RwSignal::new(None::<String>);
 
     let starts_at = alert.starts_at.clone();
     let duration_str = move || {
@@ -140,6 +167,50 @@ fn AlertRow(alert: FiringAlert) -> impl IntoView {
     };
 
     let sev_class = format!("alert-sev sev-{}", alert.severity);
+    let fingerprint = alert.fingerprint.clone();
+    let silenced = alert.silenced;
+    let silence = Callback::new(move |()| {
+        #[cfg(target_arch = "wasm32")]
+        {
+            if silencing.get_untracked() {
+                return;
+            }
+            silencing.set(true);
+            silence_error.set(None);
+            let fingerprint = fingerprint.clone();
+            leptos::task::spawn_local(async move {
+                let request = roder_core::SilenceAlertRequest {
+                    fingerprint: fingerprint.clone(),
+                    duration_secs: duration_secs.get_untracked(),
+                };
+                let body = serde_json::to_value(request).unwrap_or_default();
+                match crate::data::post_json::<serde_json::Value>("/api/alerts/silences", &body)
+                    .await
+                {
+                    Ok(_) => {
+                        data.update(|alerts| {
+                            if let Some(alert) = alerts.as_mut().and_then(|alerts| {
+                                alerts.iter_mut().find(|a| a.fingerprint == fingerprint)
+                            }) {
+                                alert.silenced = true;
+                            }
+                        });
+                        if let Ok(alerts) = crate::app::fetch_alerts(true).await {
+                            crate::app::update_alerts(data, last_refresh, alerts);
+                        }
+                    }
+                    Err(error) => {
+                        silence_error.set(Some(error));
+                        set_timeout(
+                            move || silence_error.set(None),
+                            std::time::Duration::from_secs(4),
+                        );
+                    }
+                }
+                silencing.set(false);
+            });
+        }
+    });
 
     view! {
         <div class="alert-row">
@@ -170,9 +241,59 @@ fn AlertRow(alert: FiringAlert) -> impl IntoView {
                     })
                     .collect_view()}
             </div>
+            <Show when=move || silences_enabled.get() && !silenced>
+                <div class="alert-silence-actions">
+                    <input
+                        class="alert-duration-input"
+                        type="number"
+                        min="1"
+                        step="1"
+                        aria-label="Silence duration"
+                        prop:value=move || duration_amount.get().to_string()
+                        disabled=move || silencing.get()
+                        on:input=move |event| {
+                            duration_amount.set(event_target_value(&event).parse().unwrap_or(0));
+                        }
+                    />
+                    <Dropdown label=duration_unit_label>
+                        <DurationUnitItem duration_unit value=60 label="minutes" />
+                        <DurationUnitItem duration_unit value=3_600 label="hours" />
+                        <DurationUnitItem duration_unit value=86_400 label="days" />
+                        <DurationUnitItem duration_unit value=604_800 label="weeks" />
+                    </Dropdown>
+                    <button
+                        class="alert-silence-submit"
+                        disabled=move || silencing.get() || !duration_valid.get()
+                        on:click=move |_| silence.run(())
+                    >
+                        {move || if silencing.get() { "Silencing..." } else { "Silence" }}
+                    </button>
+                    <span class="alert-duration-error">
+                        {move || (!duration_valid.get()).then_some("Choose 1 minute to 1 year")}
+                    </span>
+                    <span class="alert-silence-error">{move || silence_error.get()}</span>
+                </div>
+            </Show>
         </div>
         </div>
         </div>
+    }
+}
+
+#[component]
+fn DurationUnitItem(
+    duration_unit: RwSignal<u64>,
+    value: u64,
+    label: &'static str,
+) -> impl IntoView {
+    let close = expect_context::<DropdownClose>().0;
+    view! {
+        <button type="button" class="dropdown-item" on:click=move |_| {
+            duration_unit.set(value);
+            close.run(());
+        }>
+            {label}
+        </button>
     }
 }
 

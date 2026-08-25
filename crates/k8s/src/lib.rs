@@ -18,7 +18,7 @@ mod shared;
 #[cfg(test)]
 mod test_alloc;
 
-pub use alertmanager::{discover_alertmanager, AlertsCache};
+pub use alertmanager::{alertmanager_url, AlertsCache, SilenceError};
 pub use backend::{Backend, DrainSession};
 pub use client::{ClusterAccess, K8sError};
 pub use coordination::{

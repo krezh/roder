@@ -31,6 +31,9 @@ pub struct ServerConfig {
     pub talos_config_enabled: bool,
     /// Empty means any authenticated user may read Alertmanager alerts.
     pub alerts_groups: Vec<String>,
+    /// Alertmanager silence creation requires both this flag and the operator allow-list.
+    pub alerts_actions_enabled: bool,
+    pub alerts_operator_groups: Vec<String>,
     /// Downward-API node name; coordinated power actions reject their own host.
     pub pod_node_name: Option<String>,
     /// Max concurrent per-user backends before the soft LRU cap starts evicting
@@ -71,6 +74,8 @@ impl ServerConfig {
         let talos_config_groups = env_groups("RODER_TALOS_CONFIG_GROUPS");
         let talos_config_enabled = env_bool("RODER_TALOS_CONFIG_ENABLED");
         let alerts_groups = env_groups("RODER_ALERTS_GROUPS");
+        let alerts_actions_enabled = env_bool("RODER_ALERTS_ACTIONS_ENABLED");
+        let alerts_operator_groups = env_groups("RODER_ALERTS_OPERATOR_GROUPS");
         let pod_node_name = std::env::var("RODER_POD_NODE_NAME").ok();
         let max_user_backends = env_usize("RODER_MAX_USER_BACKENDS", 200);
         let backend_idle_secs = env_u64("RODER_BACKEND_IDLE_SECS", 1200);
@@ -88,6 +93,8 @@ impl ServerConfig {
                 talos_config_groups,
                 talos_config_enabled,
                 alerts_groups,
+                alerts_actions_enabled,
+                alerts_operator_groups,
                 pod_node_name,
                 max_user_backends,
                 backend_idle_secs,
@@ -120,6 +127,8 @@ impl ServerConfig {
             talos_config_groups,
             talos_config_enabled,
             alerts_groups,
+            alerts_actions_enabled,
+            alerts_operator_groups,
             pod_node_name,
             max_user_backends,
             backend_idle_secs,
@@ -153,6 +162,11 @@ impl ServerConfig {
 
     pub fn can_read_alerts(&self, groups: &[String]) -> bool {
         self.dev_mode || self.alerts_groups.is_empty() || has_any_group(groups, &self.alerts_groups)
+    }
+
+    pub fn can_silence_alerts(&self, groups: &[String]) -> bool {
+        self.alerts_actions_enabled
+            && (self.dev_mode || has_any_group(groups, &self.alerts_operator_groups))
     }
 
     /// Convert to the `roder_auth` config (panics if called in dev mode).
@@ -298,6 +312,8 @@ mod tests {
             "RODER_TALOS_CONFIG_GROUPS",
             "RODER_TALOS_CONFIG_ENABLED",
             "RODER_ALERTS_GROUPS",
+            "RODER_ALERTS_ACTIONS_ENABLED",
+            "RODER_ALERTS_OPERATOR_GROUPS",
             "RODER_POD_NODE_NAME",
             "RODER_MAX_USER_BACKENDS",
             "RODER_BACKEND_IDLE_SECS",
@@ -318,6 +334,8 @@ mod tests {
         g.unset("RODER_TALOS_CONFIG_GROUPS");
         g.unset("RODER_TALOS_CONFIG_ENABLED");
         g.unset("RODER_ALERTS_GROUPS");
+        g.unset("RODER_ALERTS_ACTIONS_ENABLED");
+        g.unset("RODER_ALERTS_OPERATOR_GROUPS");
         g.unset("RODER_POD_NODE_NAME");
         g.unset("RODER_MAX_USER_BACKENDS");
         g.unset("RODER_BACKEND_IDLE_SECS");
@@ -565,6 +583,22 @@ mod tests {
         g.set("RODER_ALERTS_GROUPS", "platform");
         let cfg = ServerConfig::from_env().unwrap();
         assert!(cfg.can_read_alerts(&["developers".into()]));
+    }
+
+    #[test]
+    #[serial]
+    fn alert_silencing_requires_switch_and_group() {
+        let g = prod_env();
+        g.set("RODER_ALERTS_OPERATOR_GROUPS", "platform-operators");
+        let groups = vec!["platform-operators".into()];
+        assert!(!ServerConfig::from_env()
+            .unwrap()
+            .can_silence_alerts(&groups));
+
+        g.set("RODER_ALERTS_ACTIONS_ENABLED", "true");
+        let enabled = ServerConfig::from_env().unwrap();
+        assert!(enabled.can_silence_alerts(&groups));
+        assert!(!enabled.can_silence_alerts(&["developers".into()]));
     }
 
     #[test]

@@ -49,6 +49,7 @@
     RUST_LOG = "info";
     RODER_BASE_URL = "http://127.0.0.1:8080";
     RODER_ALERTMANAGER_URL = "https://alertmanager.plexuz.xyz";
+    RODER_ALERTS_ACTIONS_ENABLED = "true";
   };
 
   processes.dev.exec = "cargo leptos watch";

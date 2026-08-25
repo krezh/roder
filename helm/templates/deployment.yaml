@@ -79,6 +79,10 @@ spec:
             {{- end }}
             - name: RODER_ALERTS_GROUPS
               value: {{ toJson .Values.alertmanager.readerGroups | quote }}
+            - name: RODER_ALERTS_ACTIONS_ENABLED
+              value: {{ .Values.alertmanager.actions.enabled | quote }}
+            - name: RODER_ALERTS_OPERATOR_GROUPS
+              value: {{ toJson .Values.alertmanager.actions.operatorGroups | quote }}
             - name: RODER_MAX_USER_BACKENDS
               value: {{ .Values.backends.maxUserBackends | quote }}
             - name: RODER_BACKEND_IDLE_SECS

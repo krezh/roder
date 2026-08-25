@@ -652,6 +652,15 @@ pub struct FiringAlert {
     pub silenced: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SilenceAlertRequest {
+    pub fingerprint: String,
+    pub duration_secs: u64,
+}
+
+pub const MIN_ALERT_SILENCE_SECS: u64 = 60;
+pub const MAX_ALERT_SILENCE_SECS: u64 = 365 * 24 * 60 * 60;
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -61,6 +61,11 @@ alertmanager:
   # by roder via RODER_ALERTS_GROUPS. Restrict this if cluster-wide alert text
   # (namespaces/pods a tenant can't otherwise see) should not be visible to all.
   readerGroups: []
+  actions:
+    # Silence creation is disabled unless explicitly enabled and authorized.
+    enabled: false
+    # Users must also satisfy readerGroups when it is restricted.
+    operatorGroups: []
 
 # Per-user backend registry tuning (multi-user token passthrough). Both have
 # sensible in-app defaults; override only if needed.

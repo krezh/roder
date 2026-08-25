@@ -26,7 +26,7 @@ pub use exec::{
     terminal_xterm_css, terminal_xterm_js,
 };
 pub use logs::{logs, metrics_history};
-pub use misc::{alerts, features, health, namespaces, overview, resources};
+pub use misc::{alerts, features, health, namespaces, overview, resources, silence_alert};
 pub use resource_reads::{access_review, detail, permissions, resource_tree};
 pub use talos::{talos_config_diff, talos_dmesg, talos_node};
 pub use watch::{watch, watch_multi};

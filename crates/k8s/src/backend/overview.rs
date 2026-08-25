@@ -5,7 +5,9 @@
 use futures::future::join_all;
 use k8s_openapi::api::core::v1::{Event, Namespace, Node, Pod};
 use kube::api::{Api, DynamicObject, ListParams};
-use roder_core::{Category, ClusterOverview, HealthRollup, NodeSummary};
+use roder_core::{
+    Category, ClusterOverview, HealthRollup, NodeSummary, OverviewWarning, ResourceHealthRollup,
+};
 
 use crate::metrics::{node_usage, parse_cpu, parse_mem};
 use crate::project::ts_string;
@@ -113,9 +115,17 @@ impl Backend {
         // Recent warning events.
         let warnings = self.recent_warnings().await.unwrap_or_default();
 
-        let (flux, external_secrets) = tokio::join!(
-            self.rollup(Category::Flux),
-            self.rollup(Category::ExternalSecrets),
+        let (flux_resources, external_secret_resources, kopiur_resources, tuppr_resources) = tokio::join!(
+            self.resource_rollups(Category::Flux, None),
+            self.resource_rollups(Category::ExternalSecrets, None),
+            self.resource_rollups(
+                Category::Custom("home-operations.com".to_string()),
+                Some("kopiur.home-operations.com"),
+            ),
+            self.resource_rollups(
+                Category::Custom("home-operations.com".to_string()),
+                Some("tuppr.home-operations.com"),
+            ),
         );
 
         Ok(ClusterOverview {
@@ -127,52 +137,77 @@ impl Backend {
             pod_pending,
             pod_failed,
             warnings,
-            flux,
-            external_secrets,
+            flux_resources,
+            external_secret_resources,
+            kopiur_resources,
+            tuppr_resources,
         })
     }
 
-    async fn recent_warnings(&self) -> Result<Vec<String>, K8sError> {
+    async fn recent_warnings(&self) -> Result<Vec<OverviewWarning>, K8sError> {
         let client = self.client();
         let lp = ListParams::default().fields("type=Warning");
         let list = Api::<Event>::all(client).list(&lp).await.map_err(api_err)?;
-        let mut events: Vec<(Option<String>, String)> = list
+        let mut events: Vec<OverviewWarning> = list
             .items
             .into_iter()
             .map(|e| {
-                let ts = e.last_timestamp.as_ref().and_then(ts_string);
-                let ns = e
-                    .involved_object
-                    .namespace
-                    .clone()
-                    .map(|n| format!("{n}/"))
+                let timestamp = e
+                    .series
+                    .as_ref()
+                    .and_then(|series| series.last_observed_time.as_ref())
+                    .and_then(ts_string)
+                    .or_else(|| e.event_time.as_ref().and_then(ts_string))
+                    .or_else(|| e.last_timestamp.as_ref().and_then(ts_string));
+                let count = e
+                    .series
+                    .as_ref()
+                    .and_then(|series| series.count)
+                    .or(e.count)
+                    .unwrap_or(1)
+                    .max(1) as u32;
+                let source = e
+                    .reporting_component
+                    .or_else(|| e.source.and_then(|source| source.component))
                     .unwrap_or_default();
-                let obj = e.involved_object.name.clone().unwrap_or_default();
-                (
-                    ts,
-                    format!(
-                        "{ns}{obj}: {} {}",
-                        e.reason.unwrap_or_default(),
-                        e.message.unwrap_or_default()
-                    ),
-                )
+                OverviewWarning {
+                    event_name: e.metadata.name.unwrap_or_default(),
+                    namespace: e.metadata.namespace.or(e.involved_object.namespace),
+                    involved_kind: e.involved_object.kind.unwrap_or_default(),
+                    involved_name: e.involved_object.name.unwrap_or_default(),
+                    reason: e.reason.unwrap_or_default(),
+                    message: e.message.unwrap_or_default(),
+                    source,
+                    timestamp,
+                    count,
+                }
             })
             .collect();
-        events.sort_by(|a, b| b.0.cmp(&a.0));
-        Ok(events.into_iter().take(8).map(|(_, m)| m).collect())
+        events.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        events.truncate(8);
+        Ok(events)
     }
 
-    /// Count Ready/suspended/failing for every kind in a CRD family (Flux, ESO).
+    /// Count reconciliation states for every kind in a CRD family.
     /// Lists all matching kinds concurrently (instead of sequentially) so the
     /// dashboard overview doesn't accumulate per-kind latency.
-    async fn rollup(&self, category: Category) -> HealthRollup {
+    async fn rollup(
+        &self,
+        category: Category,
+        group: Option<&str>,
+        kind: Option<&str>,
+    ) -> HealthRollup {
         let client = self.client();
         let catalog_store = self.shared.catalog();
         let catalog = catalog_store.load();
         let futs = catalog
             .entries
             .iter()
-            .filter(|e| e.kind.category == category)
+            .filter(|entry| {
+                entry.kind.category == category
+                    && group.is_none_or(|group| entry.kind.group == group)
+                    && kind.is_none_or(|kind| entry.kind.kind == kind)
+            })
             .map(|entry| {
                 let api: Api<DynamicObject> = Api::all_with(client.clone(), &entry.api_resource);
                 async move {
@@ -187,6 +222,14 @@ impl Backend {
         for items in results {
             for obj in items {
                 rollup.total += 1;
+                if obj
+                    .data
+                    .get("status")
+                    .and_then(|status| status.as_object())
+                    .is_some_and(|status| !status.is_empty())
+                {
+                    rollup.with_status += 1;
+                }
                 let suspended = obj
                     .data
                     .get("spec")
@@ -195,19 +238,85 @@ impl Backend {
                     .unwrap_or(false);
                 if suspended {
                     rollup.suspended += 1;
+                    continue;
                 }
-                match ready_condition(&obj.data) {
-                    Some(true) => rollup.ready += 1,
-                    Some(false) => rollup.failing += 1,
-                    None => {}
+                match reconciliation_state(&obj.data) {
+                    ReconciliationState::Ready => rollup.ready += 1,
+                    ReconciliationState::Reconciling => rollup.reconciling += 1,
+                    ReconciliationState::Failing => rollup.failing += 1,
+                    ReconciliationState::Unknown => {}
                 }
             }
         }
         rollup
     }
+
+    async fn resource_rollups(
+        &self,
+        category: Category,
+        group: Option<&str>,
+    ) -> Vec<ResourceHealthRollup> {
+        let catalog_store = self.shared.catalog();
+        let catalog = catalog_store.load();
+        let mut kinds: Vec<String> = catalog
+            .entries
+            .iter()
+            .filter(|entry| {
+                entry.kind.category == category
+                    && group.is_none_or(|group| entry.kind.group == group)
+            })
+            .map(|entry| entry.kind.kind.clone())
+            .collect();
+        kinds.sort();
+        kinds.dedup();
+
+        join_all(kinds.into_iter().map(|kind| {
+            let category = category.clone();
+            async move {
+                let health = self.rollup(category, group, Some(&kind)).await;
+                ResourceHealthRollup { kind, health }
+            }
+        }))
+        .await
+        .into_iter()
+        .filter(|resource| resource.health.with_status > 0)
+        .collect()
+    }
 }
 
-/// Read a `Ready` status condition: Some(true)=Ready, Some(false)=not Ready, None=absent/unknown.
+#[derive(Debug, PartialEq, Eq)]
+enum ReconciliationState {
+    Ready,
+    Reconciling,
+    Failing,
+    Unknown,
+}
+
+fn reconciliation_state(data: &serde_json::Value) -> ReconciliationState {
+    if condition_is_true(data, "Stalled") {
+        return ReconciliationState::Failing;
+    }
+    if condition_is_true(data, "Reconciling") {
+        return ReconciliationState::Reconciling;
+    }
+    match ready_condition(data) {
+        Some(true) => ReconciliationState::Ready,
+        Some(false) => ReconciliationState::Failing,
+        None => ReconciliationState::Unknown,
+    }
+}
+
+fn condition_is_true(data: &serde_json::Value, condition_type: &str) -> bool {
+    data.get("status")
+        .and_then(|status| status.get("conditions"))
+        .and_then(|conditions| conditions.as_array())
+        .is_some_and(|conditions| {
+            conditions.iter().any(|condition| {
+                condition["type"] == condition_type && condition["status"] == "True"
+            })
+        })
+}
+
 fn ready_condition(data: &serde_json::Value) -> Option<bool> {
     let conds = data.get("status")?.get("conditions")?.as_array()?;
     let ready = conds.iter().find(|c| c["type"] == "Ready")?;
@@ -215,5 +324,38 @@ fn ready_condition(data: &serde_json::Value) -> Option<bool> {
         "True" => Some(true),
         "False" => Some(false),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reconciling_is_not_classified_as_failed() {
+        let data = serde_json::json!({
+            "status": { "conditions": [
+                { "type": "Ready", "status": "False" },
+                { "type": "Reconciling", "status": "True" }
+            ]}
+        });
+
+        assert_eq!(
+            reconciliation_state(&data),
+            ReconciliationState::Reconciling
+        );
+    }
+
+    #[test]
+    fn stalled_takes_precedence_over_reconciling() {
+        let data = serde_json::json!({
+            "status": { "conditions": [
+                { "type": "Ready", "status": "False" },
+                { "type": "Reconciling", "status": "True" },
+                { "type": "Stalled", "status": "True" }
+            ]}
+        });
+
+        assert_eq!(reconciliation_state(&data), ReconciliationState::Failing);
     }
 }

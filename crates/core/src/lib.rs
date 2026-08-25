@@ -258,9 +258,28 @@ pub struct ClusterOverview {
     pub pod_running: u32,
     pub pod_pending: u32,
     pub pod_failed: u32,
-    pub warnings: Vec<String>,
-    pub flux: HealthRollup,
-    pub external_secrets: HealthRollup,
+    pub warnings: Vec<OverviewWarning>,
+    #[serde(default)]
+    pub flux_resources: Vec<ResourceHealthRollup>,
+    #[serde(default)]
+    pub external_secret_resources: Vec<ResourceHealthRollup>,
+    #[serde(default)]
+    pub kopiur_resources: Vec<ResourceHealthRollup>,
+    #[serde(default)]
+    pub tuppr_resources: Vec<ResourceHealthRollup>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OverviewWarning {
+    pub event_name: String,
+    pub namespace: Option<String>,
+    pub involved_kind: String,
+    pub involved_name: String,
+    pub reason: String,
+    pub message: String,
+    pub source: String,
+    pub timestamp: Option<String>,
+    pub count: u32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -602,13 +621,23 @@ pub struct AccessRow {
 /// Verbs checked by the access review, in display order.
 pub const ACCESS_REVIEW_VERBS: &[&str] = &["get", "list", "create", "patch", "delete"];
 
-/// Counts of resources by reconciled/suspended/failing for a CRD family.
+/// Counts of resources by reconciliation state for a CRD family.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HealthRollup {
     pub total: u32,
     pub ready: u32,
+    #[serde(default)]
+    pub reconciling: u32,
     pub suspended: u32,
     pub failing: u32,
+    #[serde(default)]
+    pub with_status: u32,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ResourceHealthRollup {
+    pub kind: String,
+    pub health: HealthRollup,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

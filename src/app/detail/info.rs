@@ -13,6 +13,7 @@ use crate::data;
 
 pub(crate) fn info_view(d: ObjectDetail, kind: String) -> impl IntoView {
     let o = &d.object;
+    let is_event = kind == "Event";
     let created = json_str(o, &["metadata", "creationTimestamp"]);
     let labels = json_map(o, &["metadata", "labels"]);
     let annotations = json_map(o, &["metadata", "annotations"]);
@@ -33,9 +34,70 @@ pub(crate) fn info_view(d: ObjectDetail, kind: String) -> impl IntoView {
     };
     let images = container_images(o);
     let envs = container_envs(o);
+    let event_type = json_str(o, &["type"]);
+    let event_reason = json_str(o, &["reason"]);
+    let event_message = json_str(o, &["message"]);
+    let event_action = json_str(o, &["action"]);
+    let event_source =
+        json_str(o, &["reportingComponent"]).or_else(|| json_str(o, &["source", "component"]));
+    let event_count = json_str(o, &["series", "count"]).or_else(|| json_str(o, &["count"]));
+    let event_first_seen = json_str(o, &["firstTimestamp"]);
+    let event_last_seen = json_str(o, &["series", "lastObservedTime"])
+        .or_else(|| json_str(o, &["eventTime"]))
+        .or_else(|| json_str(o, &["lastTimestamp"]));
+    let event_object = match (
+        json_str(o, &["involvedObject", "kind"]),
+        json_str(o, &["involvedObject", "name"]),
+    ) {
+        (Some(kind), Some(name)) => Some(format!("{kind} / {name}")),
+        (None, Some(name)) => Some(name),
+        _ => None,
+    };
 
     view! {
         <div class="info">
+            {is_event.then(|| view! {
+                <section class="event-detail-summary">
+                    <div class="event-detail-head">
+                        <div>
+                            <span class="event-detail-label">"Kubernetes event"</span>
+                            <h3>{event_reason.unwrap_or_else(|| "Unknown reason".to_string())}</h3>
+                        </div>
+                        {event_type.map(|value| {
+                            let class = format!("event-type event-type-{}", value.to_lowercase());
+                            view! { <span class=class>{value}</span> }
+                        })}
+                    </div>
+                    {event_message.map(|message| view! {
+                        <div class="event-detail-message">{message}</div>
+                    })}
+                    <div class="event-detail-context">
+                        {event_object.map(|value| view! {
+                            <div class="event-detail-row"><span>"Affected object"</span><strong>{value}</strong></div>
+                        })}
+                        {event_source.map(|value| view! {
+                            <div class="event-detail-row"><span>"Reported by"</span><strong>{value}</strong></div>
+                        })}
+                        {event_action.map(|value| view! {
+                            <div class="event-detail-row"><span>"Action"</span><strong>{value}</strong></div>
+                        })}
+                    </div>
+                    <div class="event-detail-stats">
+                        {event_count.map(|value| view! {
+                            <div><span>"Occurrences"</span><strong>{value}</strong></div>
+                        })}
+                        {event_first_seen.map(|value| {
+                            let age = data::humanize_age(&Some(value.clone()));
+                            view! { <div><span>"First seen"</span><strong data-tip=value>{age}</strong></div> }
+                        })}
+                        {event_last_seen.map(|value| {
+                            let age = data::humanize_age(&Some(value.clone()));
+                            view! { <div><span>"Last seen"</span><strong data-tip=value>{age}</strong></div> }
+                        })}
+                    </div>
+                </section>
+            })}
+
             <div class="kv-grid">
                 {d.namespace.clone().map(|ns| view! {
                     <div class="kv"><span class="k">"Namespace"</span><span class="v">{ns}</span></div>

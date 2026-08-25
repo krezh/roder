@@ -314,8 +314,10 @@ impl InformerRegistry {
             if **entry.headers.load() == new_headers {
                 continue; // columns unchanged for this kind
             }
+            // Keep the published headers paired with the current rows. The
+            // informer commits the new headers only after its full relist has
+            // projected every row with this column definition.
             entry.crd.store(Arc::new(new_crd));
-            entry.headers.store(Arc::new(new_headers));
             entry.reproject.notify_one();
         }
     }
@@ -1040,13 +1042,11 @@ fn spawn_pvc_usage_scrape(enrichment: Arc<Enrichment>) {
 mod tests {
     use super::*;
 
-    /// A `columns_changed` notification (the `SharedCluster` counterpart, sent
-    /// after a CRD-driven columns rebuild) makes the registry re-derive an
-    /// active informer's headers from the freshly-swapped `ColumnMap` — this
-    /// is the live column-reflow wiring, exercised end to end via the
-    /// broadcast channel rather than by calling `refresh_columns` directly.
+    /// New columns stay pending until a complete relist can publish matching
+    /// rows. This prevents a large list from rendering old cells under new
+    /// headers while its replacement snapshot is still being assembled.
     #[tokio::test]
-    async fn columns_changed_notification_reflows_active_informer_headers() {
+    async fn columns_changed_notification_does_not_get_ahead_of_rows() {
         use kube::core::ApiResource;
         let cluster = crate::client::ClusterAccess::for_test();
         let enrich = Enrichment::new(cluster.clone());
@@ -1082,20 +1082,24 @@ mod tests {
         columns.store(Arc::new(new_map));
         columns_tx.send(()).expect("registry is subscribed");
 
-        // The reflow happens on a background task; poll briefly instead of a
-        // fixed sleep so the test isn't flaky under load.
-        let mut headers_after = headers_before.clone();
+        // Wait for the registry to stage the new definition.
         for _ in 0..50 {
-            headers_after = (**handle.columns.load()).clone();
-            if headers_after != headers_before {
+            if handle.columns.load().as_ref().eq(&headers_before)
+                && registry
+                    .active
+                    .lock()
+                    .await
+                    .values()
+                    .any(|entry| entry.crd.load().iter().any(|column| column.name == "Phase"))
+            {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert_eq!(
-            headers_after,
-            vec!["Phase".to_string()],
-            "active informer's headers should reflect the newly-swapped CRD column"
+            **handle.columns.load(),
+            headers_before,
+            "published headers must continue to match the current row layout"
         );
     }
 

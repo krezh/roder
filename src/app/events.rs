@@ -262,6 +262,7 @@ pub(crate) fn apply_event(
     entering: UidSet,
     removing: UidSet,
     columns: Option<RwSignal<Vec<String>>>,
+    toast: RwSignal<Option<Toast>>,
     ev: WatchEvent,
 ) {
     match ev {
@@ -338,6 +339,15 @@ pub(crate) fn apply_event(
             // Forbidden streams do not reconnect, so retain the last snapshot
             // and leave a diagnostic in the browser console.
             leptos::logging::warn!("watch forbidden: {message}");
+        }
+        WatchEvent::Error { message } => {
+            leptos::logging::error!("watch failed: {message}");
+            show_toast_detail(
+                toast,
+                "Resource watch failed",
+                Some(message),
+                ToastKind::Err,
+            );
         }
     }
 }

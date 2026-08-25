@@ -1,5 +1,5 @@
 //! Allocation-counting global allocator + helper, shared by the crate's memory
-//! regression tests (`printer_columns`, `metrics`). A test binary can only
+//! regression tests (`metrics`). A test binary can only
 //! define one global allocator, so it lives here and the tests reuse it.
 
 use std::alloc::{GlobalAlloc, Layout, System};

@@ -4,16 +4,15 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use arc_swap::ArcSwap;
 use futures::StreamExt;
-use kube::api::{Api, DynamicObject};
+use kube::api::{DynamicObject, ListParams, WatchParams};
 use kube::core::ApiResource;
-use kube::runtime::watcher::{self, Event};
 use roder_core::{MetricsPoint, ResourceRow, Trend, WatchEvent};
 use tokio::sync::{broadcast, Mutex, Notify, RwLock};
 
-use crate::client::{make_api, ClusterAccess};
+use crate::client::ClusterAccess;
 use crate::metrics::PvcUsage;
-use crate::printer_columns::{self, ColumnMap, PrinterCol};
-use crate::project::{columns_for, project_row, should_hide};
+use crate::project::{project_table_row, reproject_table_row, table_layout, TableLayout};
+use crate::table::{TableApi, TableError, TableWatchEvent};
 
 /// Broadcast backlog per informer. Each slot can hold a full `Snapshot` (every
 /// row), so a deep buffer multiplies memory on busy kinds. Kept modest: when a
@@ -91,11 +90,6 @@ pub(crate) type MetricsHistory = HashMap<String, PodMetricsHistory>;
 type NameKey = (Option<String>, String);
 type NameIndex = Arc<RwLock<HashMap<NameKey, String>>>;
 
-/// Hot-swappable column state shared between the informer task, the registry's
-/// `refresh_columns`, and the `WatchHandle`: the CRD printer columns used to
-/// project cells, and the matching header names. Swapping both atomically when a
-/// CRD changes is what lets an open table reflow its columns live.
-type Crd = Arc<ArcSwap<Vec<PrinterCol>>>;
 type Headers = Arc<ArcSwap<Vec<String>>>;
 
 struct Active {
@@ -112,7 +106,7 @@ struct Active {
     /// the detail handler can locate the right cache.
     resource_key: String,
     namespace: Option<String>,
-    /// (group, kind) for re-deriving columns when CRDs change.
+    /// (group, kind) for relisting when CRDs change.
     group: String,
     kind: String,
     /// Last-seen full objects by uid, so detail is served from cache (and metric
@@ -120,12 +114,11 @@ struct Active {
     objects: Arc<RwLock<HashMap<String, DynamicObject>>>,
     /// Secondary index: (namespace, name) → uid for O(1) object lookup by name.
     by_name: NameIndex,
-    /// Hot-swappable printer columns + header names (see [`Crd`]).
-    crd: Crd,
+    /// Current server Table layout, replaced atomically with each successful relist.
+    layout: Arc<RwLock<Option<TableLayout>>>,
     headers: Headers,
-    /// Poked by `refresh_columns` to make the task re-list and re-project with the
-    /// freshly-swapped columns (a fresh `Snapshot` down the live channel — the
-    /// client never reconnects).
+    schema_lock: Arc<RwLock<()>>,
+    /// Poked by `refresh_schema` to make the task relist and publish a fresh snapshot.
     reproject: Arc<Notify>,
     /// Terminal event retained after the watch task exits so a later subscriber
     /// does not attach to a silent, dead informer.
@@ -150,12 +143,14 @@ impl Drop for Active {
 /// a receiver for subsequent deltas.
 pub struct WatchHandle {
     pub snapshot: Vec<ResourceRow>,
+    pub initial_columns: Vec<String>,
     pub rx: broadcast::Receiver<WatchEvent>,
     /// Live row cache (used by the SSE handler to send a re-snapshot on broadcast lag).
     pub rows: Arc<RwLock<HashMap<String, ResourceRow>>>,
     /// Current column headers, hot-swapped on CRD change — read for the initial
     /// snapshot and any lag-resync so headers always match the rows' cells.
     pub columns: Headers,
+    pub schema_lock: Arc<RwLock<()>>,
 }
 
 /// Shared cluster-metadata + metrics enrichment layer, owned once per cluster
@@ -209,28 +204,19 @@ pub struct InformerRegistry {
     /// Shared metrics/PVC caches, injected — one `Enrichment` (and its scrape
     /// loops) serves every per-user registry watching the same cluster.
     enrich: Arc<Enrichment>,
-    /// CRD-declared printer columns, indexed by (group, kind). Injected/shared
-    /// so every per-user registry sees the same hot-swapped columns; swapped by
-    /// [`InformerRegistry::refresh_columns`] when CRDs change.
-    columns: Arc<ArcSwap<ColumnMap>>,
 }
 
 impl InformerRegistry {
-    /// `columns_rx` is a [`SharedCluster::subscribe_columns`](crate::shared::SharedCluster::subscribe_columns)
-    /// receiver: fired whenever the shared CRD watch swaps in freshly-rebuilt
-    /// columns, so this registry re-projects its own active informers against
-    /// them without waiting for its next subscribe.
+    /// `schema_rx` notifies this registry when active Table informers must relist.
     pub fn new(
         cluster: Arc<ClusterAccess>,
         enrich: Arc<Enrichment>,
-        columns: Arc<ArcSwap<ColumnMap>>,
-        columns_rx: broadcast::Receiver<()>,
+        schema_rx: broadcast::Receiver<()>,
     ) -> Arc<Self> {
         let registry = Arc::new(Self {
             cluster,
             active: Mutex::new(HashMap::new()),
             enrich,
-            columns,
         });
         // The 3 background loops hold only `Weak` — the registry's sole strong
         // owner is `Backend` (see `crates/k8s/src/backend/mod.rs`), so dropping
@@ -239,7 +225,7 @@ impl InformerRegistry {
         // connection pool, instead of leaking them forever.
         spawn_reaper(Arc::downgrade(&registry));
         spawn_reproject(Arc::downgrade(&registry));
-        spawn_columns_watch(Arc::downgrade(&registry), columns_rx);
+        spawn_schema_watch(Arc::downgrade(&registry), schema_rx);
         registry
     }
 
@@ -260,8 +246,6 @@ impl InformerRegistry {
             selector: selector.clone(),
         };
 
-        let columns = self.columns.load();
-        let crd = printer_columns::cols_for(&columns, group, kind).to_vec();
         let mut active = self.active.lock().await;
         let entry = active.entry(key.clone()).or_insert_with(|| {
             start_informer(
@@ -274,14 +258,16 @@ impl InformerRegistry {
                 selector,
                 self.enrich.pod_usage.clone(),
                 self.enrich.pvc_usage.clone(),
-                crd,
             )
         });
 
         // Subscribe first so no delta is missed between snapshot and stream.
         let mut rx = entry.tx.subscribe();
         *entry.idle_since.write().await = None;
+        let schema_guard = entry.schema_lock.read().await;
         let snapshot = entry.rows.read().await.values().cloned().collect();
+        let initial_columns = (**entry.headers.load()).clone();
+        drop(schema_guard);
         if let Some(event) = entry.terminal.read().await.clone() {
             let (terminal_tx, terminal_rx) = broadcast::channel(1);
             let _ = terminal_tx.send(event);
@@ -289,35 +275,19 @@ impl InformerRegistry {
         }
         WatchHandle {
             snapshot,
+            initial_columns,
             rx,
             rows: entry.rows.clone(),
             columns: entry.headers.clone(),
+            schema_lock: entry.schema_lock.clone(),
         }
     }
 
-    /// For every active informer whose columns actually changed against
-    /// `new_columns`, swap its columns and poke it to re-list + re-project.
-    /// The connected clients keep their streams and just receive a new snapshot.
-    ///
-    /// Does NOT store `new_columns` into `self.columns`: that `ArcSwap` is the
-    /// same shared instance owned and written by `SharedCluster` (see
-    /// [`InformerRegistry::new`]), so the shared layer is the sole writer —
-    /// this only reprojects each active informer against what's already there.
-    pub async fn refresh_columns(&self, new_columns: Arc<ColumnMap>) {
-        // Collect the pokes under the lock (no awaits), then they fire on the
-        // informer tasks asynchronously.
-        let new_map: &ColumnMap = &new_columns;
+    /// A changed CRD may change the server's Table schema. Relist active
+    /// informers so rows and headers are replaced atomically from a fresh Table.
+    pub async fn refresh_schema(&self) {
         let active = self.active.lock().await;
         for entry in active.values() {
-            let new_crd = printer_columns::cols_for(new_map, &entry.group, &entry.kind).to_vec();
-            let new_headers = columns_for(&entry.group, &entry.kind, &new_crd);
-            if **entry.headers.load() == new_headers {
-                continue; // columns unchanged for this kind
-            }
-            // Keep the published headers paired with the current rows. The
-            // informer commits the new headers only after its full relist has
-            // projected every row with this column definition.
-            entry.crd.store(Arc::new(new_crd));
             entry.reproject.notify_one();
         }
     }
@@ -383,7 +353,6 @@ fn start_informer(
     selector: Option<String>,
     pod_usage: Arc<RwLock<UsageWithTrend>>,
     pvc_usage: Arc<RwLock<PvcUsageMap>>,
-    crd: Vec<PrinterCol>,
 ) -> Active {
     let is_pod = group.is_empty() && kind == "Pod";
     let is_pvc = group.is_empty() && kind == "PersistentVolumeClaim";
@@ -402,11 +371,9 @@ fn start_informer(
     // would make the reaper start the eviction clock before any subscription.
     let idle_since: Arc<RwLock<Option<Instant>>> = Arc::new(RwLock::new(None));
 
-    // Hot-swappable columns: derive the initial headers from the starting CRD,
-    // then wrap both so `refresh_columns` can swap them and poke `reproject`.
-    let initial_headers = columns_for(&group, &kind, &crd);
-    let crd: Crd = Arc::new(ArcSwap::from_pointee(crd));
-    let headers: Headers = Arc::new(ArcSwap::from_pointee(initial_headers));
+    let headers: Headers = Arc::new(ArcSwap::from_pointee(Vec::new()));
+    let layout = Arc::new(RwLock::new(None));
+    let schema_lock = Arc::new(RwLock::new(()));
     let reproject = Arc::new(Notify::new());
     let terminal = Arc::new(RwLock::new(None));
 
@@ -415,7 +382,8 @@ fn start_informer(
     let task_objects = objects.clone();
     let task_by_name = by_name.clone();
     let task_pvc_usage = pvc_usage.clone();
-    let task_crd = crd.clone();
+    let task_layout = layout.clone();
+    let task_schema_lock = schema_lock.clone();
     let task_headers = headers.clone();
     let task_reproject = reproject.clone();
     let task_terminal = terminal.clone();
@@ -427,188 +395,306 @@ fn start_informer(
     // lifetime. This is the main steady-state memory reduction.
     let cache_objects = is_pod || is_pvc;
     let handle = tokio::spawn(async move {
-        // `kube`'s `watcher` is self-healing: on a transient failure it yields
-        // an `Err`, then re-lists and resumes on the same stream. Back off here
-        // until a complete relist succeeds; WatchStreamExt::default_backoff resets
-        // on the synthetic `Init` event emitted before each LIST, so it otherwise
-        // stays at its minimum delay throughout an outage. We only rebuild the
-        // stream when the client itself must change — i.e. the bearer token
-        // rotated and the old client now 401s.
-        // Rebuilding on *every* error would force a fresh LIST each time, which
-        // both hammers etcd and doubles memory while the new list is buffered.
         let mut backoff_attempt: u32 = 0;
-        loop {
+        'relist: loop {
             let client = (*cluster.client()).clone();
-            let api: Api<DynamicObject> = make_api(client, &ar, namespaced, namespace.as_deref());
-
+            let api = TableApi::new(
+                client,
+                &ar,
+                if namespaced {
+                    namespace.as_deref()
+                } else {
+                    None
+                },
+            );
             let mut building: HashMap<String, ResourceRow> = HashMap::new();
             let mut building_objs: HashMap<String, DynamicObject> = HashMap::new();
-            let cfg = match &selector {
-                Some(s) => watcher::Config::default().labels(s),
-                None => watcher::Config::default(),
-            };
-            let stream = watcher::watcher(api, cfg);
-            futures::pin_mut!(stream);
+            let mut continue_token = String::new();
+            let mut resource_version = String::new();
+            let mut current_layout: Option<TableLayout> = None;
 
-            // Reusable helper to derive the name-based index key from an object.
-            let name_key = |obj: &DynamicObject| {
-                (
-                    obj.metadata.namespace.clone(),
-                    obj.metadata.name.clone().unwrap_or_default(),
-                )
-            };
-
-            // Set when an auth error means we must rebuild with the refreshed client.
-            let mut rebuild_for_auth = false;
-            // Set when `refresh_columns` poked us to re-list with new columns.
-            let mut reproject_now = false;
+            // A complete paginated LIST is built off to the side and committed
+            // only after the final page, so subscribers never observe a partial
+            // replacement when the apiserver pages a large resource collection.
             loop {
-                tokio::select! {
-                    maybe = stream.next() => {
-                        let Some(event) = maybe else { break };
-                        match event {
-                            Ok(Event::Init) => {
-                                building.clear();
-                                building_objs.clear();
+                let mut params = ListParams::default().limit(500);
+                if let Some(selector) = &selector {
+                    params = params.labels(selector);
+                }
+                if !continue_token.is_empty() {
+                    params = params.continue_token(&continue_token);
+                }
+                let table = tokio::select! {
+                    result = api.list(&params) => match result {
+                        Ok(table) => table,
+                        Err(error) => {
+                            if is_forbidden_error(&error) {
+                                publish_terminal(&task_tx, &task_terminal, error.to_string()).await;
+                                return;
                             }
-                            Ok(Event::InitApply(mut obj)) => {
-                                obj.metadata.managed_fields = None;
-                                if should_hide(&group, &kind, &obj) {
-                                    continue;
-                                }
-                                let (usage, pvc_u) = enrichments(
-                                    &obj,
-                                    is_pod,
-                                    is_pvc,
-                                    &*pod_usage.read().await,
-                                    &*task_pvc_usage.read().await,
-                                );
-                                let guard = task_crd.load();
-                                let crd_now: &[PrinterCol] = &guard;
-                                let row = project_row(&group, &kind, &obj, usage, pvc_u, crd_now);
-                                if cache_objects {
-                                    building_objs.insert(row.uid.clone(), obj);
-                                }
-                                building.insert(row.uid.clone(), row);
-                            }
-                            Ok(Event::InitDone) => {
-                                let rows_vec: Vec<ResourceRow> = building.values().cloned().collect();
-                                // Rebuild the name index from the full init set.
-                                let mut name_idx: HashMap<NameKey, String> = HashMap::new();
-                                if cache_objects {
-                                    for (uid, obj) in building_objs.iter() {
-                                        name_idx.insert(name_key(obj), uid.clone());
-                                    }
-                                }
-                                *task_rows.write().await = std::mem::take(&mut building);
-                                *task_objects.write().await = std::mem::take(&mut building_objs);
-                                *task_by_name.write().await = name_idx;
-                                let columns = (**task_headers.load()).clone();
-                                let _ = task_tx.send(WatchEvent::Snapshot { columns, rows: rows_vec });
-                                // A completed (re)list means the stream is healthy
-                                // again; reset the rebuild backoff.
-                                backoff_attempt = 0;
-                            }
-                            Ok(Event::Apply(mut obj)) => {
-                                obj.metadata.managed_fields = None;
-                                if should_hide(&group, &kind, &obj) {
-                                    continue;
-                                }
-                                let (usage, pvc_u) = enrichments(
-                                    &obj,
-                                    is_pod,
-                                    is_pvc,
-                                    &*pod_usage.read().await,
-                                    &*task_pvc_usage.read().await,
-                                );
-                                let guard = task_crd.load();
-                                let crd_now: &[PrinterCol] = &guard;
-                                let row = project_row(&group, &kind, &obj, usage, pvc_u, crd_now);
-                                let uid = row.uid.clone();
-                                if cache_objects {
-                                    let name_k = name_key(&obj);
-                                    task_objects.write().await.insert(uid.clone(), obj);
-                                    task_by_name.write().await.insert(name_k, uid.clone());
-                                }
-                                task_rows.write().await.insert(uid, row.clone());
-                                let _ = task_tx.send(WatchEvent::Applied { row });
-                            }
-                            Ok(Event::Delete(obj)) => {
-                                let guard = task_crd.load();
-                                let crd_now: &[PrinterCol] = &guard;
-                                let row = project_row(&group, &kind, &obj, None, None, crd_now);
-                                task_rows.write().await.remove(&row.uid);
-                                if cache_objects {
-                                    task_objects.write().await.remove(&row.uid);
-                                    task_by_name.write().await.remove(&name_key(&obj));
-                                }
-                                let _ = task_tx.send(WatchEvent::Deleted { uid: row.uid });
-                            }
-                            Err(e) => {
-                                // A 403 means the subject genuinely lacks RBAC for
-                                // this kind/namespace (this is expected under token
-                                // passthrough) — retrying, rebuilt client or not,
-                                // can never succeed and would just hammer the
-                                // apiserver forever. Tell this user's stream once
-                                // and end the task; the idle reaper cleans up the
-                                // `Active` entry once its subscribers drop off.
-                                if is_forbidden_error(&e) {
-                                    tracing::debug!("watch forbidden (403) for {group}/{kind}; stopping: {e}");
-                                    let event = WatchEvent::Forbidden {
-                                        message: e.to_string(),
-                                    };
-                                    *task_terminal.write().await = Some(event.clone());
-                                    let _ = task_tx.send(event);
-                                    return;
-                                }
-                                // A 401 means the token rotated: the watcher would
-                                // keep retrying with the stale client forever, so
-                                // break to rebuild with the hot-swapped one. Every
-                                // other error is transient — let the watcher
-                                // self-heal in place (no LIST, no memory spike).
-                                if is_auth_error(&e) {
-                                    tracing::debug!("watch auth error for {group}/{kind}; rebuilding: {e}");
-                                    rebuild_for_auth = true;
-                                    break;
-                                }
-                                tracing::debug!("watch error for {group}/{kind} (self-healing): {e}");
-                                let delay = rebuild_backoff(backoff_attempt);
+                            if is_auth_error(&error) {
+                                tokio::time::sleep(rebuild_backoff(backoff_attempt)).await;
                                 backoff_attempt = backoff_attempt.saturating_add(1);
-                                tokio::select! {
-                                    _ = tokio::time::sleep(delay) => {}
-                                    _ = task_reproject.notified() => {
-                                        reproject_now = true;
-                                        break;
-                                    }
-                                }
+                                continue 'relist;
                             }
+                            if error.is_permanent() {
+                                publish_error(&task_tx, &task_terminal, error.to_string()).await;
+                                return;
+                            }
+                            tracing::debug!("Table list error for {group}/{kind}: {error}");
+                            let delay = rebuild_backoff(backoff_attempt);
+                            backoff_attempt = backoff_attempt.saturating_add(1);
+                            tokio::time::sleep(delay).await;
+                            continue 'relist;
                         }
+                    },
+                    _ = task_reproject.notified() => continue 'relist,
+                };
+                if table.kind != "Table" {
+                    publish_error(
+                        &task_tx,
+                        &task_terminal,
+                        format!("expected Kubernetes Table, got {}", table.kind),
+                    )
+                    .await;
+                    return;
+                }
+                if current_layout.is_none() {
+                    current_layout = Some(table_layout(
+                        &group,
+                        &kind,
+                        namespaced && namespace.is_none(),
+                        &table.column_definitions,
+                    ));
+                }
+                let layout = current_layout.as_ref().expect("Table layout initialized");
+                for table_row in &table.rows {
+                    let Some(object) = table_row.object.as_ref() else {
+                        publish_error(
+                            &task_tx,
+                            &task_terminal,
+                            format!("Table row for {group}/{kind} omitted its object"),
+                        )
+                        .await;
+                        return;
+                    };
+                    let (usage, pvc_u) = enrichments(
+                        object,
+                        is_pod,
+                        is_pvc,
+                        &*pod_usage.read().await,
+                        &*task_pvc_usage.read().await,
+                    );
+                    if let Some((row, object)) =
+                        project_table_row(&group, &kind, layout, table_row, usage, pvc_u)
+                    {
+                        if cache_objects {
+                            building_objs.insert(row.uid.clone(), object);
+                        }
+                        building.insert(row.uid.clone(), row);
                     }
-                    _ = task_reproject.notified() => {
-                        // Columns changed: tear the watch down and re-list, so the
-                        // next InitDone emits a fresh Snapshot carrying the new
-                        // columns. The clients keep their streams — no reconnect.
-                        reproject_now = true;
-                        break;
-                    }
+                }
+                if resource_version.is_empty() {
+                    resource_version.clone_from(&table.metadata.resource_version);
+                }
+                continue_token = table.metadata.continue_;
+                if continue_token.is_empty() {
+                    break;
                 }
             }
 
-            // A reproject re-lists immediately — it isn't a failure, so no backoff.
-            if reproject_now {
+            let Some(layout) = current_layout else {
+                tracing::warn!("Table list for {group}/{kind} had no schema");
                 continue;
+            };
+            let rows_vec: Vec<ResourceRow> = building.values().cloned().collect();
+            let mut name_idx = HashMap::new();
+            if cache_objects {
+                for (uid, object) in &building_objs {
+                    name_idx.insert(name_key(object), uid.clone());
+                }
             }
-            // We only get here on an auth rebuild or (in practice never) a truly
-            // ended stream. Back off — exponentially, with jitter, capped — so a
-            // sustained outage or token problem doesn't have every informer
-            // reconnecting in lockstep.
-            if !rebuild_for_auth {
-                // Defensive: an unexpected clean stream end shouldn't hot-loop.
-                backoff_attempt = backoff_attempt.max(1);
+            let schema_guard = task_schema_lock.write().await;
+            task_headers.store(Arc::new(layout.columns.clone()));
+            *task_layout.write().await = Some(layout.clone());
+            *task_rows.write().await = std::mem::take(&mut building);
+            *task_objects.write().await = std::mem::take(&mut building_objs);
+            *task_by_name.write().await = name_idx;
+            let _ = task_tx.send(WatchEvent::Snapshot {
+                columns: layout.columns.clone(),
+                rows: rows_vec,
+            });
+            drop(schema_guard);
+            backoff_attempt = 0;
+
+            // Reconnect a cleanly-ended or transiently-failed watch from its
+            // last resource version. Only a 410 or schema notification relists.
+            loop {
+                let mut params = WatchParams::default().timeout(290);
+                if let Some(selector) = &selector {
+                    params = params.labels(selector);
+                }
+                let stream = tokio::select! {
+                    result = api.watch(&params, &resource_version) => match result {
+                        Ok(stream) => stream,
+                        Err(error) => {
+                            if is_forbidden_error(&error) {
+                                publish_terminal(&task_tx, &task_terminal, error.to_string()).await;
+                                return;
+                            }
+                            if is_auth_error(&error) {
+                                tokio::time::sleep(rebuild_backoff(backoff_attempt)).await;
+                                backoff_attempt = backoff_attempt.saturating_add(1);
+                                continue 'relist;
+                            }
+                            if error.is_permanent() {
+                                publish_error(&task_tx, &task_terminal, error.to_string()).await;
+                                return;
+                            }
+                            tracing::debug!("Table watch connect error for {group}/{kind}: {error}");
+                            tokio::time::sleep(rebuild_backoff(backoff_attempt)).await;
+                            backoff_attempt = backoff_attempt.saturating_add(1);
+                            continue;
+                        }
+                    },
+                    _ = task_reproject.notified() => continue 'relist,
+                };
+                futures::pin_mut!(stream);
+                loop {
+                    let event = tokio::select! {
+                        event = stream.next() => event,
+                        _ = task_reproject.notified() => continue 'relist,
+                    };
+                    let Some(event) = event else {
+                        break;
+                    };
+                    match event {
+                        Ok(TableWatchEvent::Added(table) | TableWatchEvent::Modified(table)) => {
+                            if let Some(version) = table.resource_version() {
+                                resource_version = version.to_string();
+                            }
+                            for table_row in &table.rows {
+                                let Some(object) = table_row.object.as_ref() else {
+                                    publish_error(
+                                        &task_tx,
+                                        &task_terminal,
+                                        format!(
+                                            "Table watch row for {group}/{kind} omitted its object"
+                                        ),
+                                    )
+                                    .await;
+                                    return;
+                                };
+                                let (usage, pvc_u) = enrichments(
+                                    object,
+                                    is_pod,
+                                    is_pvc,
+                                    &*pod_usage.read().await,
+                                    &*task_pvc_usage.read().await,
+                                );
+                                if let Some((row, object)) = project_table_row(
+                                    &group, &kind, &layout, table_row, usage, pvc_u,
+                                ) {
+                                    let uid = row.uid.clone();
+                                    if cache_objects {
+                                        task_by_name
+                                            .write()
+                                            .await
+                                            .insert(name_key(&object), uid.clone());
+                                        task_objects.write().await.insert(uid.clone(), object);
+                                    }
+                                    task_rows.write().await.insert(uid, row.clone());
+                                    let _ = task_tx.send(WatchEvent::Applied { row });
+                                } else {
+                                    let uid = object.metadata.uid.clone().unwrap_or_else(|| {
+                                        format!(
+                                            "{}/{}",
+                                            object.metadata.namespace.clone().unwrap_or_default(),
+                                            object.metadata.name.clone().unwrap_or_default()
+                                        )
+                                    });
+                                    if task_rows.write().await.remove(&uid).is_some() {
+                                        task_objects.write().await.remove(&uid);
+                                        task_by_name.write().await.remove(&name_key(object));
+                                        let _ = task_tx.send(WatchEvent::Deleted { uid });
+                                    }
+                                }
+                            }
+                            backoff_attempt = 0;
+                        }
+                        Ok(TableWatchEvent::Deleted(table)) => {
+                            if let Some(version) = table.resource_version() {
+                                resource_version = version.to_string();
+                            }
+                            for table_row in table.rows {
+                                let Some(object) = table_row.object else {
+                                    continue;
+                                };
+                                let uid = object.metadata.uid.clone().unwrap_or_else(|| {
+                                    format!(
+                                        "{}/{}",
+                                        object.metadata.namespace.clone().unwrap_or_default(),
+                                        object.metadata.name.clone().unwrap_or_default()
+                                    )
+                                });
+                                task_rows.write().await.remove(&uid);
+                                if cache_objects {
+                                    task_objects.write().await.remove(&uid);
+                                    task_by_name.write().await.remove(&name_key(&object));
+                                }
+                                let _ = task_tx.send(WatchEvent::Deleted { uid });
+                            }
+                        }
+                        Ok(TableWatchEvent::Bookmark(table)) => {
+                            if let Some(version) = table.resource_version() {
+                                resource_version = version.to_string();
+                            }
+                        }
+                        Ok(TableWatchEvent::Error(status)) if status.code == 410 => {
+                            continue 'relist
+                        }
+                        Ok(TableWatchEvent::Error(status)) if status.code == 401 => {
+                            tokio::time::sleep(rebuild_backoff(backoff_attempt)).await;
+                            backoff_attempt = backoff_attempt.saturating_add(1);
+                            continue 'relist;
+                        }
+                        Ok(TableWatchEvent::Error(status)) if status.code == 403 => {
+                            publish_terminal(&task_tx, &task_terminal, status.message).await;
+                            return;
+                        }
+                        Ok(TableWatchEvent::Error(status)) => {
+                            if (400..500).contains(&status.code) {
+                                publish_error(&task_tx, &task_terminal, status.message).await;
+                                return;
+                            }
+                            tracing::debug!(
+                                "Table watch status for {group}/{kind}: {}",
+                                status.message
+                            );
+                            break;
+                        }
+                        Err(error) => {
+                            if is_forbidden_error(&error) {
+                                publish_terminal(&task_tx, &task_terminal, error.to_string()).await;
+                                return;
+                            }
+                            if is_auth_error(&error) {
+                                tokio::time::sleep(rebuild_backoff(backoff_attempt)).await;
+                                backoff_attempt = backoff_attempt.saturating_add(1);
+                                continue 'relist;
+                            }
+                            if error.is_permanent() {
+                                publish_error(&task_tx, &task_terminal, error.to_string()).await;
+                                return;
+                            }
+                            tracing::debug!("Table watch error for {group}/{kind}: {error}");
+                            break;
+                        }
+                    }
+                }
+                tokio::time::sleep(rebuild_backoff(backoff_attempt)).await;
+                backoff_attempt = backoff_attempt.saturating_add(1);
             }
-            let delay = rebuild_backoff(backoff_attempt);
-            backoff_attempt = backoff_attempt.saturating_add(1);
-            tokio::time::sleep(delay).await;
         }
     });
 
@@ -625,8 +711,9 @@ fn start_informer(
         kind: active_kind,
         objects,
         by_name,
-        crd,
+        layout,
         headers,
+        schema_lock,
         reproject,
         terminal,
     }
@@ -711,20 +798,13 @@ fn spawn_reproject(registry: std::sync::Weak<InformerRegistry>) {
     });
 }
 
-/// Background task: on each notification from the shared CRD watch (see
-/// [`InformerRegistry::new`]'s `columns_rx`), re-run [`InformerRegistry::refresh_columns`]
-/// with the (already-swapped-in) shared columns, so this registry's active
-/// informers reflow live along with every other per-user registry on the
-/// cluster. A lagged receiver (registry busy, several rebuilds coalesced)
-/// still catches up to the latest columns on the next tick, so it's skipped
-/// rather than treated as an error; only a closed sender (the `SharedCluster`
-/// is gone) ends the loop.
-fn spawn_columns_watch(
+/// Relist active Table informers when the shared CRD watch reports a schema change.
+fn spawn_schema_watch(
     registry: std::sync::Weak<InformerRegistry>,
-    mut columns_rx: broadcast::Receiver<()>,
+    mut schema_rx: broadcast::Receiver<()>,
 ) {
     tokio::spawn(async move {
-        // `columns_rx.recv()` can block indefinitely when no CRD changes
+        // `schema_rx.recv()` can block indefinitely when no CRD changes
         // occur, so a 30s liveness tick is raced alongside it purely so this
         // loop still notices — and exits — once the registry (held only
         // `Weak` here) has been dropped, rather than blocking on `recv()`
@@ -732,7 +812,7 @@ fn spawn_columns_watch(
         let mut liveness = tokio::time::interval(Duration::from_secs(30));
         loop {
             tokio::select! {
-                recv = columns_rx.recv() => {
+                recv = schema_rx.recv() => {
                     match recv {
                         Err(broadcast::error::RecvError::Closed) => break,
                         // Lagged: fall through and do a catch-up refresh below.
@@ -744,7 +824,7 @@ fn spawn_columns_watch(
             let Some(registry) = registry.upgrade() else {
                 break;
             };
-            registry.refresh_columns(registry.columns.load_full()).await;
+            registry.refresh_schema().await;
         }
     });
 }
@@ -758,6 +838,10 @@ struct ReprojectTarget {
     rows: Arc<RwLock<HashMap<String, ResourceRow>>>,
     is_pod: bool,
     is_pvc: bool,
+    group: String,
+    kind: String,
+    layout: Arc<RwLock<Option<TableLayout>>>,
+    schema_lock: Arc<RwLock<()>>,
 }
 
 /// One tick of per-user re-projection: re-derive pod/PVC rows from the shared
@@ -767,7 +851,7 @@ struct ReprojectTarget {
 /// time — no inner awaits here") and `cached_object` (clone the Arc handles
 /// under the lock, drop it, THEN await the inner RwLocks): `active` is only
 /// ever held long enough to clone handles into a `Vec`, never across an
-/// await, so this never blocks `subscribe()`, `refresh_columns()`, or
+/// await, so this never blocks `subscribe()`, `refresh_schema()`, or
 /// `cached_object()`. The `pod_usage`/`pvc_usage` read guards are similarly
 /// held only briefly, per entry, rather than for the whole tick, so a
 /// concurrent scrape-loop write is blocked for at most one entry's reproject,
@@ -787,6 +871,10 @@ async fn reproject_once(registry: &InformerRegistry) {
                 rows: e.rows.clone(),
                 is_pod: e.is_pod,
                 is_pvc: e.is_pvc,
+                group: e.group.clone(),
+                kind: e.kind.clone(),
+                layout: e.layout.clone(),
+                schema_lock: e.schema_lock.clone(),
             })
             .collect()
     };
@@ -795,22 +883,35 @@ async fn reproject_once(registry: &InformerRegistry) {
     // reproject/broadcast changed rows — the `pod_usage`/`pvc_usage` read
     // guard is only held for one entry's reproject call, not the whole loop.
     for entry in entries {
+        let _schema_guard = entry.schema_lock.read().await;
+        let Some(layout) = entry.layout.read().await.clone() else {
+            continue;
+        };
         if entry.is_pod {
             let usage = registry.enrich.pod_usage.read().await;
-            reproject_entry(&entry.tx, &entry.objects, &entry.rows, |obj| {
-                project_row("", "Pod", obj, usage_for(obj, &usage), None, &[])
+            reproject_entry(&entry.tx, &entry.objects, &entry.rows, |obj, current| {
+                reproject_table_row(
+                    &entry.group,
+                    &entry.kind,
+                    &layout,
+                    obj,
+                    current,
+                    usage_for(obj, &usage),
+                    None,
+                )
             })
             .await;
         } else if entry.is_pvc {
             let pvc = registry.enrich.pvc_usage.read().await;
-            reproject_entry(&entry.tx, &entry.objects, &entry.rows, |obj| {
-                project_row(
-                    "",
-                    "PersistentVolumeClaim",
+            reproject_entry(&entry.tx, &entry.objects, &entry.rows, |obj, current| {
+                reproject_table_row(
+                    &entry.group,
+                    &entry.kind,
+                    &layout,
                     obj,
+                    current,
                     None,
                     pvc_usage_for(obj, &pvc),
-                    &[],
                 )
             })
             .await;
@@ -841,8 +942,9 @@ impl Active {
             kind: "Pod".to_string(),
             objects: Arc::new(RwLock::new(objects)),
             by_name: Arc::new(RwLock::new(HashMap::new())),
-            crd: Arc::new(ArcSwap::from_pointee(Vec::new())),
+            layout: Arc::new(RwLock::new(Some(table_layout("", "Pod", false, &[])))),
             headers: Arc::new(ArcSwap::from_pointee(Vec::new())),
+            schema_lock: Arc::new(RwLock::new(())),
             reproject: Arc::new(Notify::new()),
             terminal: Arc::new(RwLock::new(None)),
         }
@@ -855,17 +957,47 @@ async fn reproject_entry(
     tx: &broadcast::Sender<WatchEvent>,
     objects: &RwLock<HashMap<String, DynamicObject>>,
     rows: &RwLock<HashMap<String, ResourceRow>>,
-    project: impl Fn(&DynamicObject) -> ResourceRow,
+    project: impl Fn(&DynamicObject, &ResourceRow) -> ResourceRow,
 ) {
     let objs = objects.read().await;
     let mut rows = rows.write().await;
     for (uid, obj) in objs.iter() {
-        let new_row = project(obj);
-        if rows.get(uid) != Some(&new_row) {
+        let Some(current) = rows.get(uid) else {
+            continue;
+        };
+        let new_row = project(obj, current);
+        if current != &new_row {
             rows.insert(uid.clone(), new_row.clone());
             let _ = tx.send(WatchEvent::Applied { row: new_row });
         }
     }
+}
+
+fn name_key(object: &DynamicObject) -> NameKey {
+    (
+        object.metadata.namespace.clone(),
+        object.metadata.name.clone().unwrap_or_default(),
+    )
+}
+
+async fn publish_terminal(
+    tx: &broadcast::Sender<WatchEvent>,
+    terminal: &RwLock<Option<WatchEvent>>,
+    message: String,
+) {
+    let event = WatchEvent::Forbidden { message };
+    *terminal.write().await = Some(event.clone());
+    let _ = tx.send(event);
+}
+
+async fn publish_error(
+    tx: &broadcast::Sender<WatchEvent>,
+    terminal: &RwLock<Option<WatchEvent>>,
+    message: String,
+) {
+    let event = WatchEvent::Error { message };
+    *terminal.write().await = Some(event.clone());
+    let _ = tx.send(event);
 }
 
 /// Walks an error's source chain, stringifying each link, and reports whether
@@ -874,7 +1006,7 @@ async fn reproject_entry(
 /// shape changes in the same way. Delegates to [`matches_status_str`] once the
 /// chain is stringified, so that pure string-matching logic is unit-testable
 /// without constructing a real `watcher::Error`.
-fn matches_status(e: &watcher::Error, needles: &[&str]) -> bool {
+fn matches_status(e: &(dyn std::error::Error + 'static), needles: &[&str]) -> bool {
     use std::error::Error;
     let mut src: Option<&dyn Error> = Some(e);
     while let Some(err) = src {
@@ -900,7 +1032,7 @@ fn matches_status_str(s: &str, needles: &[&str]) -> bool {
 /// text so it stays robust across `kube`'s error-enum shape changes. A 403
 /// (RBAC) is handled separately by [`is_forbidden_error`]: rebuilding wouldn't
 /// help there, so the watch is stopped instead of retried.
-fn is_auth_error(e: &watcher::Error) -> bool {
+fn is_auth_error(e: &TableError) -> bool {
     matches_status(e, &["Unauthorized", "401"])
 }
 
@@ -909,7 +1041,7 @@ fn is_auth_error(e: &watcher::Error) -> bool {
 /// kind/namespace, so retrying (with or without a rebuilt client) can never
 /// succeed. Callers should surface this to the user once and stop the watch,
 /// rather than let it self-heal/retry forever.
-fn is_forbidden_error(e: &watcher::Error) -> bool {
+fn is_forbidden_error(e: &TableError) -> bool {
     matches_status(e, &["Forbidden", "403"])
 }
 
@@ -1042,86 +1174,21 @@ fn spawn_pvc_usage_scrape(enrichment: Arc<Enrichment>) {
 mod tests {
     use super::*;
 
-    /// New columns stay pending until a complete relist can publish matching
-    /// rows. This prevents a large list from rendering old cells under new
-    /// headers while its replacement snapshot is still being assembled.
-    #[tokio::test]
-    async fn columns_changed_notification_does_not_get_ahead_of_rows() {
-        use kube::core::ApiResource;
-        let cluster = crate::client::ClusterAccess::for_test();
-        let enrich = Enrichment::new(cluster.clone());
-        let columns: Arc<ArcSwap<ColumnMap>> =
-            Arc::new(ArcSwap::from_pointee(ColumnMap::default()));
-        let (columns_tx, columns_rx) = broadcast::channel::<()>(4);
-        let registry = InformerRegistry::new(cluster, enrich, columns.clone(), columns_rx);
-
-        let ar = ApiResource {
-            group: "example.com".into(),
-            version: "v1".into(),
-            api_version: "example.com/v1".into(),
-            kind: "Widget".into(),
-            plural: "widgets".into(),
-        };
-        let handle = registry
-            .subscribe(&ar, "example.com", "Widget", true, Some("ns".into()), None)
-            .await;
-        let headers_before = (**handle.columns.load()).clone();
-
-        // Swap in a ColumnMap that declares a printer column for this CRD kind,
-        // then notify — mirroring what `spawn_crd_watch_shared` does after a
-        // rebuild: store the new columns, then broadcast `()`.
-        let mut new_map = ColumnMap::default();
-        new_map.insert(
-            ("example.com".to_string(), "Widget".to_string()),
-            vec![PrinterCol {
-                name: "Phase".to_string(),
-                json_path: "$.status.phase".to_string(),
-                col_type: "string".to_string(),
-            }],
-        );
-        columns.store(Arc::new(new_map));
-        columns_tx.send(()).expect("registry is subscribed");
-
-        // Wait for the registry to stage the new definition.
-        for _ in 0..50 {
-            if handle.columns.load().as_ref().eq(&headers_before)
-                && registry
-                    .active
-                    .lock()
-                    .await
-                    .values()
-                    .any(|entry| entry.crd.load().iter().any(|column| column.name == "Phase"))
-            {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert_eq!(
-            **handle.columns.load(),
-            headers_before,
-            "published headers must continue to match the current row layout"
-        );
-    }
-
     #[tokio::test]
     async fn distinct_user_registries_track_subscriptions_independently() {
         use kube::core::ApiResource;
         let enrich = Enrichment::new(crate::client::ClusterAccess::for_test());
-        let columns: Arc<ArcSwap<ColumnMap>> =
-            Arc::new(ArcSwap::from_pointee(ColumnMap::default()));
-        let (columns_tx, _) = broadcast::channel::<()>(4);
+        let (schema_tx, _) = broadcast::channel::<()>(4);
 
         let reg_a = InformerRegistry::new(
             crate::client::ClusterAccess::for_test(),
             enrich.clone(),
-            columns.clone(),
-            columns_tx.subscribe(),
+            schema_tx.subscribe(),
         );
         let reg_b = InformerRegistry::new(
             crate::client::ClusterAccess::for_test(),
             enrich.clone(),
-            columns.clone(),
-            columns_tx.subscribe(),
+            schema_tx.subscribe(),
         );
 
         let ar = ApiResource {
@@ -1153,9 +1220,8 @@ mod tests {
 
         let cluster = crate::client::ClusterAccess::for_test();
         let enrich = Enrichment::new(cluster.clone());
-        let columns = Arc::new(ArcSwap::from_pointee(ColumnMap::default()));
-        let (_columns_tx, columns_rx) = broadcast::channel(4);
-        let registry = InformerRegistry::new(cluster, enrich, columns, columns_rx);
+        let (_schema_tx, schema_rx) = broadcast::channel(4);
+        let registry = InformerRegistry::new(cluster, enrich, schema_rx);
         let (tx, _rx) = broadcast::channel(4);
         let entry = Active::test_pod(tx, HashMap::new(), HashMap::new());
         *entry.terminal.write().await = Some(WatchEvent::Forbidden {
@@ -1211,7 +1277,14 @@ mod tests {
             "status": {},
         }))
         .expect("valid pod manifest");
-        let row = project_row("", "Pod", &pod, None, None, &[]);
+        let layout = table_layout("", "Pod", false, &[]);
+        let table_row = crate::table::TableRow {
+            object: Some(pod.clone()),
+            ..Default::default()
+        };
+        let row = project_table_row("", "Pod", &layout, &table_row, None, None)
+            .expect("visible pod")
+            .0;
         (pod, row)
     }
 
@@ -1219,10 +1292,8 @@ mod tests {
     async fn reproject_once_rebroadcasts_only_on_change() {
         let cluster = crate::client::ClusterAccess::for_test();
         let enrich = Enrichment::new(cluster.clone());
-        let columns: Arc<ArcSwap<ColumnMap>> =
-            Arc::new(ArcSwap::from_pointee(ColumnMap::default()));
-        let (_columns_tx, columns_rx) = broadcast::channel::<()>(4);
-        let registry = InformerRegistry::new(cluster, enrich.clone(), columns, columns_rx);
+        let (_schema_tx, schema_rx) = broadcast::channel::<()>(4);
+        let registry = InformerRegistry::new(cluster, enrich.clone(), schema_rx);
 
         let (pod, row) = test_pod_object("uid-1", "pod1", "ns");
         let uid = row.uid.clone();
@@ -1262,7 +1333,7 @@ mod tests {
         match event {
             WatchEvent::Applied { row } => {
                 assert_eq!(row.uid, uid);
-                assert_eq!(row.cells[3], "500", "CPU cell should reflect seeded usage");
+                assert_eq!(row.cells[0], "500", "CPU cell should reflect seeded usage");
             }
             other => panic!("expected Applied, got {other:?}"),
         }
@@ -1287,10 +1358,8 @@ mod tests {
     async fn dropping_registry_frees_it_no_strong_ref_cycle() {
         let cluster = crate::client::ClusterAccess::for_test();
         let enrich = Enrichment::new(cluster.clone());
-        let columns: Arc<ArcSwap<ColumnMap>> =
-            Arc::new(ArcSwap::from_pointee(ColumnMap::default()));
-        let (_columns_tx, columns_rx) = broadcast::channel::<()>(4);
-        let registry = InformerRegistry::new(cluster, enrich, columns, columns_rx);
+        let (_schema_tx, schema_rx) = broadcast::channel::<()>(4);
+        let registry = InformerRegistry::new(cluster, enrich, schema_rx);
 
         let weak = Arc::downgrade(&registry);
         drop(registry);
@@ -1330,8 +1399,9 @@ mod tests {
             kind: "Pod".to_string(),
             objects: Arc::new(RwLock::new(HashMap::new())),
             by_name: Arc::new(RwLock::new(HashMap::new())),
-            crd: Arc::new(ArcSwap::from_pointee(Vec::new())),
+            layout: Arc::new(RwLock::new(None)),
             headers: Arc::new(ArcSwap::from_pointee(Vec::new())),
+            schema_lock: Arc::new(RwLock::new(())),
             reproject: Arc::new(Notify::new()),
             terminal: Arc::new(RwLock::new(None)),
         };
@@ -1345,6 +1415,50 @@ mod tests {
             abort_handle.is_finished(),
             "dropping Active must abort its watch task"
         );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn live_service_snapshot_uses_server_table_schema() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let cluster = Arc::new(
+            crate::client::ClusterAccess::connect_with_default()
+                .await
+                .expect("connect to current cluster"),
+        );
+        let enrich = Enrichment::new(cluster.clone());
+        let (_schema_tx, schema_rx) = broadcast::channel(4);
+        let registry = InformerRegistry::new(cluster, enrich, schema_rx);
+        let ar = kube::core::ApiResource {
+            group: String::new(),
+            version: "v1".into(),
+            api_version: "v1".into(),
+            kind: "Service".into(),
+            plural: "services".into(),
+        };
+        let mut handle = registry
+            .subscribe(&ar, "", "Service", true, Some("kube-system".into()), None)
+            .await;
+        let event = tokio::time::timeout(Duration::from_secs(10), handle.rx.recv())
+            .await
+            .expect("Table snapshot timeout")
+            .expect("Table snapshot stream closed");
+        let WatchEvent::Snapshot { columns, rows } = event else {
+            panic!("expected initial snapshot");
+        };
+        assert_eq!(
+            columns,
+            [
+                "Name",
+                "Type",
+                "Cluster-IP",
+                "External-IP",
+                "Port(s)",
+                "Age"
+            ]
+        );
+        assert!(rows.iter().any(|row| row.name == "roder"));
+        assert!(rows.iter().all(|row| row.cells.len() == columns.len()));
     }
 
     /// The pure string-walk core used by `is_auth_error` and

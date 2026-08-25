@@ -6,6 +6,7 @@ use roder_core::{ResourceKind, WatchEvent};
 use crate::app::components::kind_table::KindTable;
 use crate::app::events::RowMap;
 use crate::app::hooks::Coalescer;
+use crate::app::overlays::toast::{show_toast_detail, Toast, ToastKind};
 use crate::app::state::{
     Catalog, ConnectionState, Connectivity, DetailTarget, PaneConfig, WorkspaceConf,
 };
@@ -15,10 +16,13 @@ use crate::data;
 pub(crate) fn WorkspaceView() -> impl IntoView {
     let ws = expect_context::<WorkspaceConf>().0;
     let connection = expect_context::<ConnectionState>().0;
+    let toast = expect_context::<RwSignal<Option<Toast>>>();
 
     // One row signal per pane (keyed by kind_key). Non-reactive storage so the
     // multi-watch Effect can write into individual signals without loops.
     let pane_rows: StoredValue<HashMap<String, RowMap>> = StoredValue::new(HashMap::new());
+    let pane_columns: StoredValue<HashMap<String, RwSignal<Vec<String>>>> =
+        StoredValue::new(HashMap::new());
     // False until the first SSE Snapshot arrives for each pane. Prevents KindTable
     // from mounting with empty rows on SPA navigation (where catalog is already loaded
     // so KindTable would otherwise appear before the SSE snapshot lands).
@@ -38,6 +42,9 @@ pub(crate) fn WorkspaceView() -> impl IntoView {
         // Remove stale entries for panes that were closed. Signals for remaining
         // panes were created by the For item body (stable scope) — never here.
         pane_rows.update_value(|map| {
+            map.retain(|k, _| panes.iter().any(|p| &p.kind_key == k));
+        });
+        pane_columns.update_value(|map| {
             map.retain(|k, _| panes.iter().any(|p| &p.kind_key == k));
         });
         pane_loaded.update_value(|map| {
@@ -65,9 +72,12 @@ pub(crate) fn WorkspaceView() -> impl IntoView {
                 pane_rows.with_value(|map| {
                     if let Some(&rows) = map.get(&key) {
                         match event {
-                            // Workspace panes keep their catalog headers, so the
-                            // snapshot's columns aren't tracked here.
-                            WatchEvent::Snapshot { rows: r, .. } => {
+                            WatchEvent::Snapshot { columns, rows: r } => {
+                                pane_columns.with_value(|map| {
+                                    if let Some(&schema) = map.get(&key) {
+                                        schema.set(columns);
+                                    }
+                                });
                                 rows.set(r.into_iter().map(|row| (row.uid.clone(), row)).collect());
                             }
                             WatchEvent::Applied { row } => {
@@ -82,6 +92,15 @@ pub(crate) fn WorkspaceView() -> impl IntoView {
                             }
                             WatchEvent::Forbidden { message } => {
                                 leptos::logging::warn!("watch forbidden for pane {key}: {message}");
+                            }
+                            WatchEvent::Error { message } => {
+                                leptos::logging::error!("watch failed for pane {key}: {message}");
+                                show_toast_detail(
+                                    toast,
+                                    format!("{key} watch failed"),
+                                    Some(message),
+                                    ToastKind::Err,
+                                );
                             }
                         }
                     }
@@ -134,6 +153,12 @@ pub(crate) fn WorkspaceView() -> impl IntoView {
                     });
                     let rows_sig = pane_rows
                         .with_value(|map| *map.get(&cfg.kind_key).expect("just inserted"));
+                    pane_columns.update_value(|map| {
+                        map.entry(cfg.kind_key.clone())
+                            .or_insert_with(|| RwSignal::new(Vec::new()));
+                    });
+                    let columns_sig = pane_columns
+                        .with_value(|map| *map.get(&cfg.kind_key).expect("just inserted"));
                     pane_loaded.update_value(|map| {
                         map.entry(cfg.kind_key.clone())
                             .or_insert_with(|| RwSignal::new(false));
@@ -149,6 +174,7 @@ pub(crate) fn WorkspaceView() -> impl IntoView {
                         <PaneView
                             config=cfg
                             rows_sig=rows_sig
+                            columns_sig=columns_sig
                             loaded_sig=loaded_sig
                             pane_ns=pane_ns
                             on_close=Callback::new(move |_| {
@@ -185,6 +211,7 @@ pub(crate) fn WorkspaceView() -> impl IntoView {
 fn PaneView(
     config: PaneConfig,
     rows_sig: RowMap,
+    columns_sig: RwSignal<Vec<String>>,
     loaded_sig: RwSignal<bool>,
     /// Local namespace signal shared with KindTable for the dropdown. Writing
     /// triggers on_ns_persist → ws.update → SSE Effect reconnects.
@@ -223,6 +250,7 @@ fn PaneView(
                             kind=k
                             url_fn=move || None
                             rows_override=rows_sig
+                            columns_override=columns_sig
                             on_close=on_close
                             namespace=None
                             selector=sel

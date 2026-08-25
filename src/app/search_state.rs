@@ -8,6 +8,7 @@ use leptos::prelude::*;
 use roder_core::{ResourceKind, ResourceRow, WatchEvent};
 
 use crate::app::events::UidSet;
+use crate::app::overlays::toast::{show_toast_detail, Toast, ToastKind};
 
 #[derive(Clone, PartialEq)]
 pub(crate) struct MergedRow {
@@ -23,6 +24,12 @@ enum PendingTransition {
 
 fn merged_key(kind_key: &str, uid: &str) -> String {
     format!("{kind_key}/{uid}")
+}
+
+fn reduce_columns(schemas: &mut HashMap<String, Vec<String>>, kind_key: &str, event: &WatchEvent) {
+    if let WatchEvent::Snapshot { columns, .. } = event {
+        schemas.insert(kind_key.to_string(), columns.clone());
+    }
 }
 
 fn reduce_event(
@@ -76,7 +83,7 @@ fn reduce_event(
                 Vec::new()
             }
         }
-        WatchEvent::Forbidden { .. } => Vec::new(),
+        WatchEvent::Forbidden { .. } | WatchEvent::Error { .. } => Vec::new(),
     }
 }
 
@@ -94,12 +101,24 @@ pub(crate) fn apply_event(
     rows: RwSignal<HashMap<String, MergedRow>>,
     entering: UidSet,
     removing: UidSet,
+    columns: RwSignal<HashMap<String, Vec<String>>>,
+    toast: RwSignal<Option<Toast>>,
     kind: Arc<ResourceKind>,
     event: WatchEvent,
 ) {
     if let WatchEvent::Forbidden { message } = &event {
         leptos::logging::warn!("watch forbidden for {}: {message}", kind.key);
     }
+    if let WatchEvent::Error { message } = &event {
+        leptos::logging::error!("watch failed for {}: {message}", kind.key);
+        show_toast_detail(
+            toast,
+            format!("{} watch failed", kind.kind),
+            Some(message.clone()),
+            ToastKind::Err,
+        );
+    }
+    columns.update(|schemas| reduce_columns(schemas, &kind.key, &event));
 
     let mut pending = Vec::new();
     rows.update(|row_map| {
@@ -153,7 +172,6 @@ mod tests {
             plural: format!("{}s", name.to_lowercase()),
             namespaced: true,
             category: Category::Custom("test".to_string()),
-            columns: Vec::new(),
         })
     }
 
@@ -166,6 +184,7 @@ mod tests {
             cells: Vec::new(),
             trends: Vec::new(),
             status: RowStatus::Ok,
+            suspended: false,
             labels: BTreeMap::new(),
         }
     }
@@ -273,5 +292,59 @@ mod tests {
 
         assert!(!rows.contains_key(key));
         assert!(!removing.contains(key));
+    }
+
+    #[test]
+    fn snapshot_replaces_only_its_kinds_rows() {
+        let pod = kind("/v1/Pod", "Pod");
+        let service = kind("/v1/Service", "Service");
+        let mut rows = HashMap::new();
+        let mut entering = BTreeSet::new();
+        let mut removing = BTreeSet::new();
+        reduce_event(
+            &mut rows,
+            &mut entering,
+            &mut removing,
+            &service,
+            WatchEvent::Applied {
+                row: row("service", "service"),
+            },
+        );
+
+        reduce_event(
+            &mut rows,
+            &mut entering,
+            &mut removing,
+            &pod,
+            WatchEvent::Snapshot {
+                columns: vec!["Namespace".into(), "Name".into(), "Age".into()],
+                rows: vec![row("pod", "pod")],
+            },
+        );
+
+        assert!(rows.contains_key("/v1/Pod/pod"));
+        assert!(rows.contains_key("/v1/Service/service"));
+    }
+
+    #[test]
+    fn snapshot_schema_replaces_only_its_kind() {
+        let mut schemas = HashMap::from([
+            ("/v1/Pod".to_string(), vec!["Name".to_string()]),
+            ("/v1/Service".to_string(), vec!["Name".to_string()]),
+        ]);
+        let event = WatchEvent::Snapshot {
+            columns: vec![
+                "Namespace".into(),
+                "Name".into(),
+                "Ready".into(),
+                "Age".into(),
+            ],
+            rows: Vec::new(),
+        };
+
+        reduce_columns(&mut schemas, "/v1/Pod", &event);
+
+        assert_eq!(schemas["/v1/Pod"], ["Namespace", "Name", "Ready", "Age"]);
+        assert_eq!(schemas["/v1/Service"], ["Name"]);
     }
 }

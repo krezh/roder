@@ -33,6 +33,11 @@ pub(crate) fn httproute_cells(data: &Value) -> (Vec<String>, RowStatus) {
     (vec![hostnames, gateways, msg], st)
 }
 
+pub(crate) fn parent_route_cells(data: &Value) -> (Vec<String>, RowStatus) {
+    let (cells, status) = httproute_cells(data);
+    (cells[1..].to_vec(), status)
+}
+
 /// HTTPRoute acceptance: a not-True Accepted/ResolvedRefs condition is an error
 /// (surfacing its message); an Accepted=True route is healthy.
 fn httproute_status(data: &Value) -> (String, RowStatus) {
@@ -53,7 +58,12 @@ fn httproute_status(data: &Value) -> (String, RowStatus) {
             let status = c.get("status").and_then(|v| v.as_str()).unwrap_or("");
             let message = c.get("message").and_then(|v| v.as_str()).unwrap_or("");
             if matches!(typ, "Accepted" | "ResolvedRefs") && status != "True" {
-                return (message.to_string(), RowStatus::Error);
+                let row_status = if status == "False" {
+                    RowStatus::Error
+                } else {
+                    RowStatus::Pending
+                };
+                return (message.to_string(), row_status);
             }
             if typ == "Accepted" && status == "True" {
                 accepted = true;

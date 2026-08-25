@@ -12,7 +12,7 @@ use crate::app::events::{make_bulk_open_logs, make_do_bulk, make_do_delete, RowM
 use crate::app::hooks::{use_table_state, Coalescer};
 use crate::app::mobile::bulk_bar::MobileBulkBar;
 use crate::app::mobile::row_card::{use_select_mode, CardFields, MobileRowCard};
-use crate::app::overlays::toast::Toast;
+use crate::app::overlays::toast::{show_toast_detail, Toast, ToastKind};
 use crate::app::state::{
     Catalog, ConnectionState, Connectivity, CtxMenu, DetailTarget, LogPods, OnlyProblems, SortKey,
     Tick, WorkspaceConf,
@@ -26,8 +26,11 @@ pub(crate) fn MobileWorkspaceView() -> impl IntoView {
     let ws = expect_context::<WorkspaceConf>().0;
     let catalog = expect_context::<Catalog>().0;
     let connection = expect_context::<ConnectionState>().0;
+    let toast = expect_context::<RwSignal<Option<Toast>>>();
 
     let pane_rows: StoredValue<HashMap<String, RowMap>> = StoredValue::new(HashMap::new());
+    let pane_columns: StoredValue<HashMap<String, RwSignal<Vec<String>>>> =
+        StoredValue::new(HashMap::new());
     let pane_loaded: StoredValue<HashMap<String, RwSignal<bool>>> =
         StoredValue::new(HashMap::new());
 
@@ -42,6 +45,9 @@ pub(crate) fn MobileWorkspaceView() -> impl IntoView {
         pane_rows.update_value(|map| {
             map.retain(|k, _| panes.iter().any(|p| &p.kind_key == k));
         });
+        pane_columns.update_value(|map| {
+            map.retain(|k, _| panes.iter().any(|p| &p.kind_key == k));
+        });
         pane_loaded.update_value(|map| {
             map.retain(|k, _| panes.iter().any(|p| &p.kind_key == k));
         });
@@ -50,6 +56,10 @@ pub(crate) fn MobileWorkspaceView() -> impl IntoView {
             pane_rows.update_value(|map| {
                 map.entry(p.kind_key.clone())
                     .or_insert_with(|| RwSignal::new(HashMap::new()));
+            });
+            pane_columns.update_value(|map| {
+                map.entry(p.kind_key.clone())
+                    .or_insert_with(|| RwSignal::new(Vec::new()));
             });
             pane_loaded.update_value(|map| {
                 map.entry(p.kind_key.clone())
@@ -71,7 +81,12 @@ pub(crate) fn MobileWorkspaceView() -> impl IntoView {
                 pane_rows.with_value(|map| {
                     if let Some(&rows) = map.get(&key) {
                         match event {
-                            WatchEvent::Snapshot { rows: r, .. } => {
+                            WatchEvent::Snapshot { columns, rows: r } => {
+                                pane_columns.with_value(|map| {
+                                    if let Some(&schema) = map.get(&key) {
+                                        schema.set(columns);
+                                    }
+                                });
                                 rows.set(r.into_iter().map(|row| (row.uid.clone(), row)).collect());
                             }
                             WatchEvent::Applied { row } => {
@@ -86,6 +101,15 @@ pub(crate) fn MobileWorkspaceView() -> impl IntoView {
                             }
                             WatchEvent::Forbidden { message } => {
                                 leptos::logging::warn!("watch forbidden for pane {key}: {message}");
+                            }
+                            WatchEvent::Error { message } => {
+                                leptos::logging::error!("watch failed for pane {key}: {message}");
+                                show_toast_detail(
+                                    toast,
+                                    format!("{key} watch failed"),
+                                    Some(message),
+                                    ToastKind::Err,
+                                );
                             }
                         }
                     }
@@ -159,23 +183,24 @@ pub(crate) fn MobileWorkspaceView() -> impl IntoView {
                 let key = active_key.get()?;
                 let kind = catalog.get().into_iter().find(|k| k.key == key)?;
                 let rows = pane_rows.with_value(|m| m.get(&key).copied())?;
+                let columns = pane_columns.with_value(|m| m.get(&key).copied())?;
                 let loaded = pane_loaded.with_value(|m| m.get(&key).copied())?;
                 if !loaded.get() {
                     return None;
                 }
-                Some(view! { <MobilePane kind=kind rows=rows /> })
+                Some(view! { <MobilePane kind=kind rows=rows columns=columns /> })
             }}
         </div>
     }
 }
 
 #[component]
-fn MobilePane(kind: ResourceKind, rows: RowMap) -> impl IntoView {
+fn MobilePane(kind: ResourceKind, rows: RowMap, columns: RwSignal<Vec<String>>) -> impl IntoView {
     let detail = expect_context::<RwSignal<Option<DetailTarget>>>();
     let ctx_menu = expect_context::<RwSignal<Option<CtxMenu>>>();
+    let toast = expect_context::<RwSignal<Option<Toast>>>();
     let only_problems = expect_context::<OnlyProblems>().0;
     let log_pods = expect_context::<LogPods>().0;
-    let toast = expect_context::<RwSignal<Option<Toast>>>();
     let tick = expect_context::<Tick>().0;
 
     // Rows are driven by the workspace's own multiplexed subscription (the
@@ -205,7 +230,6 @@ fn MobilePane(kind: ResourceKind, rows: RowMap) -> impl IntoView {
     let bulk_helmrelease = kk.is_helmrelease();
     let bulk_has_source_ref = kk.has_source_ref();
     let key_sv = StoredValue::new(kind.key.clone());
-    let columns_sv = StoredValue::new(kind.columns.clone());
 
     let reset_selection = move || select_mode.set(false);
     let do_bulk = make_do_bulk(toast, key_sv, rows, selected, reset_selection);
@@ -238,11 +262,15 @@ fn MobilePane(kind: ResourceKind, rows: RowMap) -> impl IntoView {
                         namespace: init.as_ref().and_then(|r| r.namespace.clone()),
                         name: init.as_ref().map(|r| r.name.clone()).unwrap_or_default(),
                     };
+                    let node_for_ctx = move || {
+                        let node_col = columns.get_untracked().iter().position(|c| c == "Node")?;
+                        row.get_untracked().and_then(|r| r.cells.get(node_col).cloned())
+                    };
                     let fields = Memo::new(move |_| {
                         let r = row.get()?;
-                        let cols = columns_sv.get_value();
+                        let cols = columns.get();
                         tick.get();
-                        Some(CardFields::from_row(&r, &cols, None, data::humanize_age(&r.created)))
+                        Some(CardFields::from_row(&r, &cols, None))
                     });
                     view! {
                         <MobileRowCard
@@ -253,7 +281,7 @@ fn MobilePane(kind: ResourceKind, rows: RowMap) -> impl IntoView {
                             selected=selected
                             select_mode=select_mode
                             press=t.press
-                            node_for_ctx=move || None
+                            node_for_ctx=node_for_ctx
                             fields=fields />
                     }
                 }

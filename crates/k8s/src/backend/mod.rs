@@ -1,7 +1,7 @@
 //! The per-user façade over a connected cluster: the user's token-passthrough
 //! `ClusterAccess`, a per-user `InformerRegistry`, and per-user small caches
-//! (overview, `can`, log-dedup). Discovery/catalog/CRD printer columns/metrics
-//! enrichment are NOT owned here — they live once per cluster on
+//! (overview, `can`, log-dedup). Discovery, catalog, and metrics enrichment
+//! are not owned here; they live once per cluster on
 //! [`crate::shared::SharedCluster`] and are shared by every user's `Backend`.
 //! Each concern beyond that core lives in its own submodule, all as
 //! additional `impl Backend` blocks on the one struct defined here: [`overview`]
@@ -39,12 +39,12 @@ mod tree;
 type CanCacheKey = (String, String, Option<String>);
 
 /// The per-user façade over a connected cluster: the user's token-passthrough
-/// client, its own informer registry, and small per-user caches. Catalog,
-/// CRD printer columns, and metrics/PVC enrichment are read from `shared`.
+/// client, its own informer registry, and small per-user caches. Catalog and
+/// metrics/PVC enrichment are read from `shared`.
 pub struct Backend {
     /// The USER's token-passthrough client (RBAC is the calling user's identity).
     cluster: Arc<ClusterAccess>,
-    /// The cluster's SA-owned catalog/columns/enrichment, shared with every
+    /// The cluster's SA-owned catalog and enrichment, shared with every
     /// other user's `Backend` on this cluster.
     shared: Arc<SharedCluster>,
     registry: Arc<InformerRegistry>,
@@ -65,8 +65,7 @@ impl Backend {
         let registry = InformerRegistry::new(
             cluster.clone(),
             shared.enrichment(),
-            shared.columns(),
-            shared.subscribe_columns(),
+            shared.subscribe_schema_changes(),
         );
         Self {
             cluster,

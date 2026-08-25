@@ -45,8 +45,9 @@ pub async fn watch(
 
     let rows = handle.rows.clone();
     let columns = handle.columns.clone();
+    let schema_lock = handle.schema_lock.clone();
     let snapshot = WatchEvent::Snapshot {
-        columns: (**columns.load()).clone(),
+        columns: handle.initial_columns,
         rows: handle.snapshot,
     };
     // Suppressed in dev mode: cargo-leptos watch's own hot-reload already
@@ -60,12 +61,14 @@ pub async fn watch(
     let live = BroadcastStream::new(handle.rx).then(move |res| {
         let rows = rows.clone();
         let columns = columns.clone();
+        let schema_lock = schema_lock.clone();
         async move {
             match res {
                 Ok(ev) => sse_event(&ev),
                 Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(_)) => {
                     // Consumer fell behind — send a fresh snapshot so the client
                     // gets a consistent view instead of silently dropping deltas.
+                    let _schema_guard = schema_lock.read().await;
                     let current = rows.read().await;
                     let resync = WatchEvent::Snapshot {
                         columns: (**columns.load()).clone(),
@@ -156,8 +159,9 @@ pub async fn watch_multi(
         };
         let rows = handle.rows.clone();
         let columns = handle.columns.clone();
+        let schema_lock = handle.schema_lock.clone();
         let snapshot = WatchEvent::Snapshot {
-            columns: (**columns.load()).clone(),
+            columns: handle.initial_columns,
             rows: handle.snapshot,
         };
         let init = tokio_stream::once(sse_event(&MultiWatchEvent {
@@ -168,10 +172,12 @@ pub async fn watch_multi(
             let key = key.clone();
             let rows = rows.clone();
             let columns = columns.clone();
+            let schema_lock = schema_lock.clone();
             async move {
                 let ev = match res {
                     Ok(ev) => ev,
                     Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(_)) => {
+                        let _schema_guard = schema_lock.read().await;
                         let current = rows.read().await;
                         WatchEvent::Snapshot {
                             columns: (**columns.load()).clone(),

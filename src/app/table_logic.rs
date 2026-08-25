@@ -145,11 +145,11 @@ pub(crate) fn surfaced_cells(columns: &[String], cells: &[String]) -> Vec<(Strin
     {
         idx.push(i);
     }
-    for i in 0..columns.len() {
+    for (i, column) in columns.iter().enumerate() {
         if idx.len() >= 2 {
             break;
         }
-        if !idx.contains(&i) {
+        if !idx.contains(&i) && !matches!(column.as_str(), "Namespace" | "Name" | "Age") {
             idx.push(i);
         }
     }
@@ -238,7 +238,7 @@ pub(crate) fn targets_all(
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_action_targets, targets_all};
+    use super::{resolve_action_targets, surfaced_cells, targets_all};
     use crate::app::state::DetailTarget;
     use roder_core::{ResourceRow, RowStatus};
     use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -252,6 +252,7 @@ mod tests {
             cells: Vec::new(),
             trends: Vec::new(),
             status: RowStatus::Ok,
+            suspended: false,
             labels: BTreeMap::new(),
         }
     }
@@ -332,5 +333,20 @@ mod tests {
         );
 
         assert_eq!(keys, ["/v1/Pod/same", "/v1/Service/same"]);
+    }
+
+    #[test]
+    fn mobile_surfaced_cells_skip_identity_and_age_columns() {
+        let columns = ["Namespace", "Name", "Ready", "Node", "Age"].map(str::to_string);
+        let cells =
+            ["default", "api", "True", "worker-1", "2026-01-01T00:00:00Z"].map(str::to_string);
+
+        assert_eq!(
+            surfaced_cells(&columns, &cells),
+            vec![
+                ("Ready".to_string(), "True".to_string(), true),
+                ("Node".to_string(), "worker-1".to_string(), false),
+            ]
+        );
     }
 }

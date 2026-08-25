@@ -27,8 +27,6 @@ use crate::data;
 #[derive(Clone, Debug, PartialEq)]
 struct UnifiedColumn {
     name: String,
-    /// Index in the original kind's columns, if applicable
-    kind_column_idx: Option<usize>,
     /// Whether this column should be colored by status
     colored: bool,
     /// Whether this is a metric column (no flash)
@@ -43,40 +41,19 @@ struct UnifiedColumn {
     pct_thresh: bool,
 }
 
-/// Build unified column schema from multiple resource kinds.
-///
-/// Columns from every kind are merged in encounter order (deduped by name).
-/// Cell values are resolved per-row by name, so the index stored here is only
-/// used as a tiebreaker for ordering — not for cell access.
-fn build_unified_columns(kinds: &[Arc<ResourceKind>]) -> Vec<UnifiedColumn> {
+/// Merge the latest snapshot schemas in kind encounter order.
+fn build_unified_columns(
+    kinds: &[Arc<ResourceKind>],
+    schemas: &HashMap<String, Vec<String>>,
+) -> Vec<UnifiedColumn> {
     let mut unified = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
-    if kinds.iter().any(|k| k.namespaced) {
-        unified.push(UnifiedColumn {
-            name: "Namespace".to_string(),
-            kind_column_idx: None,
-            colored: false,
-            is_metric: false,
-            bool_colored: false,
-            pct_thresh: false,
-        });
-        seen.insert("Namespace".to_string());
-    }
-
-    unified.push(UnifiedColumn {
-        name: "Name".to_string(),
-        kind_column_idx: None,
-        colored: false,
-        is_metric: false,
-        bool_colored: false,
-        pct_thresh: false,
-    });
-    seen.insert("Name".to_string());
-
-    // Merge columns from ALL kinds so every kind's specific columns appear.
     for kind in kinds {
-        for (idx, col) in kind.columns.iter().enumerate() {
+        let Some(columns) = schemas.get(&kind.key) else {
+            continue;
+        };
+        for col in columns {
             if seen.insert(col.clone()) {
                 let colored = matches!(col.as_str(), "Phase" | "Status" | "Ready");
                 let is_metric =
@@ -85,7 +62,6 @@ fn build_unified_columns(kinds: &[Arc<ResourceKind>]) -> Vec<UnifiedColumn> {
                 let pct_thresh = matches!(col.as_str(), "%CPU/R" | "%CPU/L" | "%MEM/R" | "%MEM/L");
                 unified.push(UnifiedColumn {
                     name: col.clone(),
-                    kind_column_idx: Some(idx),
                     colored,
                     is_metric,
                     bool_colored,
@@ -95,15 +71,6 @@ fn build_unified_columns(kinds: &[Arc<ResourceKind>]) -> Vec<UnifiedColumn> {
         }
     }
 
-    unified.push(UnifiedColumn {
-        name: "Age".to_string(),
-        kind_column_idx: None,
-        colored: false,
-        is_metric: false,
-        bool_colored: false,
-        pct_thresh: false,
-    });
-
     unified
 }
 
@@ -112,18 +79,18 @@ fn build_unified_columns(kinds: &[Arc<ResourceKind>]) -> Vec<UnifiedColumn> {
 /// The lookup is per-row so that kinds with different column orderings (or no
 /// column of that name at all) each resolve correctly. A kind that doesn't have
 /// the column returns `""` instead of leaking another kind's cell value.
-fn cell_value_str<'a>(col: &UnifiedColumn, mr: &'a MergedRow) -> &'a str {
-    match col.name.as_str() {
-        "Namespace" => mr.row.namespace.as_deref().unwrap_or(""),
-        "Name" => mr.row.name.as_str(),
-        "Age" => mr.row.created.as_deref().unwrap_or(""),
-        col_name => {
-            let Some(idx) = mr.kind.columns.iter().position(|c| c.as_str() == col_name) else {
-                return "";
-            };
-            mr.row.cells.get(idx).map(String::as_str).unwrap_or("")
-        }
-    }
+fn cell_value_str<'a>(
+    col: &UnifiedColumn,
+    mr: &'a MergedRow,
+    schemas: &'a HashMap<String, Vec<String>>,
+) -> &'a str {
+    let Some(idx) = schemas
+        .get(&mr.kind.key)
+        .and_then(|columns| columns.iter().position(|c| c == &col.name))
+    else {
+        return "";
+    };
+    mr.row.cells.get(idx).map(String::as_str).unwrap_or("")
 }
 
 #[component]
@@ -157,6 +124,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
     // so the same uid from different kinds can't collide. Holds a `MergedRow`
     // (kind + row) so the row component can deref both at render time.
     let merged_rows: RwSignal<HashMap<String, MergedRow>> = RwSignal::new(Default::default());
+    let live_columns: RwSignal<HashMap<String, Vec<String>>> = RwSignal::new(Default::default());
     // Mirror merged rows into the context-menu projections.
     let rows_for_ctx = t.rows;
     Effect::new(move |_| {
@@ -219,7 +187,26 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
     });
 
     // Unified column schema from the resolved kinds.
-    let unified_columns = Memo::new(move |_| build_unified_columns(&resolved_kinds.get()));
+    let unified_columns = Memo::new(move |_| {
+        live_columns.with(|schemas| build_unified_columns(&resolved_kinds.get(), schemas))
+    });
+    let sorted_cell_name = StoredValue::new(None::<String>);
+    Effect::new(move |_| {
+        let columns = unified_columns.get();
+        let (sort_key, _) = t.sort.get();
+        let SortKey::Cell(index) = sort_key else {
+            sorted_cell_name.set_value(None);
+            return;
+        };
+        let current = columns.get(index).map(|column| column.name.clone());
+        let previous = sorted_cell_name.get_value();
+        if previous.is_some() && previous != current {
+            t.sort.set((SortKey::Name, true));
+            sorted_cell_name.set_value(None);
+        } else {
+            sorted_cell_name.set_value(current);
+        }
+    });
 
     // Subscribe to each resolved kind via SSE. Label selectors are passed to the
     // watch URL so the API server filters server-side — no client-side fan-out.
@@ -230,6 +217,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
         };
 
         merged_rows.set(Default::default());
+        live_columns.set(Default::default());
         t.selected.set(Default::default());
         t.last_clicked.set(None);
         t.entering.set(Default::default());
@@ -264,7 +252,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                 // once per burst rather than once per delta (see `Coalescer`).
                 let coalescer = Coalescer::new(move |batch: Vec<roder_core::WatchEvent>| {
                     for ev in batch {
-                        search_state::apply_event(mr, ent, rm, ka.clone(), ev);
+                        search_state::apply_event(mr, ent, rm, live_columns, toast, ka.clone(), ev);
                     }
                 });
                 data::subscribe_with_error(
@@ -295,6 +283,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
         let filter_text = resource_filter.get().to_lowercase();
         let (key, asc) = t.sort.get();
         let cols = unified_columns.get();
+        let schemas = live_columns.get();
         merged_rows.with(|m| {
             let mut v: Vec<(&String, &MergedRow)> = m
                 .iter()
@@ -327,8 +316,8 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                     SortKey::Cell(i) => {
                         if let Some(col) = cols.get(i) {
                             // Borrow both cell values directly, then numeric-or-lexical compare.
-                            let av = cell_value_str(col, a.1);
-                            let bv = cell_value_str(col, b.1);
+                            let av = cell_value_str(col, a.1, &schemas);
+                            let bv = cell_value_str(col, b.1, &schemas);
                             cmp_str(av, bv).then_with(|| a.1.row.name.cmp(&b.1.row.name))
                         } else {
                             a.1.row.name.cmp(&b.1.row.name)
@@ -376,6 +365,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
     let sizer: RwSignal<Vec<String>> = RwSignal::new(Vec::new());
     Effect::new(move |_| {
         let cols = unified_columns.get();
+        let schemas = live_columns.get();
         if cols.is_empty() {
             return;
         }
@@ -387,21 +377,18 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
         merged_rows.with_untracked(|m| {
             for mr in m.values() {
                 for (i, col) in cols.iter().enumerate() {
-                    let val = cell_value_str(col, mr);
-                    // Timestamp cells are stored as raw RFC3339 but rendered
-                    // humanized (e.g. "5m"); size the track by the rendered
-                    // form so date columns don't get sized to the long raw
-                    // timestamp string. ("Age" falls in the same bucket — its
-                    // cell_value_str returns the raw RFC3339 too.)
-                    let rendered = if data::looks_like_rfc3339(val) {
-                        data::humanize_cell(val)
-                    } else {
-                        val.to_string()
-                    };
+                    let val = cell_value_str(col, mr, &schemas);
+                    let rendered = data::humanize_cell(val);
                     if rendered.len() > col_maxes[i].len() {
                         col_maxes[i] = rendered;
                     }
-                    if matches!(mr.row.trends.get(i), Some(Trend::Up | Trend::Down)) {
+                    let row_idx = schemas
+                        .get(&mr.kind.key)
+                        .and_then(|schema| schema.iter().position(|name| name == &col.name));
+                    if row_idx
+                        .and_then(|idx| mr.row.trends.get(idx))
+                        .is_some_and(|trend| matches!(trend, Trend::Up | Trend::Down))
+                    {
                         col_has_trend[i] = true;
                     }
                 }
@@ -518,7 +505,8 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                             };
                             let node_for_ctx = move || {
                                 let mr = merged.get()?;
-                                let node_col = mr.kind.columns.iter().position(|c| c == "Node")?;
+                                let node_col = live_columns
+                                    .with(|schemas| schemas.get(&mr.kind.key)?.iter().position(|c| c == "Node"))?;
                                 mr.row.cells.get(node_col).cloned()
                             };
                             let on_unmount = {
@@ -555,7 +543,12 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                                                     view! {
                                                         <NameCell
                                                             uid=uid.clone()
-                                                            name=move || merged.get().map(|mr| mr.row.name)
+                                                            name=move || merged.get().and_then(|mr| {
+                                                                live_columns.with(|schemas| {
+                                                                    let i = schemas.get(&mr.kind.key)?.iter().position(|c| c == "Name")?;
+                                                                    mr.row.cells.get(i).cloned()
+                                                                })
+                                                            })
                                                             status=move || merged.get().map(|mr| mr.row.status)
                                                             selected=selected
                                                             last_clicked=last_clicked
@@ -565,21 +558,31 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                                                 "Namespace" => {
                                                     view! {
                                                         <FlashTd
-                                                            value=move || merged.get().and_then(|mr| mr.row.namespace.clone()).unwrap_or_default()
+                                                            value=move || merged.get().and_then(|mr| {
+                                                                live_columns.with(|schemas| {
+                                                                    let i = schemas.get(&mr.kind.key)?.iter().position(|c| c == "Namespace")?;
+                                                                    mr.row.cells.get(i).cloned()
+                                                                })
+                                                            }).unwrap_or_default()
                                                             class="cell-ns" />
                                                     }.into_any()
                                                 }
                                                 "Age" => {
                                                     view! {
-                                                        <div class="cell cell-age"><div class="cw"><div class="cwi">{move || { tick.get(); merged.get().as_ref().and_then(|mr| mr.row.created.as_ref().map(|c| data::humanize_age(&Some(c.clone())))).unwrap_or_default() }}</div></div></div>
+                                                        <div class="cell cell-age"><div class="cw"><div class="cwi">{move || {
+                                                            tick.get();
+                                                            let value = merged.get().and_then(|mr| {
+                                                                live_columns.with(|schemas| {
+                                                                    let i = schemas.get(&mr.kind.key)?.iter().position(|c| c == "Age")?;
+                                                                    mr.row.cells.get(i).cloned()
+                                                                })
+                                                            }).unwrap_or_default();
+                                                            data::humanize_cell(&value)
+                                                        }}</div></div></div>
                                                     }.into_any()
                                                 }
                                                 _ => {
-                                                    // StoredValue<String> is Copy so it can be captured
-                                                    // by all closures (value, color, trend) in both
-                                                    // branches without cloning or partial-move errors.
-                                                    // We look up the column index per row so mixed-kind
-                                                    // results with different column orderings work.
+                                                    // Resolve by header because each kind may order its schema differently.
                                                     let col_name_sv = StoredValue::new(col.name.clone());
                                                     if col_colored || col_bool_colored {
                                                         view! {
@@ -587,7 +590,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                                                                 let cn = col_name_sv.get_value();
                                                                 merged.get()
                                                                     .and_then(|mr| {
-                                                                        let i = mr.kind.columns.iter().position(|c| c.as_str() == cn.as_str())?;
+                                                                        let i = live_columns.with(|schemas| schemas.get(&mr.kind.key)?.iter().position(|c| c == &cn))?;
                                                                         mr.row.cells.get(i).cloned()
                                                                     })
                                                                     .unwrap_or_default()
@@ -597,7 +600,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                                                                         let cn = col_name_sv.get_value();
                                                                         match merged.get()
                                                                             .and_then(|mr| {
-                                                                                let i = mr.kind.columns.iter().position(|c| c.as_str() == cn.as_str())?;
+                                                                                let i = live_columns.with(|schemas| schemas.get(&mr.kind.key)?.iter().position(|c| c == &cn))?;
                                                                                 mr.row.cells.get(i).cloned()
                                                                             })
                                                                             .as_deref()
@@ -618,7 +621,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                                                         let trend_sig = Signal::derive(move || {
                                                             let cn = col_name_sv.get_value();
                                                             merged.get().and_then(|mr| {
-                                                                let i = mr.kind.columns.iter().position(|c| c.as_str() == cn.as_str())?;
+                                                                let i = live_columns.with(|schemas| schemas.get(&mr.kind.key)?.iter().position(|c| c == &cn))?;
                                                                 mr.row.trends.get(i).copied()
                                                             }).unwrap_or(Trend::None)
                                                         });
@@ -627,7 +630,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                                                                 let cn = col_name_sv.get_value();
                                                                 merged.get()
                                                                     .and_then(|mr| {
-                                                                        let i = mr.kind.columns.iter().position(|c| c.as_str() == cn.as_str())?;
+                                                                        let i = live_columns.with(|schemas| schemas.get(&mr.kind.key)?.iter().position(|c| c == &cn))?;
                                                                         mr.row.cells.get(i).cloned()
                                                                     })
                                                                     .unwrap_or_default()
@@ -640,7 +643,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                                                                     let cn = col_name_sv.get_value();
                                                                     let v = merged.get()
                                                                         .and_then(|mr| {
-                                                                            let i = mr.kind.columns.iter().position(|c| c.as_str() == cn.as_str())?;
+                                                                            let i = live_columns.with(|schemas| schemas.get(&mr.kind.key)?.iter().position(|c| c == &cn))?;
                                                                             mr.row.cells.get(i).cloned()
                                                                         })
                                                                         .unwrap_or_default();
@@ -651,7 +654,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                                                         let trend_sig = Signal::derive(move || {
                                                             let cn = col_name_sv.get_value();
                                                             merged.get().and_then(|mr| {
-                                                                let i = mr.kind.columns.iter().position(|c| c.as_str() == cn.as_str())?;
+                                                                let i = live_columns.with(|schemas| schemas.get(&mr.kind.key)?.iter().position(|c| c == &cn))?;
                                                                 mr.row.trends.get(i).copied()
                                                             }).unwrap_or(Trend::None)
                                                         });
@@ -660,7 +663,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                                                                 let cn = col_name_sv.get_value();
                                                                 let v = merged.get()
                                                                     .and_then(|mr| {
-                                                                        let i = mr.kind.columns.iter().position(|c| c.as_str() == cn.as_str())?;
+                                                                        let i = live_columns.with(|schemas| schemas.get(&mr.kind.key)?.iter().position(|c| c == &cn))?;
                                                                         mr.row.cells.get(i).cloned()
                                                                     })
                                                                     .unwrap_or_default();

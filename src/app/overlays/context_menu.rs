@@ -153,13 +153,9 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             let is_cronjob = targets_all(&targets, |kind| kind.is_cronjob());
             let is_kopiur_snapshot_policy = targets_all(&targets, |kind| kind.is_kopiur_snapshot_policy());
             let is_node = targets_all(&targets, |kind| kind.is_node());
-            // `RowStatus::Warn` is reserved for the suspended case in the Flux
-            // projector (see `ready_message_cells`), so it doubles as the signal
-            // for which of Suspend/Resume to show. `None` (mixed selection, or
-            // no row data) falls back to showing both.
             let suspend_state: Option<bool> = rows_opt.and_then(|rows| {
                 rows.with_untracked(|rm| {
-                    let mut states = target_uids.iter().filter_map(|uid| rm.get(uid)).map(|r| r.status == RowStatus::Warn);
+                    let mut states = target_uids.iter().filter_map(|uid| rm.get(uid)).map(|r| r.suspended);
                     let first = states.next()?;
                     states.all(|s| s == first).then_some(first)
                 })

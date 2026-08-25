@@ -29,42 +29,41 @@ pub(crate) struct CardFields {
 }
 
 impl CardFields {
-    /// Build a card's fields from a live row + its kind's column schema.
-    /// `age` is passed in already-humanized so callers control the `Tick`
-    /// dependency explicitly (the Memo that reads this needs to re-run once a
-    /// second, which only the caller's `tick.get()` can express).
+    /// Build a card's fields from a live row and its snapshot schema.
     pub(crate) fn from_row(
         row: &ResourceRow,
         columns: &[String],
         kind_label: Option<String>,
-        age: String,
     ) -> Self {
-        // Surfaced cells may include RFC3339 timestamps (e.g. a CRD `date`
-        // column or ExternalSecret "Last Sync"). Humanize them here so the
-        // card shows "5m" rather than the raw timestamp; the parent `Memo`
-        // re-runs every tick (see `MobileKindList`), so they stay live —
-        // mirroring the desktop table's tick-driven age cell.
         let extra = table_logic::surfaced_cells(columns, &row.cells)
             .into_iter()
             .map(|(label, value, colored)| {
+                // Collapse multi-value Table cells to the desktop's compact form.
+                let value = value.replace('\n', ", ");
                 let value = if crate::data::looks_like_rfc3339(&value) {
                     crate::data::humanize_cell(&value)
                 } else {
                     value
                 };
-                // `\n` marks a list value (see printer_columns::eval) — collapse to
-                // a compact inline form, mirroring the desktop table cell.
-                let value = value.replace('\n', ", ");
                 (label, value, colored)
             })
             .collect();
+        let cell = |header: &str| {
+            columns
+                .iter()
+                .position(|column| column == header)
+                .and_then(|i| row.cells.get(i))
+                .cloned()
+        };
         Self {
-            name: row.name.clone(),
+            name: cell("Name").unwrap_or_else(|| row.name.clone()),
             status: row.status,
-            namespace: row.namespace.clone(),
+            namespace: cell("Namespace").or_else(|| row.namespace.clone()),
             kind_label,
             extra,
-            age,
+            age: cell("Age")
+                .map(|value| crate::data::humanize_cell(&value))
+                .unwrap_or_default(),
         }
     }
 }

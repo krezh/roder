@@ -7,6 +7,7 @@ use leptos::task::spawn_local;
 use roder_core::WatchEvent;
 
 use crate::app::events::{apply_event, RowMap, UidSet};
+use crate::app::overlays::toast::Toast;
 use crate::app::state::{ConnectionState, Connectivity, SortKey};
 use crate::data;
 
@@ -102,12 +103,13 @@ pub(crate) fn use_sse_subscription(
     // A counter that the error handler bumps to re-trigger the subscription Effect.
     let reconnect: RwSignal<u32> = RwSignal::new(0);
     let conn = use_context::<ConnectionState>().map(|c| c.0);
+    let toast = expect_context::<RwSignal<Option<Toast>>>();
 
     // Coalesce the per-event SSE deltas of a burst (notably a metrics scrape's one
     // `Applied` per pod) into a single reactive flush — see [`Coalescer`].
     let coalescer = Coalescer::new(move |batch: Vec<WatchEvent>| {
         for ev in batch {
-            apply_event(rows, entering, removing, columns, ev);
+            apply_event(rows, entering, removing, columns, toast, ev);
         }
     });
 
@@ -325,8 +327,8 @@ const TRUNCATE_BUFFER_PX: f64 = 8.0;
 
 /// Watches `.table-wrap`'s rendered width against its content width and, when
 /// the row grid overflows, caps the single widest CRD column's grid track down
-/// to whatever width makes the table fit. Every other column (Namespace, Name,
-/// Age, and every other CRD column) is left at its natural `max-content` size.
+/// to whatever width makes the table fit. Identity and Age columns are left at
+/// their natural `max-content` size.
 /// Falls back to the table's existing horizontal scroll if capping one column
 /// isn't enough.
 ///
@@ -342,7 +344,6 @@ pub(crate) fn table_column_truncation(
     table_ref: NodeRef<Div>,
     sizer: RwSignal<Vec<String>>,
     columns: RwSignal<Vec<String>>,
-    namespaced: bool,
 ) -> RwSignal<Option<(usize, f64)>> {
     let truncate_col: RwSignal<Option<(usize, f64)>> = RwSignal::new(None);
 
@@ -365,11 +366,15 @@ pub(crate) fn table_column_truncation(
                     return;
                 };
                 let cells = sizer_row.children();
-                let base = 1 + usize::from(namespaced);
-                let ncrd = columns.with_untracked(|c| c.len());
+                let column_count = columns.with_untracked(|c| c.len());
                 let mut widest: Option<(usize, f64)> = None;
-                for i in 0..ncrd {
-                    let Some(cell) = cells.item((base + i) as u32) else {
+                for i in 0..column_count {
+                    if columns.with_untracked(|cols| {
+                        matches!(cols[i].as_str(), "Namespace" | "Name" | "Age")
+                    }) {
+                        continue;
+                    }
+                    let Some(cell) = cells.item(i as u32) else {
                         continue;
                     };
                     let w = cell.client_width() as f64;

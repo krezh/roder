@@ -68,9 +68,8 @@ pub struct AppState {
     pub provider: Option<Arc<OidcProvider>>,
     /// Alertmanager HTTP cache. `None` if no Alertmanager was discovered.
     pub alerts: Arc<RwLock<Option<Arc<roder_k8s::AlertsCache>>>>,
-    /// Shared, ServiceAccount-owned cluster metadata + enrichment (catalog,
-    /// CRD printer columns, metrics/PVC scrape caches). Built once at startup;
-    /// every per-user Backend reads discovery/columns/enrichment from here.
+    /// Shared, ServiceAccount-owned cluster metadata and enrichment caches.
+    /// Built once at startup and read by every per-user `Backend`.
     pub shared: std::sync::Arc<roder_k8s::SharedCluster>,
     /// Native Talos in-cluster API client. None when no generated config is mounted.
     pub talos: Option<Arc<roder_talos::Backend>>,
@@ -110,12 +109,9 @@ pub async fn build_state(leptos_options: LeptosOptions) -> Result<AppState, Stri
         ))
     };
 
-    // Connect at startup so the catalog + CRD printer columns are discovered
-    // ONCE, up front, and cached — not on the first client login, and never
-    // re-loaded per connection (which is what let a client hammer the apiserver).
-    // Dev uses the inferred kubeconfig; prod uses roder's pod ServiceAccount —
-    // the catalog/columns are cluster metadata, so the SA only needs discovery +
-    // read on `customresourcedefinitions`. Actual object reads still go through
+    // Connect at startup so the catalog is discovered once and shared instead
+    // of being loaded for every client connection. Dev uses the inferred
+    // kubeconfig; prod uses roder's pod ServiceAccount. Actual object reads go through
     // each user's own passthrough token, via their per-subject `Backend` in
     // `backends` (built lazily on first use by `BackendRegistry::resolve`).
     let alerts = Arc::new(RwLock::new(None));
@@ -131,8 +127,8 @@ pub async fn build_state(leptos_options: LeptosOptions) -> Result<AppState, Stri
             None
         }
     };
-    // Build the shared SA-owned layer once: catalog + CRD printer columns +
-    // metrics/PVC scrape caches + CRD watch. Startup REQUIRES the cluster to be
+    // Build the shared SA-owned catalog, enrichment caches, and CRD watch.
+    // Startup REQUIRES the cluster to be
     // reachable (roder runs in-cluster; the apiserver is up before roder schedules).
     let shared = roder_k8s::SharedCluster::connect_default()
         .await

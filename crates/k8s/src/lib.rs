@@ -11,9 +11,10 @@ mod coordination;
 mod discovery;
 mod informers;
 mod metrics;
-mod printer_columns;
 mod project;
 mod shared;
+#[allow(dead_code)]
+mod table;
 
 #[cfg(test)]
 mod test_alloc;

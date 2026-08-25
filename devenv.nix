@@ -24,7 +24,26 @@
         args = [
           "--headless"
           "--isolated"
-          "--allowed-hosts=localhost:8888"
+          "--allowed-hosts=localhost:8888,localhost:8080,127.0.0.1:8080"
+        ];
+      };
+    };
+  };
+
+  opencode = {
+    enable = true;
+    mcp = {
+      "mcp.devenv.sh" = {
+        type = "remote";
+        url = "https://mcp.devenv.sh";
+      };
+      playwright = {
+        type = "local";
+        command = [
+          (lib.getExe pkgs.playwright-mcp)
+          "--headless"
+          "--isolated"
+          "--allowed-hosts=localhost:8888,localhost:8080,127.0.0.1:8080"
         ];
       };
     };

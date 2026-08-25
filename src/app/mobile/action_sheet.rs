@@ -3,7 +3,7 @@
 //! Triggered by long-press on a `MobileRowCard` instead of `oncontextmenu`.
 
 use leptos::prelude::*;
-use roder_core::{ResourceKind, RowStatus};
+use roder_core::ResourceKind;
 
 use crate::app::events::{fire_action, fire_action_with};
 use crate::app::overlays::delete::{ask_delete, delete_extra, DeleteRequest};
@@ -92,7 +92,7 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
             let is_kopiur_snapshot_policy = targets_all(&targets, |kind| kind.is_kopiur_snapshot_policy());
             let suspend_state: Option<bool> = rows_opt.and_then(|rows| {
                 rows.with_untracked(|rm| {
-                    let mut states = target_uids.iter().filter_map(|uid| rm.get(uid)).map(|r| r.status == RowStatus::Warn);
+                    let mut states = target_uids.iter().filter_map(|uid| rm.get(uid)).map(|r| r.suspended);
                     let first = states.next()?;
                     states.all(|s| s == first).then_some(first)
                 })

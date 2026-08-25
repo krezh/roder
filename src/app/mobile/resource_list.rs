@@ -90,7 +90,7 @@ fn MobileKindList(
         (SortKey::Namespace, true)
     });
 
-    let columns: RwSignal<Vec<String>> = RwSignal::new(kind.columns.clone());
+    let columns: RwSignal<Vec<String>> = RwSignal::new(Vec::new());
     use_sse_subscription(t.rows, t.entering, t.removing, Some(columns), move || {
         t.rows.set(Default::default());
         t.selected.set(Default::default());
@@ -169,7 +169,7 @@ fn MobileKindList(
                             let r = row.get()?;
                             let cols = columns.get();
                             tick.get();
-                            Some(CardFields::from_row(&r, &cols, None, data::humanize_age(&r.created)))
+                            Some(CardFields::from_row(&r, &cols, None))
                         });
                         view! {
                             <MobileRowCard

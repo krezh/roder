@@ -49,6 +49,7 @@ pub(crate) fn MobileSearchList() -> impl IntoView {
     });
 
     let merged_rows: RwSignal<HashMap<String, MergedRow>> = RwSignal::new(Default::default());
+    let live_columns: RwSignal<HashMap<String, Vec<String>>> = RwSignal::new(Default::default());
     let rows_for_ctx = t.rows;
     Effect::new(move |_| {
         merged_rows.with(|m| {
@@ -108,6 +109,7 @@ pub(crate) fn MobileSearchList() -> impl IntoView {
         };
 
         merged_rows.set(Default::default());
+        live_columns.set(Default::default());
         t.selected.set(Default::default());
         t.last_clicked.set(None);
         t.entering.set(Default::default());
@@ -140,7 +142,7 @@ pub(crate) fn MobileSearchList() -> impl IntoView {
                 let probe_url = url.clone();
                 let coalescer = Coalescer::new(move |batch: Vec<WatchEvent>| {
                     for ev in batch {
-                        search_state::apply_event(mr, ent, rm, ka.clone(), ev);
+                        search_state::apply_event(mr, ent, rm, live_columns, toast, ka.clone(), ev);
                     }
                 });
                 data::subscribe_with_error(
@@ -233,17 +235,20 @@ pub(crate) fn MobileSearchList() -> impl IntoView {
                         };
                         let node_for_ctx = move || {
                             let mr = merged.get_untracked()?;
-                            let node_col = mr.kind.columns.iter().position(|c| c == "Node")?;
+                            let node_col = live_columns
+                                .with(|schemas| schemas.get(&mr.kind.key)?.iter().position(|c| c == "Node"))?;
                             mr.row.cells.get(node_col).cloned()
                         };
                         let fields = Memo::new(move |_| {
                             let mr = merged.get()?;
+                            let columns = live_columns.with(|schemas| {
+                                schemas.get(&mr.kind.key).cloned().unwrap_or_default()
+                            });
                             tick.get();
                             Some(CardFields::from_row(
                                 &mr.row,
-                                &mr.kind.columns,
+                                &columns,
                                 Some(mr.kind.kind.clone()),
-                                data::humanize_age(&mr.row.created),
                             ))
                         });
                         view! {

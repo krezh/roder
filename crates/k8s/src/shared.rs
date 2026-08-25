@@ -1,6 +1,6 @@
 //! The ServiceAccount-owned cluster layer, shared across every per-user session
 //! on the same cluster: the SA [`ClusterAccess`], the hot-swapped resource
-//! catalog + CRD printer columns (rebuilt on CRD change), and the shared
+//! catalog (rebuilt on CRD change), and the shared
 //! [`Enrichment`] metrics/PVC caches. There is one `SharedCluster` per cluster;
 //! per-user `InformerRegistry`s (owned by `backend::Backend`) read
 //! discovery/columns/enrichment from here instead of each re-discovering and
@@ -22,7 +22,6 @@ use tokio::sync::broadcast;
 use crate::client::{ClusterAccess, K8sError};
 use crate::discovery::{build_catalog, CatalogEntry};
 use crate::informers::{rebuild_backoff, Enrichment};
-use crate::printer_columns::ColumnMap;
 
 /// The resource catalog, hot-swapped when CRDs change so newly-installed
 /// operators appear (and removed ones disappear) without restarting roder.
@@ -47,25 +46,20 @@ impl CatalogData {
 }
 
 /// The ServiceAccount-owned cluster connection shared by every per-user
-/// session on a cluster: discovery catalog, CRD printer columns, and the
-/// metrics/PVC enrichment caches. Built once via [`SharedCluster::connect_default`].
+/// session on a cluster: discovery catalog and metrics/PVC enrichment caches.
+/// Built once via [`SharedCluster::connect_default`].
 pub struct SharedCluster {
     cluster: Arc<ClusterAccess>,
     catalog: Arc<ArcSwap<CatalogData>>,
-    columns: Arc<ArcSwap<ColumnMap>>,
     enrich: Arc<Enrichment>,
-    /// Fires after the CRD watch stores freshly-rebuilt columns, so every
-    /// per-user `InformerRegistry` (subscribed via [`subscribe_columns`])
-    /// re-projects its active informers against the new columns without a
-    /// client reconnect. A small capacity is enough: it only ever carries a
-    /// wake-up, never data (subscribers always re-read `columns` itself).
-    columns_changed: broadcast::Sender<()>,
+    /// Notifies active Table informers to relist after the catalog changes.
+    schema_changed: broadcast::Sender<()>,
 }
 
 impl SharedCluster {
     /// Connect with the ServiceAccount / default credentials (in-cluster
-    /// config or local kubeconfig), harvest CRD printer columns, build the
-    /// discovery catalog, and start the CRD watch + enrichment scrape loops.
+    /// config or local kubeconfig), build the discovery catalog, and start the
+    /// CRD watch and enrichment scrape loops.
     pub async fn connect_default() -> Result<Arc<Self>, K8sError> {
         let cluster = Arc::new(ClusterAccess::connect_with_default().await?);
         Self::build(cluster).await
@@ -73,24 +67,17 @@ impl SharedCluster {
 
     async fn build(cluster: Arc<ClusterAccess>) -> Result<Arc<Self>, K8sError> {
         let client = (*cluster.client()).clone();
-        // Harvest CRD-declared printer columns; shared by the catalog (headers)
-        // and every per-user informer registry (cell projection).
-        let loaded_columns = crate::printer_columns::load(&client).await;
-        let entries = build_catalog(&client, &loaded_columns).await?;
+        let entries = build_catalog(&client).await?;
         let catalog = Arc::new(ArcSwap::from_pointee(CatalogData::new(entries)));
-        let columns = Arc::new(ArcSwap::from_pointee(loaded_columns));
         let enrich = Enrichment::new(cluster.clone());
-        let (columns_changed, _) = broadcast::channel(4);
+        let (schema_changed, _) = broadcast::channel(4);
         let shared = Arc::new(Self {
             cluster,
             catalog,
-            columns,
             enrich,
-            columns_changed,
+            schema_changed,
         });
-        // Keep the catalog + columns live: watch CRDs and rebuild on change, so
-        // new operators show up and changed printer columns are visible to
-        // future subscriptions without a restart.
+        // Keep discovery and active Table schemas live as CRDs change.
         spawn_crd_watch_shared(shared.clone());
         Ok(shared)
     }
@@ -105,15 +92,13 @@ impl SharedCluster {
     pub fn for_test() -> Arc<Self> {
         let cluster = ClusterAccess::for_test();
         let catalog = Arc::new(ArcSwap::from_pointee(CatalogData::new(Vec::new())));
-        let columns = Arc::new(ArcSwap::from_pointee(ColumnMap::default()));
         let enrich = Enrichment::new(cluster.clone());
-        let (columns_changed, _) = broadcast::channel(4);
+        let (schema_changed, _) = broadcast::channel(4);
         Arc::new(Self {
             cluster,
             catalog,
-            columns,
             enrich,
-            columns_changed,
+            schema_changed,
         })
     }
 
@@ -163,17 +148,10 @@ impl SharedCluster {
         self.enrich.clone()
     }
 
-    /// The shared, hot-swapped CRD printer-column map.
-    pub(crate) fn columns(&self) -> Arc<ArcSwap<ColumnMap>> {
-        self.columns.clone()
-    }
-
-    /// Subscribe to column-rebuild notifications. Fired once per CRD-driven
-    /// catalog/columns rebuild (see [`spawn_crd_watch_shared`]); each per-user
-    /// `InformerRegistry` holds its own receiver so it can re-project its
-    /// active informers against the freshly-swapped `columns()`.
-    pub(crate) fn subscribe_columns(&self) -> broadcast::Receiver<()> {
-        self.columns_changed.subscribe()
+    /// Subscribe to CRD schema-change notifications. Active Table informers
+    /// relist so the apiserver can provide the new authoritative schema.
+    pub(crate) fn subscribe_schema_changes(&self) -> broadcast::Receiver<()> {
+        self.schema_changed.subscribe()
     }
 
     /// The ServiceAccount `kube::Client`, for handlers that legitimately need
@@ -184,37 +162,26 @@ impl SharedCluster {
     }
 }
 
-/// Re-discover the catalog and re-harvest CRD printer columns, swapping both
-/// into the shared stores, then notify every per-user `InformerRegistry`
-/// (via [`SharedCluster::subscribe_columns`]) to re-project its active
-/// informers against the new columns. Best-effort: a failed rebuild leaves
-/// the previous catalog/columns in place (and no notification is sent).
+/// Rebuild the catalog and notify active Table informers to relist.
+/// A failed rebuild leaves the previous catalog in place.
 async fn rebuild_catalog_shared(
     cluster: &Arc<ClusterAccess>,
     catalog: &Arc<ArcSwap<CatalogData>>,
-    columns: &Arc<ArcSwap<ColumnMap>>,
-    columns_changed: &broadcast::Sender<()>,
+    schema_changed: &broadcast::Sender<()>,
 ) {
     let client = (*cluster.client()).clone();
-    let loaded_columns = crate::printer_columns::load(&client).await;
-    match build_catalog(&client, &loaded_columns).await {
+    match build_catalog(&client).await {
         Ok(entries) => {
             catalog.store(Arc::new(CatalogData::new(entries)));
-            columns.store(Arc::new(loaded_columns));
-            // No receivers (e.g. no user session active yet) is not an error.
-            let _ = columns_changed.send(());
-            tracing::debug!("shared catalog + printer columns refreshed after CRD change");
+            let _ = schema_changed.send(());
+            tracing::debug!("shared catalog refreshed after CRD change");
         }
         Err(e) => tracing::debug!("shared catalog refresh skipped: {e}"),
     }
 }
 
-/// Watch `CustomResourceDefinition`s and rebuild the shared catalog/columns on
-/// change, so new operators appear and changed printer columns are visible —
-/// no restart. Events are debounced (operators often churn CRDs in bursts)
-/// into one rebuild. This is the `SharedCluster` counterpart of
-/// `backend::spawn_crd_watch`; see that function's doc comment for why the
-/// watch is metadata-only.
+/// Watch `CustomResourceDefinition`s and rebuild the shared catalog on change.
+/// Events are debounced because operators often update CRDs in bursts.
 fn spawn_crd_watch_shared(shared: Arc<SharedCluster>) {
     tokio::spawn(async move {
         let mut backoff_attempt = 0;
@@ -252,13 +219,8 @@ fn spawn_crd_watch_shared(shared: Arc<SharedCluster>) {
                         Ok(None) | Err(_) => break,
                     }
                 }
-                rebuild_catalog_shared(
-                    &shared.cluster,
-                    &shared.catalog,
-                    &shared.columns,
-                    &shared.columns_changed,
-                )
-                .await;
+                rebuild_catalog_shared(&shared.cluster, &shared.catalog, &shared.schema_changed)
+                    .await;
             }
             // Stream ended; pause before rebuilding the CRD watch.
             tokio::time::sleep(Duration::from_secs(5)).await;
@@ -273,10 +235,10 @@ mod tests {
     #[tokio::test]
     async fn column_notifications_reach_each_shared_subscriber() {
         let shared = SharedCluster::for_test();
-        let mut first = shared.subscribe_columns();
-        let mut second = shared.subscribe_columns();
+        let mut first = shared.subscribe_schema_changes();
+        let mut second = shared.subscribe_schema_changes();
 
-        shared.columns_changed.send(()).unwrap();
+        shared.schema_changed.send(()).unwrap();
         assert_eq!(first.recv().await, Ok(()));
         assert_eq!(second.recv().await, Ok(()));
     }
@@ -299,7 +261,6 @@ mod tests {
                 plural: "deployments".into(),
                 namespaced: true,
                 category: roder_core::Category::Workloads,
-                columns: vec!["Ready".into()],
             },
             api_resource,
         };

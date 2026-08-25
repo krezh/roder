@@ -101,8 +101,6 @@ pub struct ResourceKind {
     pub plural: String,
     pub namespaced: bool,
     pub category: Category,
-    /// Extra column headers (beyond the standard Name / Namespace / Age).
-    pub columns: Vec<String>,
 }
 
 impl ResourceKind {
@@ -159,6 +157,9 @@ pub struct ResourceRow {
     /// pod CPU/MEM cells carry `Up`/`Down` when usage changed vs the prior sample.
     pub trends: Vec<Trend>,
     pub status: RowStatus,
+    /// Whether a Flux resource has reconciliation suspended.
+    #[serde(default)]
+    pub suspended: bool,
     /// `metadata.labels` from the Kubernetes object.
     #[serde(default)]
     pub labels: BTreeMap<String, String>,
@@ -185,6 +186,8 @@ pub enum WatchEvent {
     /// informer stops retrying — the client should treat the stream as ended
     /// rather than expect further events.
     Forbidden { message: String },
+    /// A non-recoverable Table/API error for this resource stream.
+    Error { message: String },
 }
 
 /// Tagged SSE event for a multiplexed workspace watch stream.

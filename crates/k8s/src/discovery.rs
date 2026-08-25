@@ -3,8 +3,6 @@ use kube::Client;
 use roder_core::{Category, ResourceKind};
 
 use crate::client::K8sError;
-use crate::printer_columns::{self, ColumnMap};
-use crate::project::columns_for;
 
 /// Internal catalog entry: the public [`ResourceKind`] plus the bits needed to
 /// build a dynamic `Api` (the `kube::core::ApiResource`).
@@ -17,10 +15,7 @@ pub struct CatalogEntry {
 /// Enumerate every listable resource type in the cluster (core, extensions, and
 /// every installed CRD) via the discovery API. This is how roder browses any
 /// resource/CRD without per-type code.
-pub async fn build_catalog(
-    client: &Client,
-    columns: &ColumnMap,
-) -> Result<Vec<CatalogEntry>, K8sError> {
+pub async fn build_catalog(client: &Client) -> Result<Vec<CatalogEntry>, K8sError> {
     let discovery = Discovery::new(client.clone())
         .run()
         .await
@@ -49,11 +44,6 @@ pub async fn build_catalog(
                     plural: ar.plural.clone(),
                     namespaced,
                     category,
-                    columns: columns_for(
-                        &ar.group,
-                        &ar.kind,
-                        printer_columns::cols_for(columns, &ar.group, &ar.kind),
-                    ),
                 },
                 api_resource: ar,
             });

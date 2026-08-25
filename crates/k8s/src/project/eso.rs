@@ -29,9 +29,20 @@ pub(crate) fn external_secret_cells(data: &Value) -> (Vec<String>, RowStatus) {
 
 pub(crate) fn eso_generic_cells(data: &Value) -> (Vec<String>, RowStatus) {
     let ready = condition_status(data, "Ready");
-    let store = str_at(data, &["spec", "secretStoreRef", "name"]).unwrap_or_default();
     (
-        vec![ready_label(&ready), ready_reason(data), store],
+        vec![ready_label(&ready), ready_reason(data)],
         cond_to_status(ready.as_deref()),
     )
+}
+
+pub(crate) fn cluster_external_secret_cells(data: &Value) -> (Vec<String>, RowStatus) {
+    let (mut cells, status) = eso_generic_cells(data);
+    cells.push(
+        str_at(
+            data,
+            &["spec", "externalSecretSpec", "secretStoreRef", "name"],
+        )
+        .unwrap_or_default(),
+    );
+    (cells, status)
 }

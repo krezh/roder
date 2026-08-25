@@ -25,11 +25,17 @@ pub(crate) fn issuer_cells(data: &Value) -> (Vec<String>, RowStatus) {
 
 pub(crate) fn certrequest_cells(data: &Value) -> (Vec<String>, RowStatus) {
     let approved = condition_status(data, "Approved");
+    let denied = condition_status(data, "Denied");
     let ready = condition_status(data, "Ready");
     let issuer = str_at(data, &["spec", "issuerRef", "name"]).unwrap_or_default();
+    let status = if denied.as_deref() == Some("True") {
+        RowStatus::Error
+    } else {
+        cond_to_status(ready.as_deref())
+    };
     (
         vec![ready_label(&approved), ready_label(&ready), issuer],
-        cond_to_status(ready.as_deref()),
+        status,
     )
 }
 

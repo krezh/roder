@@ -47,7 +47,7 @@ use state::{
     ConnectionState, Connectivity, CtxMenu, DebugImage, DrainOpen, DrainTarget, ExecOpen,
     ExecTarget, FilterFocus, LogPods, LogTarget, NavOpen, NavigationRestored, NsPaletteOpen,
     OnlyProblems, PaletteOpen, PodModalTarget, ResourceFilter, ShortcutsOpen, TableRows,
-    TableSelected, TableTargets, Tick, TreeOpen, WorkspaceConf, WorkspaceConfig,
+    TableSelected, TableTargets, TalosFeatures, Tick, TreeOpen, WorkspaceConf, WorkspaceConfig,
 };
 use views::resource::ResourceView;
 use views::search::SearchResultsView;
@@ -219,6 +219,8 @@ pub fn App() -> impl IntoView {
     provide_context(PodModalTarget(pod_modal));
     let exec_open = RwSignal::new(None::<ExecTarget>);
     provide_context(ExecOpen(exec_open));
+    let talos_features = RwSignal::new(roder_core::TalosCapabilities::default());
+    provide_context(TalosFeatures(talos_features));
     let tree_open = RwSignal::new(None::<DetailTarget>);
     provide_context(TreeOpen(tree_open));
     let drain_open = RwSignal::new(None::<DrainTarget>);
@@ -450,6 +452,13 @@ pub fn App() -> impl IntoView {
                 .and_then(|value| value.get("alertmanager_silences"))
                 .and_then(|value| value.as_bool())
                 .unwrap_or(false),
+        );
+        talos_features.set(
+            features
+                .as_ref()
+                .and_then(|value| value.get("talos").cloned())
+                .and_then(|value| serde_json::from_value(value).ok())
+                .unwrap_or_default(),
         );
         if let Some(img) = features
             .as_ref()

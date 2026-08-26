@@ -9,9 +9,10 @@ use crate::app::overlays::delete::{ask_delete, delete_extra, DeleteRequest};
 use crate::app::overlays::toast::{show_toast, show_toast_detail, Toast, ToastKind};
 use crate::app::state::{
     open_logs, Catalog, CtxMenu, DebugImage, DetailTarget, DrainOpen, DrainTarget, ExecOpen,
-    ExecTarget, LogPods, LogTarget, TableRows, TableSelected, TableTargets, TreeOpen,
+    ExecTarget, LogPods, LogTarget, TableRows, TableSelected, TableTargets, TalosFeatures,
+    TreeOpen,
 };
-use crate::app::table_logic::{resolve_action_targets, targets_all};
+use crate::app::table_logic::{node_is_control_plane, resolve_action_targets, targets_all};
 use crate::app::util::clipboard::copy_to_clipboard;
 use crate::app::util::format::parse_key;
 use crate::app::util::predicate::KindKind;
@@ -30,6 +31,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
     let debug_image = expect_context::<DebugImage>().0;
     let tree_open = expect_context::<TreeOpen>().0;
     let drain_open = expect_context::<DrainOpen>().0;
+    let talos_features = expect_context::<TalosFeatures>().0;
     // Provided at App level; ResourceView fills in the Option on mount.
     let table_selected = expect_context::<TableSelected>().0;
     let table_rows = expect_context::<TableRows>().0;
@@ -153,6 +155,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             let is_cronjob = targets_all(&targets, |kind| kind.is_cronjob());
             let is_kopiur_snapshot_policy = targets_all(&targets, |kind| kind.is_kopiur_snapshot_policy());
             let is_node = targets_all(&targets, |kind| kind.is_node());
+            let talos_actions = talos_features.get().actions;
             let suspend_state: Option<bool> = rows_opt.and_then(|rows| {
                 rows.with_untracked(|rm| {
                     let mut states = target_uids.iter().filter_map(|uid| rm.get(uid)).map(|r| r.suspended);
@@ -173,6 +176,14 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             });
             let show_cordon = cordon_state != Some(true);
             let show_uncordon = cordon_state != Some(false);
+            let control_plane = rows_opt.is_some_and(|rows| {
+                rows.with_untracked(|rm| {
+                    target_uids
+                        .first()
+                        .and_then(|uid| rm.get(uid))
+                        .is_some_and(node_is_control_plane)
+                })
+            });
 
             let open = { let t = m.target.clone(); move |_| { detail.set(Some(t.clone())); do_close(); } };
             let open_tree = { let t = m.target.clone(); move |_| { tree_open.set(Some(t.clone())); do_close(); } };
@@ -264,6 +275,34 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                         name: name.clone(),
                         power: None,
                         control_plane: false,
+                        job: None,
+                    }));
+                    do_close();
+                }
+            };
+            let talos_reboot = {
+                let key = m.target.key.clone();
+                let name = m.target.name.clone();
+                move |_| {
+                    drain_open.set(Some(DrainTarget {
+                        key: key.clone(),
+                        name: name.clone(),
+                        power: Some("reboot".to_string()),
+                        control_plane,
+                        job: None,
+                    }));
+                    do_close();
+                }
+            };
+            let talos_shutdown = {
+                let key = m.target.key.clone();
+                let name = m.target.name.clone();
+                move |_| {
+                    drain_open.set(Some(DrainTarget {
+                        key: key.clone(),
+                        name: name.clone(),
+                        power: Some("shutdown".to_string()),
+                        control_plane,
                         job: None,
                     }));
                     do_close();
@@ -508,6 +547,10 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                     {(is_node && show_cordon).then(|| view! { <button class="ctx-item" on:click=cordon>"Cordon"</button> })}
                     {(is_node && show_uncordon).then(|| view! { <button class="ctx-item" on:click=uncordon>"Uncordon"</button> })}
                     {(!is_bulk && is_node).then(|| view! { <button class="ctx-item danger" on:click=drain>"Drain"</button> })}
+                    {(!is_bulk && is_node && talos_actions).then(|| view! {
+                        <button class="ctx-item danger" on:click=talos_reboot>"Reboot"</button>
+                        <button class="ctx-item danger" on:click=talos_shutdown>"Shutdown"</button>
+                    })}
                     {is_pod.then(|| view! { <button class="ctx-item danger" on:click=evict>"Evict"</button> })}
                     <button class="ctx-item danger" on:click=delete>"Delete"</button>
                 </div>

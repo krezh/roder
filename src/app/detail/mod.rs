@@ -12,7 +12,9 @@ use crate::app::components::table::ScaleControl;
 use crate::app::logs::LogsView;
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::overlays::delete::{ask_delete, delete_extra, DeleteRequest};
-use crate::app::state::{DetailTarget, DrainOpen, DrainTarget, ExecOpen, ExecTarget};
+use crate::app::state::{
+    DetailTarget, DrainOpen, DrainTarget, ExecOpen, ExecTarget, TalosFeatures,
+};
 use crate::app::util::format::parse_key;
 use crate::app::util::json::selector_from;
 use crate::app::util::predicate::KindKind;
@@ -125,20 +127,10 @@ pub(crate) fn RowDetail(
     let is_eso = kk.is_eso();
     let is_pod = kk.is_pod();
     let is_node = kk.is_node();
-    let features = LocalResource::new(move || async move {
-        if !is_node {
-            return roder_core::TalosCapabilities::default();
-        }
-        data::fetch_json::<serde_json::Value>("/api/features")
-            .await
-            .ok()
-            .and_then(|v| v.get("talos").cloned())
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default()
-    });
-    let talos_available = move || features.get().is_some_and(|caps| caps.read);
-    let talos_actions = move || features.get().is_some_and(|caps| caps.actions);
-    let talos_config = move || features.get().is_some_and(|caps| caps.config);
+    let features = expect_context::<TalosFeatures>().0;
+    let talos_available = move || is_node && features.get().read;
+    let talos_actions = move || is_node && features.get().actions;
+    let talos_config = move || is_node && features.get().config;
     // Pod-owning resources get a live "Pods" tab listing their pods by selector.
     let has_pods = is_workload || kk.is_job();
     let is_cronjob = kk.is_cronjob();

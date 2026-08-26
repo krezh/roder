@@ -163,6 +163,12 @@ pub(crate) fn surfaced_cells(columns: &[String], cells: &[String]) -> Vec<(Strin
         .collect()
 }
 
+pub(crate) fn node_is_control_plane(row: &ResourceRow) -> bool {
+    row.labels
+        .contains_key("node-role.kubernetes.io/control-plane")
+        || row.labels.contains_key("node-role.kubernetes.io/master")
+}
+
 /// Resolve a set of selected uids (single-kind table: every row shares `key`)
 /// into bulk-action targets — shared by every mobile list's "do_bulk" closure.
 pub(crate) fn bulk_targets(
@@ -238,7 +244,7 @@ pub(crate) fn targets_all(
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_action_targets, surfaced_cells, targets_all};
+    use super::{node_is_control_plane, resolve_action_targets, surfaced_cells, targets_all};
     use crate::app::state::DetailTarget;
     use roder_core::{ResourceRow, RowStatus};
     use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -348,5 +354,22 @@ mod tests {
                 ("Node".to_string(), "worker-1".to_string(), false),
             ]
         );
+    }
+
+    #[test]
+    fn control_plane_detection_supports_current_and_legacy_labels() {
+        let mut current = row("current", "node-a");
+        current.labels.insert(
+            "node-role.kubernetes.io/control-plane".into(),
+            String::new(),
+        );
+        let mut legacy = row("legacy", "node-b");
+        legacy
+            .labels
+            .insert("node-role.kubernetes.io/master".into(), String::new());
+
+        assert!(node_is_control_plane(&current));
+        assert!(node_is_control_plane(&legacy));
+        assert!(!node_is_control_plane(&row("worker", "node-c")));
     }
 }

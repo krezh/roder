@@ -95,6 +95,10 @@ pub(crate) struct ExecOpen(pub(crate) RwSignal<Option<ExecTarget>>);
 #[derive(Clone, Copy)]
 pub(crate) struct DebugImage(pub(crate) RwSignal<String>);
 
+/// Talos permissions returned by `/api/features` for the current user.
+#[derive(Clone, Copy)]
+pub(crate) struct TalosFeatures(pub(crate) RwSignal<roder_core::TalosCapabilities>);
+
 /// Which Kustomization/HelmRelease the resource-tree overlay is open for.
 #[derive(Clone, Copy)]
 pub(crate) struct TreeOpen(pub(crate) RwSignal<Option<DetailTarget>>);

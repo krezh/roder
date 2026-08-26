@@ -67,18 +67,14 @@
   align-items: center;
   gap: 0.4rem;
   padding: 0.25rem 0.6rem;
-  color: var(--muted);
+  color: var(--fg);
   cursor: pointer;
   white-space: nowrap;
   width: max-content;
-  transition: opacity 0.13s ease;
   &:hover,
   &:focus-visible {
     color: var(--accent);
   }
-}
-.dropdown-caret {
-  font-size: 0.65rem;
 }
 // The button face fades out (no movement — a translate here reads as the
 // label bobbing up and down when the menu closes) as the menu face takes over.
@@ -89,10 +85,6 @@
   top: 0;
   right: 0;
 }
-.dropdown-shell.closing .dropdown-face-btn {
-  transition-delay: 0.18s;
-}
-
 /* -- face 2: the open menu -- */
 .dropdown-face-menu {
   display: none;
@@ -117,6 +109,53 @@
   color: var(--accent);
 }
 
+.topbar-account .dropdown-head {
+  padding: 0 0.385rem 0.4rem 0.35rem;
+  font-weight: 400;
+  position: relative;
+}
+.topbar-account .dropdown-head::after {
+  content: "";
+  position: absolute;
+  left: 0.35rem;
+  bottom: -1px;
+  width: 1.4rem;
+  height: 1px;
+  background: var(--accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 65%, transparent);
+}
+.topbar-account .dropdown-shell::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: var(--accent);
+  scale: 1 0;
+  transform-origin: top;
+  transition: scale 0.24s var(--spring);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 55%, transparent);
+  pointer-events: none;
+}
+.topbar-account .dropdown-shell.open {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--accent) 7%, var(--panel)) 0,
+    var(--panel) 55%);
+}
+.topbar-account .dropdown-shell.open::before {
+  scale: 1;
+}
+.topbar-account .dropdown-item {
+  position: relative;
+  transition: color 0.12s ease, background-color 0.12s ease;
+}
+.topbar-account .dropdown-item:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
 .dropdown-item {
   background: none;
   border: none;
@@ -124,41 +163,13 @@
   text-align: left;
   text-decoration: none;
   padding: 0.4rem 0.6rem;
-  font-size: 0.85rem;
+  font-size: inherit;
   cursor: pointer;
   white-space: nowrap;
   display: block;
   &:hover {
     color: var(--accent);
   }
-}
-
-// Menu content cascades in behind the leading edge of the box morph: fade +
-// rise, staggered per row. Delays start ~20% into the size morph so the box
-// leads and the content follows.
-.dropdown-face-menu > * {
-  opacity: 0;
-  translate: 0 8px;
-  transition: opacity 0.24s ease, translate 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.dropdown-shell.open .dropdown-face-menu > * {
-  opacity: 1;
-  translate: 0 0;
-}
-.dropdown-shell.open .dropdown-face-menu > :nth-child(1) { transition-delay: 0.07s; }
-.dropdown-shell.open .dropdown-face-menu > :nth-child(2) { transition-delay: 0.12s; }
-.dropdown-shell.open .dropdown-face-menu > :nth-child(3) { transition-delay: 0.17s; }
-
-// Closing: content drops out fast and the box shrink is delayed so the
-// content leads on the way out too.
-.dropdown-shell.closing {
-  transition-delay: 0.06s;
-}
-.dropdown-shell.closing .dropdown-face-menu > * {
-  opacity: 0;
-  translate: 0 6px;
-  transition: opacity 0.12s ease, translate 0.12s ease;
-  transition-delay: 0s;
 }
 
 @media (prefers-reduced-motion: reduce) {

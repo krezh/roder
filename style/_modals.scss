@@ -264,6 +264,14 @@
 .alert-row {
   border-bottom: 1px solid var(--border);
   &:last-child { border-bottom: none; }
+
+  &:has(.dropdown-shell.open),
+  &:has(.dropdown-shell.closing) {
+    position: relative;
+    z-index: 1;
+
+    .alert-cwi { overflow: visible; }
+  }
 }
 
 .alert-cw {
@@ -320,6 +328,15 @@
   align-items: center;
   gap: 0.4rem;
   margin-top: 0.65rem;
+
+  .dropdown-spacer,
+  .dropdown-face-btn {
+    gap: 0.3rem;
+    padding-inline: 0.4rem;
+  }
+
+  .dropdown-face-menu { padding: 0; }
+  .dropdown-item { padding: 0.25rem 0.4rem; }
 
   .alert-duration-input,
   .alert-silence-submit {

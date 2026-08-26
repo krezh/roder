@@ -36,6 +36,7 @@ pub(crate) fn Dropdown(
         StoredValue::new(Box::new(label));
     let open = RwSignal::new(false);
     let closing = RwSignal::new(false);
+    let anchor_ref = NodeRef::<leptos::html::Div>::new();
     let shell_ref = NodeRef::<leptos::html::Div>::new();
     let btn_ref = NodeRef::<leptos::html::Button>::new();
 
@@ -80,6 +81,9 @@ pub(crate) fn Dropdown(
     };
 
     Effect::new(move |_| {
+        #[cfg(target_arch = "wasm32")]
+        reserve_width(anchor_ref, shell_ref);
+
         let handle = window_event_listener(leptos::ev::keydown, move |e| {
             if e.key() == "Escape" {
                 do_close();
@@ -89,16 +93,16 @@ pub(crate) fn Dropdown(
     });
 
     view! {
-        <div class="dropdown-anchor">
+        <div class="dropdown-anchor" node_ref=anchor_ref>
             // Reserves the closed button's footprint in normal flow so a
             // parent laid out in a row (e.g. the topbar) never reflows while
             // the shell (position: absolute) morphs on top of it.
             <span class="dropdown-spacer" aria-hidden="true">
-                <span>{move || label.with_value(|l| l())}</span><span class="dropdown-caret">"▾"</span>
+                <span>{move || label.with_value(|l| l())}</span>
             </span>
             <div class="dropdown-shell" node_ref=shell_ref>
                 <button class="dropdown-face-btn" node_ref=btn_ref on:click=toggle>
-                    <span>{move || label.with_value(|l| l())}</span><span class="dropdown-caret">"▾"</span>
+                    <span>{move || label.with_value(|l| l())}</span>
                 </button>
                 <div class="dropdown-face-menu">
                     {children()}
@@ -143,6 +147,18 @@ fn measure(shell: &web_sys::HtmlDivElement) -> (f64, f64) {
     }
     let _ = class_list.remove_1("measuring");
     size
+}
+
+#[cfg(target_arch = "wasm32")]
+fn reserve_width(anchor_ref: NodeRef<leptos::html::Div>, shell_ref: NodeRef<leptos::html::Div>) {
+    let (Some(anchor), Some(shell)) = (anchor_ref.get_untracked(), shell_ref.get_untracked())
+    else {
+        return;
+    };
+    let width = f64::from(shell.offset_width()).max(measure(&shell).0);
+    let width = format!("{width}px");
+    let _ = web_sys::HtmlElement::style(&anchor).set_property("width", &width);
+    let _ = web_sys::HtmlElement::style(&shell).set_property("min-width", &width);
 }
 
 /// FLIP the shell from its current (button) footprint to the menu's natural

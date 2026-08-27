@@ -25,6 +25,10 @@
 .palette-input-wrap {
   position: relative;
 }
+.palette-mobile-head,
+.palette-search-icon {
+  display: none;
+}
 .palette-input {
   background: transparent;
   border: none;
@@ -62,6 +66,12 @@
   .pi-kind {
     font-weight: 600;
   }
+  .pi-main {
+    display: flex;
+    min-width: 0;
+    align-items: baseline;
+    gap: 0.6rem;
+  }
   .pi-group {
     color: var(--muted);
     font-size: 0.8rem;
@@ -71,6 +81,21 @@
     color: var(--muted);
     font-size: 0.72rem;
   }
+}
+.palette-empty {
+  display: grid;
+  justify-items: center;
+  gap: 0.25rem;
+  padding: 2rem 1rem;
+  color: var(--muted);
+  text-align: center;
+
+  strong { color: var(--fg); }
+}
+.ns-active-check {
+  margin-left: auto;
+  color: var(--accent);
+  font-weight: 700;
 }
 .palette-hints {
   display: flex;

@@ -1,6 +1,6 @@
 //! Mobile's bottom action sheet: the touch equivalent of the desktop's
 //! cursor-anchored right-click context menu (`overlays/context_menu.rs`).
-//! Triggered by long-press on a `MobileRowCard` instead of `oncontextmenu`.
+//! Triggered by the overflow button on a `MobileRowCard`.
 
 use leptos::prelude::*;
 use roder_core::{ResourceKind, RowStatus};

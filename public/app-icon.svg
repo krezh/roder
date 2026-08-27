@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Roder">
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#15171c" />
+      <stop offset="1" stop-color="#08090b" />
+    </linearGradient>
+    <linearGradient id="mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8ab4ff" />
+      <stop offset="1" stop-color="#4c8bf5" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#background)" />
+  <path d="M158 132h105c72 0 116 36 116 96 0 42-24 73-64 87l73 77h-79l-63-68h-22v68h-66V132Zm66 58v77h37c33 0 51-14 51-39 0-26-18-38-51-38h-37Z" fill="url(#mark)" />
+</svg>

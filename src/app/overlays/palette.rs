@@ -3,6 +3,7 @@
 use leptos::prelude::*;
 use roder_core::ResourceKind;
 
+use crate::app::components::icons::TreeKindIcon;
 use crate::app::state::{Catalog, PaletteOpen};
 
 pub(crate) fn use_palette_scroll(cursor: RwSignal<usize>) -> NodeRef<leptos::html::Ul> {
@@ -190,10 +191,24 @@ pub(crate) fn CommandPalette() -> impl IntoView {
         <Show when=move || visible.get() fallback=|| ()>
             <div class="palette-scrim" class:closing=move || closing.get()
                 on:click=move |_| do_close()></div>
-            <div class="palette" class:closing=move || closing.get()>
+            <div class="palette palette-command" class:closing=move || closing.get()>
+                <div class="palette-mobile-head">
+                    <div class="palette-mobile-title">
+                        <span>"Explore"</span>
+                        <strong>"Resources"</strong>
+                    </div>
+                    {move || (!query.get().is_empty()).then(|| view! {
+                        <span class="palette-result-count">{matches.with(|items| items.len())}</span>
+                    })}
+                </div>
                 <div class="palette-input-wrap">
+                    <svg class="palette-search-icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <circle cx="11" cy="11" r="6.5" />
+                        <path d="m16 16 4 4" />
+                    </svg>
                     <input class="palette-input" node_ref=input_ref
-                        placeholder="Go to kind…"
+                        placeholder="Search resource kinds"
+                        aria-label="Search resource kinds"
                         prop:value=move || query.get()
                         on:input=move |e| query.set(event_target_value(&e))
                         on:keydown=handle_keydown />
@@ -203,24 +218,35 @@ pub(crate) fn CommandPalette() -> impl IntoView {
                         let is_active = move || cursor.get() == idx;
                         let group = if k.group.is_empty() { "core".to_string() } else { k.group.clone() };
                         let segs = highlight(&k.kind, &positions);
+                        let icon_category = k.category.clone();
+                        let icon_kind = k.kind.clone();
                         view! {
                             <li class="palette-item"
                                 class:palette-item-active=is_active
                                 on:click=move |_| navigate(k.clone())>
-                                <span class="pi-kind">
-                                    {segs.into_iter().map(|(s, matched)| {
-                                        if matched {
-                                            view! { <span class="highlight">{s}</span> }.into_any()
-                                        } else {
-                                            view! { <span>{s}</span> }.into_any()
-                                        }
-                                    }).collect_view()}
+                                <TreeKindIcon category=Some(icon_category) kind=icon_kind small=false />
+                                <span class="pi-main">
+                                    <span class="pi-kind">
+                                        {segs.into_iter().map(|(s, matched)| {
+                                            if matched {
+                                                view! { <span class="highlight">{s}</span> }.into_any()
+                                            } else {
+                                                view! { <span>{s}</span> }.into_any()
+                                            }
+                                        }).collect_view()}
+                                    </span>
+                                    <span class="pi-group">{group}</span>
                                 </span>
-                                <span class="pi-group">{group}</span>
                                 <span class="pi-cat">{k.category.label()}</span>
                             </li>
                         }
                     }).collect_view()}
+                    {move || matches.with(|items| items.is_empty()).then(|| view! {
+                        <li class="palette-empty">
+                            <strong>"No resources found"</strong>
+                            <span>"Try a kind, API group, or plural name."</span>
+                        </li>
+                    })}
                 </ul>
                 <div class="palette-hints">
                     <span class="hint"><kbd>"↑↓"</kbd>" navigate"</span>

@@ -1,7 +1,6 @@
 //! The mobile replacement for the desktop's dense grid row: one card per
 //! resource. Tap opens detail (or toggles selection in Select mode);
-//! long-press opens the action sheet, mobile's equivalent of the desktop
-//! context menu.
+//! hold enters multi-select, while the overflow button opens the action sheet.
 
 use std::time::Duration;
 
@@ -98,10 +97,11 @@ pub(crate) fn MobileRowCard(
     let uid_pd = uid.clone();
     let uid_chk = uid.clone();
     let t_click = target.clone();
-    let t_pd = target.clone();
+    let t_menu = target.clone();
+    let uid_menu = uid.clone();
 
     view! {
-        <div class="mobile-card"
+        <div class="mobile-card" role="button" tabindex="0"
             class:selected=move || selected.get().contains(&uid_chk)
             on:click=move |_| {
                 if press.fired.get_value() { press.fired.set_value(false); return; }
@@ -125,24 +125,12 @@ pub(crate) fn MobileRowCard(
                 press.xy.set_value((e.client_x(), e.client_y()));
                 let fired = press.fired;
                 let handle = press.handle;
-                let t = t_pd.clone();
                 let uid = uid_pd.clone();
                 let h = set_timeout_with_handle(move || {
                     fired.set_value(true);
                     handle.set_value(None);
-                    // A hold both opens the action sheet for this one item and
-                    // seeds select mode with it, so there's no separate mode
-                    // toggle: dismiss the sheet and you're already set up to
-                    // tap more cards into the selection.
                     select_mode.set(true);
                     selected.update(|s| { s.insert(uid.clone()); });
-                    ctx_menu.set(Some(CtxMenu {
-                        x: 0,
-                        y: 0,
-                        target: t.clone(),
-                        node: node_for_ctx(),
-                        uid: uid.clone(),
-                    }));
                 }, Duration::from_millis(450)).ok();
                 press.handle.set_value(h);
             }
@@ -157,15 +145,36 @@ pub(crate) fn MobileRowCard(
             on:pointerup=move |_| press.cancel.run(())
             on:pointercancel=move |_| press.cancel.run(())
             on:contextmenu=move |e: leptos::ev::MouseEvent| e.prevent_default()>
-            {move || fields.get().map(|f| view! {
+            {move || {
+                let menu_target = t_menu.clone();
+                let menu_uid = uid_menu.clone();
+                let check_uid = uid.clone();
+                fields.get().map(move |f| view! {
                 <div class="mc-head">
                     <span class=format!("dot dot-{}", dot_class(f.status))></span>
                     <span class="mc-name" style=name_color(f.status)>{f.name}</span>
                     {select_mode.get().then(|| {
-                        let uid_chk2 = uid.clone();
+                        let uid_chk2 = check_uid.clone();
                         view! {
                             <span class="mc-check" class:on=move || selected.get().contains(&uid_chk2)></span>
                         }
+                    })}
+                    {(!select_mode.get()).then(|| view! {
+                        <button class="mc-menu" aria-label="Resource actions"
+                            on:pointerdown=move |e| e.stop_propagation()
+                            on:click=move |e| {
+                                e.stop_propagation();
+                                press.cancel.run(());
+                                ctx_menu.set(Some(CtxMenu {
+                                    x: 0,
+                                    y: 0,
+                                    target: menu_target.clone(),
+                                    node: node_for_ctx(),
+                                    uid: menu_uid.clone(),
+                                }));
+                            }>
+                            <span aria-hidden="true">"•••"</span>
+                        </button>
                     })}
                 </div>
                 <div class="mc-meta">
@@ -184,12 +193,18 @@ pub(crate) fn MobileRowCard(
                         <div class="mc-extra">
                             {f.extra.into_iter().map(|(label, value, colored)| {
                                 let cls = if colored { format!("mc-ex mc-ex-{status_class}") } else { "mc-ex".to_string() };
-                                view! { <span class=cls>{label}": "{value}</span> }
+                                    view! {
+                                        <span class=cls>
+                                            <span class="mc-ex-label">{label}</span>
+                                            <span class="mc-ex-value">{value}</span>
+                                        </span>
+                                    }
                             }).collect_view()}
                         </div>
                     }
                 })}
-            })}
+                })
+            }}
         </div>
     }
 }

@@ -21,7 +21,10 @@ pub(crate) fn MobileLogsView() -> impl IntoView {
     view! {
         <div class="mobile-logs" class:open=move || !log_pods.get().is_empty()>
             <div class="mobile-logs-head">
-                <button class="mobile-logs-close-all" on:click=move |_| log_pods.set(Vec::new())>"‹ Close all"</button>
+                <button class="mobile-logs-close-all" on:click=move |_| log_pods.set(Vec::new())>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
+                    <span>"Close logs"</span>
+                </button>
             </div>
             {move || {
                 let pods = log_pods.get();

@@ -35,6 +35,14 @@ pub(crate) fn NsPalette() -> impl IntoView {
                 list.push(Some(ns));
             }
         }
+        if q.is_empty() {
+            if let Some(current) = selected_ns.get() {
+                if let Some(index) = list.iter().position(|ns| ns.as_ref() == Some(&current)) {
+                    let active = list.remove(index);
+                    list.insert(1, active);
+                }
+            }
+        }
         let mut scored: Vec<(Option<String>, String, Vec<usize>, i32)> = list
             .into_iter()
             .filter_map(|ns| {
@@ -101,10 +109,25 @@ pub(crate) fn NsPalette() -> impl IntoView {
         <Show when=move || visible.get() fallback=|| ()>
             <div class="palette-scrim" class:closing=move || closing.get()
                 on:click=move |_| do_close()></div>
-            <div class="palette" class:closing=move || closing.get()>
+            <div class="palette palette-namespace" class:closing=move || closing.get()>
+                <div class="palette-mobile-head">
+                    <div class="palette-mobile-title">
+                        <span>"Scope"</span>
+                        <strong>"Namespaces"</strong>
+                    </div>
+                    <span class="palette-result-count">{move || {
+                        let count = matches.with(|items| items.len());
+                        if query.get().is_empty() { count.saturating_sub(1) } else { count }
+                    }}</span>
+                </div>
                 <div class="palette-input-wrap">
+                    <svg class="palette-search-icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <circle cx="11" cy="11" r="6.5" />
+                        <path d="m16 16 4 4" />
+                    </svg>
                     <input class="palette-input" node_ref=input_ref
-                        placeholder="Switch namespace…"
+                        placeholder="Search namespaces"
+                        aria-label="Search namespaces"
                         prop:value=move || query.get()
                         on:input=move |e| query.set(event_target_value(&e))
                         on:keydown=handle_keydown />
@@ -119,20 +142,31 @@ pub(crate) fn NsPalette() -> impl IntoView {
                         view! {
                             <li class="palette-item"
                                 class:palette-item-active=is_active
+                                class:palette-item-selected=is_selected
                                 on:click=move |_| select(ns_click.clone())>
-                                <span class="pi-kind">
-                                    {segs.into_iter().map(|(s, matched)| {
-                                        if matched {
-                                            view! { <span class="highlight">{s}</span> }.into_any()
-                                        } else {
-                                            view! { <span>{s}</span> }.into_any()
-                                        }
-                                    }).collect_view()}
+                                <span class="ns-scope-icon" aria-hidden="true"></span>
+                                <span class="pi-main">
+                                    <span class="pi-kind">
+                                        {segs.into_iter().map(|(s, matched)| {
+                                            if matched {
+                                                view! { <span class="highlight">{s}</span> }.into_any()
+                                            } else {
+                                                view! { <span>{s}</span> }.into_any()
+                                            }
+                                        }).collect_view()}
+                                    </span>
+                                    <span class="pi-group">{if ns.is_none() { "Cluster-wide scope" } else { "Namespace" }}</span>
                                 </span>
-                                {is_selected.then(|| view! { <span class="pi-cat">"✓ active"</span> })}
+                                {is_selected.then(|| view! { <span class="ns-active-check" aria-label="Active">"✓"</span> })}
                             </li>
                         }
                     }).collect_view()}
+                    {move || matches.with(|items| items.is_empty()).then(|| view! {
+                        <li class="palette-empty">
+                            <strong>"No namespaces found"</strong>
+                            <span>"Check the spelling and try again."</span>
+                        </li>
+                    })}
                 </ul>
                 <div class="palette-hints">
                     <span class="hint"><kbd>"↑↓"</kbd>" navigate"</span>

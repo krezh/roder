@@ -6,6 +6,7 @@
 //! as-is from the desktop tree (progressively replaced phase by phase).
 
 mod action_sheet;
+mod bottom_nav;
 mod bulk_bar;
 mod detail_view;
 mod disclosure;
@@ -35,6 +36,7 @@ use crate::app::overlays::AlertsPanel;
 use crate::app::state::NavOpen;
 
 use action_sheet::MobileActionSheet;
+use bottom_nav::MobileBottomNav;
 use detail_view::MobileDetailView;
 use header::MobileHeader;
 use logs_view::MobileLogsView;
@@ -45,13 +47,54 @@ use workspace_view::MobileWorkspaceView;
 #[component]
 pub(crate) fn MobileShell() -> impl IntoView {
     let nav_open = expect_context::<NavOpen>().0;
+    let selected_kind = expect_context::<RwSignal<Option<roder_core::ResourceKind>>>();
+    let nav_filter = RwSignal::new(String::new());
+    Effect::new(move |_| {
+        if !nav_open.get() {
+            nav_filter.set(String::new());
+        }
+    });
 
     view! {
         <div class="mobile-shell" class:nav-open=move || nav_open.get()>
             <MobileHeader />
             <div class="mobile-sidebar-scrim" class:open=move || nav_open.get()
                 on:click=move |_| nav_open.set(false)></div>
-            <Sidebar />
+            <div class="mobile-nav-panel">
+                <div class="mobile-nav-head">
+                    <div>
+                        <span class="mobile-nav-eyebrow">"Roder"</span>
+                        <strong>"Resources"</strong>
+                    </div>
+                    <button class="mobile-round-btn" aria-label="Close navigation"
+                        on:click=move |_| nav_open.set(false)>
+                        <span aria-hidden="true">"×"</span>
+                    </button>
+                </div>
+                <label class="mobile-nav-search">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <circle cx="11" cy="11" r="6.5" />
+                        <path d="m16 16 4 4" />
+                    </svg>
+                    <input type="search" placeholder="Find a resource"
+                        aria-label="Find a resource"
+                        prop:value=move || nav_filter.get()
+                        on:input=move |event| nav_filter.set(event_target_value(&event)) />
+                    {move || (!nav_filter.get().is_empty()).then(|| view! {
+                        <button type="button" aria-label="Clear resource search"
+                            on:click=move |_| nav_filter.set(String::new())>"×"</button>
+                    })}
+                </label>
+                <button class="mobile-home-link" class:active=move || selected_kind.get().is_none()
+                    on:click=move |_| {
+                        selected_kind.set(None);
+                        nav_open.set(false);
+                    }>
+                    <span class="mobile-home-icon" aria-hidden="true"></span>
+                    <span>"Cluster overview"</span>
+                </button>
+                <Sidebar filter=Signal::derive(move || nav_filter.get()) />
+            </div>
             <main class="mobile-main">
                 <Routes fallback=|| view! { <p class="empty">"Not found."</p> }>
                     <Route path=StaticSegment("") view=MobileResourceView />
@@ -59,6 +102,7 @@ pub(crate) fn MobileShell() -> impl IntoView {
                     <Route path=StaticSegment("workspace") view=MobileWorkspaceView />
                 </Routes>
             </main>
+            <MobileBottomNav />
             <MobileDetailView />
             <MobileLogsView />
             <CommandPalette />

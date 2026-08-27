@@ -11,6 +11,7 @@ use roder_core::{ResourceKind, RowStatus, WatchEvent};
 use crate::app::events::{make_bulk_open_logs, make_do_bulk, make_do_delete, RowMap};
 use crate::app::hooks::{use_table_state, Coalescer};
 use crate::app::mobile::bulk_bar::MobileBulkBar;
+use crate::app::mobile::resource_list::MobileListActions;
 use crate::app::mobile::row_card::{use_select_mode, CardFields, MobileRowCard};
 use crate::app::overlays::toast::{show_toast_detail, Toast, ToastKind};
 use crate::app::state::{
@@ -263,6 +264,7 @@ fn MobilePane(kind: ResourceKind, rows: RowMap, columns: RwSignal<Vec<String>>) 
             <input class="mobile-filter" placeholder="Filter…"
                 prop:value=move || text_filter.get()
                 on:input=move |e| text_filter.set(event_target_value(&e)) />
+            <MobileListActions />
         </div>
         <div class="mobile-cards">
             <For each=move || shown_uids.get() key=|uid| uid.clone() let:uid>

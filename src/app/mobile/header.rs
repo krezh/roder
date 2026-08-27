@@ -3,35 +3,35 @@
 //! of the desktop's dense row of hover-driven controls.
 
 use leptos::prelude::*;
+use leptos_router::hooks::use_location;
 use roder_core::ResourceKind;
 
-use crate::app::mobile::status::MobileStatusRow;
-use crate::app::state::{ConnectionState, Connectivity, NavOpen, NsPaletteOpen, PaletteOpen};
+use crate::app::mobile::status::{MobileAlertActions, MobileStatusRow};
+use crate::app::state::{ConnectionState, Connectivity};
 
 #[component]
 pub(crate) fn MobileHeader() -> impl IntoView {
     let selected_kind = expect_context::<RwSignal<Option<ResourceKind>>>();
-    let selected_ns = expect_context::<RwSignal<Option<String>>>();
-    let nav_open = expect_context::<NavOpen>().0;
-    let palette_open = expect_context::<PaletteOpen>().0;
-    let ns_palette_open = expect_context::<NsPaletteOpen>().0;
     let connection = expect_context::<ConnectionState>().0;
+    let pathname = use_location().pathname;
 
     view! {
         <header class="mobile-topbar">
-            <button class="mobile-hamburger" on:click=move |_| nav_open.update(|o| *o = !*o)>"☰"</button>
-            <span class="mobile-brand"
-                class:mobile-brand-connected=move || matches!(connection.get(), Connectivity::Connected)
-                class:mobile-brand-checking=move || matches!(connection.get(), Connectivity::Checking)
-                class:mobile-brand-disconnected=move || matches!(connection.get(), Connectivity::Offline | Connectivity::Error(_))
-                aria-label=move || connection.get().message().to_string()
-                on:click=move |_| selected_kind.set(None)>
-                "Roder"
-            </span>
-            <button class="mobile-icon-btn" aria-label="Search" on:click=move |_| palette_open.set(true)>"🔍"</button>
-            <button class="mobile-ns-chip" on:click=move |_| ns_palette_open.set(true)>
-                {move || selected_ns.get().unwrap_or_else(|| "All namespaces".to_string())}
-            </button>
+            <div class="mobile-title">
+                <span class="mobile-brand"
+                    class:mobile-brand-connected=move || matches!(connection.get(), Connectivity::Connected)
+                    class:mobile-brand-checking=move || matches!(connection.get(), Connectivity::Checking)
+                    class:mobile-brand-disconnected=move || matches!(connection.get(), Connectivity::Offline | Connectivity::Error(_))
+                    aria-label=move || connection.get().message().to_string()>
+                    "Roder"
+                </span>
+                <strong>{move || match pathname.get().as_str() {
+                    "/workspace" => "Workspace".to_string(),
+                    "/search" => "Search results".to_string(),
+                    _ => selected_kind.get().map(|kind| kind.kind).unwrap_or_else(|| "Overview".to_string()),
+                }}</strong>
+            </div>
+            <MobileAlertActions />
         </header>
         <MobileStatusRow />
     }

@@ -18,13 +18,12 @@ pub(crate) use alerts_button::AlertsButton;
 pub(crate) use failing_badge::FailingBadge;
 pub(crate) use failure_watch::use_failure_watch;
 pub(crate) use flux_failing_badge::FluxFailingBadge;
+pub(crate) use sanitize_button::SanitizeButton;
+pub(crate) use sync_button::SyncButton;
 pub(crate) use top_usage::TopUsage;
 
 use brand::Brand;
 use identity::Identity;
-use sanitize_button::SanitizeButton;
-use sync_button::SyncButton;
-
 use leptos::prelude::*;
 
 use crate::app::components::icons::ShiftIcon;

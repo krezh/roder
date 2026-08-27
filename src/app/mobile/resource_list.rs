@@ -1,10 +1,10 @@
 //! Mobile replacement for `KindTable`: a card list instead of a dense grid,
-//! with an explicit "Select" mode for multi-select (long-press instead opens
-//! the action sheet — see `row_card.rs`).
+//! with hold-to-select multi-select and an explicit per-row action button.
 
 use leptos::prelude::*;
 use roder_core::{ResourceKind, RowStatus};
 
+use crate::app::components::topbar::{SanitizeButton, SyncButton};
 use crate::app::events::{make_bulk_open_logs, make_do_bulk, make_do_delete};
 use crate::app::hooks::{use_sse_subscription, use_table_state};
 use crate::app::mobile::bulk_bar::MobileBulkBar;
@@ -18,6 +18,24 @@ use crate::app::table_logic;
 use crate::app::util::predicate::KindKind;
 use crate::app::views::dashboard::Dashboard;
 use crate::data;
+
+#[component]
+pub(crate) fn MobileListActions() -> impl IntoView {
+    let only_problems = expect_context::<OnlyProblems>().0;
+
+    view! {
+        <div class="mobile-list-actions" aria-label="Resource actions">
+            <button type="button" class="mobile-problems-toggle"
+                class:active=move || only_problems.get()
+                aria-pressed=move || only_problems.get().to_string()
+                on:click=move |_| only_problems.update(|active| *active = !*active)>
+                "Problems"
+            </button>
+            <SanitizeButton />
+            <SyncButton />
+        </div>
+    }
+}
 
 #[component]
 pub(crate) fn MobileResourceView() -> impl IntoView {
@@ -152,9 +170,21 @@ fn MobileKindList(
     view! {
         <div class="mobile-list">
             <div class="mobile-list-head">
-                <input class="mobile-filter" placeholder="Filter…"
-                    prop:value=move || text_filter.get()
-                    on:input=move |e| text_filter.set(event_target_value(&e)) />
+                <label class="mobile-filter-wrap">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <circle cx="11" cy="11" r="6.5" />
+                        <path d="m16 16 4 4" />
+                    </svg>
+                    <input class="mobile-filter" placeholder="Filter resources"
+                        aria-label="Filter resources"
+                        prop:value=move || text_filter.get()
+                        on:input=move |e| text_filter.set(event_target_value(&e)) />
+                    {move || (!text_filter.get().is_empty()).then(|| view! {
+                        <button type="button" aria-label="Clear filter"
+                            on:click=move |_| text_filter.set(String::new())>"×"</button>
+                    })}
+                </label>
+                <MobileListActions />
             </div>
             <div class="mobile-cards">
                 <For each=move || shown_uids.get() key=|uid| uid.clone() let:uid>

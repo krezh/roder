@@ -117,8 +117,14 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                 <meta charset="utf-8" />
                 <meta name="viewport" content="width=device-width, initial-scale=1" />
                 <meta name="color-scheme" content="dark light" />
+                <meta name="theme-color" content="#0c0c0d" />
+                <meta name="application-name" content="Roder" />
+                <meta name="apple-mobile-web-app-capable" content="yes" />
+                <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
                 <meta name="roder-asset-version" content=asset_version />
                 <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+                <link rel="apple-touch-icon" href="/icons/roder-180.png" />
+                <link rel="manifest" href="/manifest.webmanifest" />
                 <AutoReload options=options.clone() />
                 <HydrationScripts options=options.clone() />
                 <leptos_meta::HashedStylesheet options id="leptos" />

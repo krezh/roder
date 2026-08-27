@@ -35,7 +35,11 @@ pub async fn security_headers(State(state): State<AppState>, req: Request, next:
         Some("no-cache")
     } else if path.ends_with(".css") {
         Some("public, max-age=31536000, immutable")
-    } else if path.starts_with("/fonts/") || path.ends_with(".svg") || path.ends_with(".ico") {
+    } else if path.starts_with("/fonts/")
+        || path.starts_with("/icons/")
+        || path.ends_with(".svg")
+        || path.ends_with(".ico")
+    {
         Some("public, max-age=604800")
     } else {
         None

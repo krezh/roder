@@ -10,6 +10,7 @@ use roder_core::{ResourceKind, WatchEvent};
 use crate::app::events::make_do_delete_multi;
 use crate::app::hooks::{use_table_state, Coalescer};
 use crate::app::mobile::bulk_bar::MobileBulkBar;
+use crate::app::mobile::resource_list::MobileListActions;
 use crate::app::mobile::row_card::{use_select_mode, CardFields, MobileRowCard};
 use crate::app::overlays::toast::Toast;
 use crate::app::search_state::{self, MergedRow};
@@ -221,8 +222,11 @@ pub(crate) fn MobileSearchList() -> impl IntoView {
     view! {
         <div class="mobile-list">
             <div class="mobile-list-head">
-                <span class="view-title">"Search"</span>
-                <button class="act" on:click=clear_search>"Clear"</button>
+                <div class="mobile-search-title-row">
+                    <span class="view-title">"Search"</span>
+                    <button class="act" on:click=clear_search>"Clear"</button>
+                </div>
+                <MobileListActions />
             </div>
             <div class="mobile-cards">
                 <For each=move || shown_uids.get() key=|uid| uid.clone() let:uid>

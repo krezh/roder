@@ -47,6 +47,7 @@ pub(crate) fn AlertsButton() -> impl IntoView {
                         class="alerts-btn tip-anchor-end"
                         class:alerts-firing={move || total > 0}
                         class:bouncing=move || bouncing.get()
+                        aria-label=format!("{total} active alerts")
                         on:click=move |_| open.set(true)
                     >
                         <span class="alerts-count">{total}</span>

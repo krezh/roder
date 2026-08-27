@@ -66,7 +66,7 @@ fn kind_li(
 }
 
 #[component]
-pub(crate) fn Sidebar() -> impl IntoView {
+pub(crate) fn Sidebar(#[prop(optional)] filter: Option<Signal<String>>) -> impl IntoView {
     let selected_kind = expect_context::<RwSignal<Option<ResourceKind>>>();
     let nav_open = expect_context::<NavOpen>().0;
     let catalog = expect_context::<Catalog>().0;
@@ -109,8 +109,17 @@ pub(crate) fn Sidebar() -> impl IntoView {
     });
 
     let groups = Memo::new(move |_| {
+        let query = filter
+            .map(|filter| filter.get().trim().to_lowercase())
+            .unwrap_or_default();
         let mut groups: Vec<(Category, Vec<ResourceKind>)> = Vec::new();
-        for k in catalog.get() {
+        for k in catalog.get().into_iter().filter(|kind| {
+            query.is_empty()
+                || kind.kind.to_lowercase().contains(&query)
+                || kind.plural.to_lowercase().contains(&query)
+                || kind.group.to_lowercase().contains(&query)
+                || kind.category.label().to_lowercase().contains(&query)
+        }) {
             match groups.last_mut() {
                 Some((c, v)) if *c == k.category => v.push(k),
                 _ => groups.push((k.category.clone(), vec![k])),
@@ -118,6 +127,8 @@ pub(crate) fn Sidebar() -> impl IntoView {
         }
         groups
     });
+    let searching =
+        Signal::derive(move || filter.is_some_and(|filter| !filter.get().trim().is_empty()));
 
     view! {
         <nav class="sidebar">
@@ -136,8 +147,16 @@ pub(crate) fn Sidebar() -> impl IntoView {
                 let cat = catalog.get();
                 let pins: Vec<ResourceKind> = {
                     let p = pinned.get();
+                    let query = filter
+                        .map(|filter| filter.get().trim().to_lowercase())
+                        .unwrap_or_default();
                     cat.iter()
-                        .filter(|k| p.contains(&k.key))
+                        .filter(|k| {
+                            p.contains(&k.key)
+                                && (query.is_empty()
+                                    || k.kind.to_lowercase().contains(&query)
+                                    || k.plural.to_lowercase().contains(&query))
+                        })
                         .cloned()
                         .collect()
                 };
@@ -164,7 +183,12 @@ pub(crate) fn Sidebar() -> impl IntoView {
             {move || {
                 let gs = groups.get();
                 if gs.is_empty() {
-                    return view! { <div class="muted pad">"Loading…"</div> }.into_any();
+                    let message = if searching.get() {
+                        "No matching resources"
+                    } else {
+                        "Loading…"
+                    };
+                    return view! { <div class="sidebar-empty">{message}</div> }.into_any();
                 }
                 let mut out: Vec<AnyView> = Vec::with_capacity(gs.len() + 2);
                 let mut core_done = false;
@@ -189,11 +213,11 @@ pub(crate) fn Sidebar() -> impl IntoView {
                         .collect_view();
                     out.push(view! {
                         <div class="cat"
-                            class:open=move || open_cats.get().contains(&cat_open)
+                            class:open=move || searching.get() || open_cats.get().contains(&cat_open)
                             class:active-category=move || selected_kind.get()
                                 .is_some_and(|k| k.category == cat_active)>
                             <button type="button" class="cat-label"
-                                aria-expanded=move || open_cats.get().contains(&cat_expanded)
+                                aria-expanded=move || searching.get() || open_cats.get().contains(&cat_expanded)
                                 on:click=move |_| open_cats.update(|s| {
                                 if !s.remove(&cat_click) { s.insert(cat_click.clone()); }
                             })>

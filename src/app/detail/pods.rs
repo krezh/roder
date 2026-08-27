@@ -107,6 +107,10 @@ pub(crate) fn PodsTab(namespace: String, selector: String) -> impl IntoView {
                                 <span class="pm-num">{move || row.get().and_then(|r| r.cells.first().cloned()).unwrap_or_default()}</span>
                                 <span class="pm-num">{move || {
                                     let v = row.get().and_then(|r| r.cells.get(2).cloned()).unwrap_or_default();
+                                    if data::cell_needs_tick(&v) {
+                                        tick.get();
+                                    }
+                                    let v = data::humanize_cell(&v);
                                     if let Some((main, hint)) = v.split_once('\x1f') {
                                         format!("⟳ {main} ({hint})")
                                     } else {

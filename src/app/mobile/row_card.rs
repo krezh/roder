@@ -40,7 +40,7 @@ impl CardFields {
             .map(|(label, value, colored)| {
                 // Collapse multi-value Table cells to the desktop's compact form.
                 let value = value.replace('\n', ", ");
-                let value = if crate::data::looks_like_rfc3339(&value) {
+                let value = if crate::data::cell_needs_tick(&value) {
                     crate::data::humanize_cell(&value)
                 } else {
                     value

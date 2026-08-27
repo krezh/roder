@@ -4,16 +4,25 @@
 use leptos::prelude::*;
 use roder_core::{RowStatus, Trend};
 
-use crate::app::state::SortKey;
+use crate::app::state::{SortKey, Tick};
 use crate::app::util::color::dot_class;
+use crate::data;
+
+fn primary_value(value: &str) -> &str {
+    value.split_once('\x1f').map_or(value, |parts| parts.0)
+}
 
 pub(crate) fn cmp_str(a: &str, b: &str) -> std::cmp::Ordering {
-    let a_val = a.split_once('\x1f').map(|x| x.0).unwrap_or(a);
-    let b_val = b.split_once('\x1f').map(|x| x.0).unwrap_or(b);
+    let a_val = primary_value(a);
+    let b_val = primary_value(b);
     match (a_val.parse::<f64>(), b_val.parse::<f64>()) {
         (Ok(x), Ok(y)) => x.partial_cmp(&y).unwrap_or(std::cmp::Ordering::Equal),
         _ => a_val.cmp(b_val),
     }
+}
+
+pub(crate) fn cell_value_changed(current: &str, previous: &str) -> bool {
+    primary_value(current) != primary_value(previous)
 }
 
 /// Compare two optional cell values, numerically when both parse as numbers.
@@ -84,6 +93,7 @@ pub(crate) fn FlashTd<F>(
 where
     F: Fn() -> String + Copy + Send + Sync + 'static,
 {
+    let tick = expect_context::<Tick>().0;
     let value_changed = RwSignal::new(false);
     Effect::new(move |prev: Option<String>| {
         let v = value();
@@ -123,9 +133,16 @@ where
             })
             .unwrap_or("trend-arrow")
     };
+    let display_value = move || {
+        let value = value();
+        if data::cell_needs_tick(&value) {
+            tick.get();
+        }
+        data::humanize_cell(&value)
+    };
     view! {
         <div class=format!("cell {class}") class:flash=move || flash_state.get()
-            data-tip=move || value().replace('\x1f', " ")
+            data-tip=move || display_value().replace('\x1f', " ")
             style=move || color.map(|c| {
                 let v = c.get();
                 if v.is_empty() { return String::new(); }
@@ -140,7 +157,7 @@ where
             // cell (the tooltip renders the real list from data-tip).
             <div class="cw"><div class="cwi">
                 {move || {
-                    let v = value().replace('\n', ", ");
+                    let v = display_value().replace('\n', ", ");
                     if pill {
                         let style = color.map(|c| c.get()).filter(|s| !s.is_empty())
                             .map(|s| format!("background:var(--{s});color:var(--pill-fg)"))
@@ -197,5 +214,16 @@ where
                     }
                 }>"Scale"</button>
         </span>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cell_value_changed;
+
+    #[test]
+    fn hint_changes_do_not_count_as_cell_value_changes() {
+        assert!(!cell_value_changed("2\x1f5m ago", "2\x1f4m ago"));
+        assert!(cell_value_changed("3\x1f1s ago", "2\x1f5m ago"));
     }
 }

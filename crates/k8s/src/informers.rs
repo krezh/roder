@@ -1264,7 +1264,11 @@ mod tests {
 
     /// Build a minimal cached pod `DynamicObject` + its initial (usage-less)
     /// projected row, keyed by `uid`.
-    fn test_pod_object(uid: &str, name: &str, namespace: &str) -> (DynamicObject, ResourceRow) {
+    fn test_pod_object(
+        uid: &str,
+        name: &str,
+        namespace: &str,
+    ) -> (DynamicObject, ResourceRow, usize) {
         let pod: DynamicObject = serde_json::from_value(serde_json::json!({
             "apiVersion": "v1",
             "kind": "Pod",
@@ -1278,6 +1282,11 @@ mod tests {
         }))
         .expect("valid pod manifest");
         let layout = table_layout("", "Pod", false, &[]);
+        let cpu_index = layout
+            .columns
+            .iter()
+            .position(|column| column == "CPU")
+            .expect("pod layout has a CPU column");
         let table_row = crate::table::TableRow {
             object: Some(pod.clone()),
             ..Default::default()
@@ -1285,7 +1294,7 @@ mod tests {
         let row = project_table_row("", "Pod", &layout, &table_row, None, None)
             .expect("visible pod")
             .0;
-        (pod, row)
+        (pod, row, cpu_index)
     }
 
     #[tokio::test]
@@ -1295,7 +1304,7 @@ mod tests {
         let (_schema_tx, schema_rx) = broadcast::channel::<()>(4);
         let registry = InformerRegistry::new(cluster, enrich.clone(), schema_rx);
 
-        let (pod, row) = test_pod_object("uid-1", "pod1", "ns");
+        let (pod, row, cpu_index) = test_pod_object("uid-1", "pod1", "ns");
         let uid = row.uid.clone();
 
         let (tx, mut rx) = broadcast::channel(16);
@@ -1333,7 +1342,10 @@ mod tests {
         match event {
             WatchEvent::Applied { row } => {
                 assert_eq!(row.uid, uid);
-                assert_eq!(row.cells[0], "500", "CPU cell should reflect seeded usage");
+                assert_eq!(
+                    row.cells[cpu_index], "500",
+                    "CPU cell should reflect seeded usage"
+                );
             }
             other => panic!("expected Applied, got {other:?}"),
         }

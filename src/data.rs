@@ -475,11 +475,21 @@ pub fn looks_like_rfc3339(s: &str) -> bool {
         && b[0..4].iter().all(|c| c.is_ascii_digit())
 }
 
-/// If `s` is an RFC3339 timestamp, return its live humanized age; otherwise
-/// return `s` unchanged. The caller must read the global `Tick` so the
-/// returned value re-renders each second.
+pub fn cell_needs_tick(s: &str) -> bool {
+    looks_like_rfc3339(s)
+        || s.split_once('\x1f')
+            .is_some_and(|(_, hint)| looks_like_rfc3339(hint))
+}
+
+/// Humanize an RFC3339 cell or timestamp hint. The caller must read the global
+/// `Tick` so the returned value re-renders each second.
 #[cfg(target_arch = "wasm32")]
 pub fn humanize_cell(s: &str) -> String {
+    if let Some((value, hint)) = s.split_once('\x1f') {
+        if looks_like_rfc3339(hint) {
+            return format!("{value}\x1f{} ago", humanize_age(&Some(hint.to_string())));
+        }
+    }
     if looks_like_rfc3339(s) {
         humanize_age(&Some(s.to_string()))
     } else {
@@ -510,6 +520,13 @@ mod tests {
         );
         assert_eq!(percent_encode("ns/name"), "ns%2Fname");
         assert_eq!(percent_encode("hello world"), "hello%20world");
+    }
+
+    #[test]
+    fn timestamp_hints_require_the_live_ui_tick() {
+        assert!(cell_needs_tick("2\x1f2026-08-27T12:00:00Z"));
+        assert!(cell_needs_tick("2026-08-27T12:00:00Z"));
+        assert!(!cell_needs_tick("2\x1f5m ago"));
     }
 
     #[test]

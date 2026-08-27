@@ -275,7 +275,11 @@ pub(crate) fn table_layout(
 
         let headers = enhancement_headers(group, kind);
         for (index, header) in headers.iter().enumerate() {
-            if columns.iter().any(|column| same_column(column, header)) {
+            if let Some(position) = columns
+                .iter()
+                .position(|column| same_column(column, header))
+            {
+                sources[position] = TableCellSource::Enhancement(index);
                 continue;
             }
             let insert_at = headers[index + 1..]
@@ -435,7 +439,7 @@ fn flux_suspended(group: &str, data: &Value) -> bool {
 fn enhancement_headers(group: &str, kind: &str) -> &'static [&'static str] {
     match (group, kind) {
         ("", "Pod") => &[
-            "CPU", "%CPU/R", "%CPU/L", "MEM", "%MEM/R", "%MEM/L", "IP", "Node",
+            "Restarts", "CPU", "%CPU/R", "%CPU/L", "MEM", "%MEM/R", "%MEM/L", "IP", "Node",
         ],
         ("", "PersistentVolumeClaim") => &["Usage", "Mount"],
         _ if is_augmented_crd(group) => explicit_view(group, kind)
@@ -456,7 +460,7 @@ fn enhancement_values(
     match (group, kind) {
         ("", "Pod") => {
             let (cells, trends, status) = pod_cells(data, deleting, usage);
-            (cells[3..].to_vec(), trends[3..].to_vec(), status)
+            (cells[2..].to_vec(), trends[2..].to_vec(), status)
         }
         ("", "PersistentVolumeClaim") => {
             let (cells, status) = pvc_cells(data, pvc_usage);
@@ -624,6 +628,58 @@ mod tests {
                 "%MEM/L", "IP", "Node", "Age",
             ]
         );
+    }
+
+    #[test]
+    fn pod_restart_enhancement_replaces_server_snapshot() {
+        let definitions = [
+            column("Name", 0),
+            column("Ready", 0),
+            column("Status", 0),
+            column("Restarts", 0),
+            column("Age", 0),
+        ];
+        let layout = table_layout("", "Pod", false, &definitions);
+        let table_row = TableRow {
+            cells: vec![
+                json!("api"),
+                json!("1/1"),
+                json!("Running"),
+                json!("99 (1h ago)"),
+                json!("1h"),
+            ],
+            object: Some(
+                serde_json::from_value(json!({
+                    "apiVersion": "v1",
+                    "kind": "Pod",
+                    "metadata": {
+                        "name": "api",
+                        "namespace": "default",
+                        "uid": "uid-pod"
+                    },
+                    "spec": {"containers": [{"name": "api"}]},
+                    "status": {
+                        "phase": "Running",
+                        "containerStatuses": [{
+                            "name": "api",
+                            "ready": true,
+                            "restartCount": 2,
+                            "state": {"running": {}},
+                            "lastState": {"terminated": {
+                                "finishedAt": "2026-08-27T00:00:00Z"
+                            }}
+                        }]
+                    }
+                }))
+                .unwrap(),
+            ),
+            ..Default::default()
+        };
+
+        let row = project_table_row("", "Pod", &layout, &table_row, None, None)
+            .unwrap()
+            .0;
+        assert!(row.cells[3].starts_with("2\x1f"), "{:?}", row.cells[3]);
     }
 
     #[test]

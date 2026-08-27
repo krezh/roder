@@ -74,7 +74,8 @@ fn init_status(data: &Value) -> Option<String> {
         // Sidecar init containers (restartPolicy: Always, KEP-753) stay running
         // after their init phase completes. The API sets started=true once
         // initialization is done — treat them as "completed" like kubectl does.
-        if c.get("started").and_then(|s| s.as_bool()) == Some(true) {
+        if is_restartable_init(data, c) && c.get("started").and_then(|s| s.as_bool()) == Some(true)
+        {
             continue;
         }
         return Some(format!("Init:{i}/{total}"));
@@ -82,77 +83,102 @@ fn init_status(data: &Value) -> Option<String> {
     None
 }
 
-fn get_last_restart_time(data: &Value) -> Option<time::OffsetDateTime> {
-    let mut restart_time = None;
-
-    let check_state = |state: Option<&Value>, restart_time: &mut Option<time::OffsetDateTime>| {
-        if let Some(state) = state {
-            if let Some(running) = state.get("running") {
-                if let Some(started_at) = running.get("startedAt").and_then(|s| s.as_str()) {
-                    if let Ok(t) = time::OffsetDateTime::parse(
-                        started_at,
-                        &time::format_description::well_known::Rfc3339,
-                    ) {
-                        if restart_time.is_none() || Some(t) > *restart_time {
-                            *restart_time = Some(t);
-                        }
-                    }
-                }
-            }
-            if let Some(terminated) = state.get("terminated") {
-                if let Some(started_at) = terminated.get("startedAt").and_then(|s| s.as_str()) {
-                    if let Ok(t) = time::OffsetDateTime::parse(
-                        started_at,
-                        &time::format_description::well_known::Rfc3339,
-                    ) {
-                        if restart_time.is_none() || Some(t) > *restart_time {
-                            *restart_time = Some(t);
-                        }
-                    }
-                }
-            }
-        }
+fn is_restartable_init(data: &Value, status: &Value) -> bool {
+    let Some(name) = status.get("name").and_then(Value::as_str) else {
+        return false;
     };
+    data.get("spec")
+        .and_then(|spec| spec.get("initContainers"))
+        .and_then(Value::as_array)
+        .is_some_and(|containers| {
+            containers.iter().any(|container| {
+                container.get("name").and_then(Value::as_str) == Some(name)
+                    && container.get("restartPolicy").and_then(Value::as_str) == Some("Always")
+            })
+        })
+}
 
-    let check_last_state =
-        |state: Option<&Value>, restart_time: &mut Option<time::OffsetDateTime>| {
-            if let Some(state) = state {
-                if let Some(terminated) = state.get("terminated") {
-                    if let Some(finished_at) = terminated.get("finishedAt").and_then(|s| s.as_str())
-                    {
-                        if let Ok(t) = time::OffsetDateTime::parse(
-                            finished_at,
-                            &time::format_description::well_known::Rfc3339,
-                        ) {
-                            if restart_time.is_none() || Some(t) > *restart_time {
-                                *restart_time = Some(t);
-                            }
-                        }
-                    }
-                }
-            }
-        };
+fn initialized(data: &Value) -> bool {
+    data.get("status")
+        .and_then(|status| status.get("conditions"))
+        .and_then(Value::as_array)
+        .is_some_and(|conditions| {
+            conditions.iter().any(|condition| {
+                condition.get("type").and_then(Value::as_str) == Some("Initialized")
+                    && condition.get("status").and_then(Value::as_str) == Some("True")
+            })
+        })
+}
 
-    let statuses = data
+fn init_container_complete(data: &Value, status: &Value) -> bool {
+    status
+        .get("state")
+        .and_then(|state| state.get("terminated"))
+        .and_then(|terminated| terminated.get("exitCode"))
+        .and_then(Value::as_i64)
+        == Some(0)
+        || is_restartable_init(data, status)
+            && status.get("started").and_then(Value::as_bool) == Some(true)
+}
+
+fn restart_info(data: &Value) -> (i64, Option<time::OffsetDateTime>) {
+    let container_statuses = data
         .get("status")
         .and_then(|s| s.get("containerStatuses"))
         .and_then(|c| c.as_array());
-
     let init_statuses = data
         .get("status")
         .and_then(|s| s.get("initContainerStatuses"))
         .and_then(|c| c.as_array());
 
-    for arr in [statuses, init_statuses].into_iter().flatten() {
-        for c in arr {
-            if c.get("restartCount").and_then(|n| n.as_i64()).unwrap_or(0) > 0 {
-                check_state(c.get("state"), &mut restart_time);
-                check_last_state(c.get("lastState"), &mut restart_time);
+    let still_initializing = init_status(data).is_some() && !initialized(data);
+    let mut statuses = Vec::new();
+    if still_initializing {
+        for status in init_statuses.into_iter().flatten() {
+            statuses.push(status);
+            if !init_container_complete(data, status) {
+                break;
+            }
+        }
+    } else {
+        statuses.extend(
+            init_statuses
+                .into_iter()
+                .flatten()
+                .filter(|status| is_restartable_init(data, status)),
+        );
+        statuses.extend(container_statuses.into_iter().flatten());
+    }
+
+    let mut count = 0;
+    let mut latest = None;
+    for status in statuses {
+        let restarts = status
+            .get("restartCount")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        count += restarts;
+        if restarts == 0 {
+            continue;
+        }
+        let Some(finished_at) = status
+            .get("lastState")
+            .and_then(|state| state.get("terminated"))
+            .and_then(|terminated| terminated.get("finishedAt"))
+            .and_then(Value::as_str)
+        else {
+            continue;
+        };
+        if let Ok(timestamp) =
+            time::OffsetDateTime::parse(finished_at, &time::format_description::well_known::Rfc3339)
+        {
+            if latest.is_none_or(|current| timestamp > current) {
+                latest = Some(timestamp);
             }
         }
     }
 
-    restart_time
+    (count, latest)
 }
 
 pub(crate) fn pod_cells(
@@ -167,17 +193,34 @@ pub(crate) fn pod_cells(
     // Sidecar init containers (restartPolicy: Always, KEP-753) that have
     // started=true have completed initialization and now behave like regular
     // long-running containers — kubectl includes them in the ready count.
-    let sidecars = data
+    let init_statuses = data
         .get("status")
         .and_then(|s| s.get("initContainerStatuses"))
-        .and_then(|c| c.as_array())
-        .map(|a| {
-            a.iter()
-                .filter(|c| c.get("started").and_then(|s| s.as_bool()) == Some(true))
-                .collect::<Vec<_>>()
-        });
-    let total =
-        statuses.map(|a| a.len()).unwrap_or(0) + sidecars.as_ref().map(|s| s.len()).unwrap_or(0);
+        .and_then(|c| c.as_array());
+    let sidecars = init_statuses
+        .into_iter()
+        .flatten()
+        .filter(|status| is_restartable_init(data, status))
+        .collect::<Vec<_>>();
+    let regular_total = data
+        .get("spec")
+        .and_then(|spec| spec.get("containers"))
+        .and_then(Value::as_array)
+        .map_or_else(|| statuses.map_or(0, Vec::len), Vec::len);
+    let sidecar_total = data
+        .get("spec")
+        .and_then(|spec| spec.get("initContainers"))
+        .and_then(Value::as_array)
+        .map(|containers| {
+            containers
+                .iter()
+                .filter(|container| {
+                    container.get("restartPolicy").and_then(Value::as_str) == Some("Always")
+                })
+                .count()
+        })
+        .unwrap_or(0);
+    let total = regular_total + sidecar_total;
     let ready = statuses
         .map(|a| {
             a.iter()
@@ -186,34 +229,20 @@ pub(crate) fn pod_cells(
         })
         .unwrap_or(0)
         + sidecars
-            .as_ref()
-            .map(|s| {
-                s.iter()
-                    .filter(|c| c["ready"].as_bool() == Some(true))
-                    .count()
+            .iter()
+            .filter(|c| {
+                c.get("started").and_then(Value::as_bool) == Some(true)
+                    && c.get("ready").and_then(Value::as_bool) == Some(true)
             })
-            .unwrap_or(0);
-    let restarts: i64 = statuses
-        .map(|a| {
-            a.iter()
-                .map(|c| c["restartCount"].as_i64().unwrap_or(0))
-                .sum()
-        })
-        .unwrap_or(0)
-        + sidecars
-            .as_ref()
-            .map(|s| {
-                s.iter()
-                    .map(|c| c["restartCount"].as_i64().unwrap_or(0))
-                    .sum::<i64>()
-            })
-            .unwrap_or(0);
+            .count();
+    let (restarts, last_restart_time) = restart_info(data);
 
     let restarts_cell = if restarts > 0 {
-        if let Some(t) = get_last_restart_time(data) {
-            let diff = time::OffsetDateTime::now_utc() - t;
-            let secs = diff.whole_seconds().max(0) as u64;
-            format!("{}\x1f{} ago", restarts, roder_core::format_age_secs(secs))
+        if let Some(t) = last_restart_time {
+            let timestamp = t
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap_or_default();
+            format!("{restarts}\x1f{timestamp}")
         } else {
             restarts.to_string()
         }
@@ -379,5 +408,143 @@ fn pod_status(reason: &str, phase: &str, ready: usize, total: usize, deleting: b
     } else {
         // Pending, ContainerCreating, PodInitializing, running-but-not-ready, etc.
         RowStatus::Warn
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use time::format_description::well_known::Rfc3339;
+
+    fn timestamp(value: &str) -> time::OffsetDateTime {
+        time::OffsetDateTime::parse(value, &Rfc3339).unwrap()
+    }
+
+    #[test]
+    fn initialized_pod_counts_main_containers_and_restartable_init_sidecars() {
+        let data = json!({
+            "spec": {
+                "containers": [{"name": "app"}],
+                "initContainers": [
+                    {"name": "setup"},
+                    {"name": "logger", "restartPolicy": "Always"}
+                ]
+            },
+            "status": {
+                "conditions": [{"type": "Initialized", "status": "True"}],
+                "initContainerStatuses": [
+                    {
+                        "name": "setup",
+                        "restartCount": 7,
+                        "state": {"terminated": {"exitCode": 0}},
+                        "lastState": {"terminated": {"finishedAt": "2026-08-27T12:00:00Z"}}
+                    },
+                    {
+                        "name": "logger",
+                        "started": true,
+                        "restartCount": 2,
+                        "state": {"running": {}},
+                        "lastState": {"terminated": {"finishedAt": "2026-08-27T11:00:00Z"}}
+                    }
+                ],
+                "containerStatuses": [{
+                    "name": "app",
+                    "restartCount": 3,
+                    "lastState": {"terminated": {"finishedAt": "2026-08-27T13:00:00Z"}}
+                }]
+            }
+        });
+
+        assert_eq!(
+            restart_info(&data),
+            (5, Some(timestamp("2026-08-27T13:00:00Z")))
+        );
+    }
+
+    #[test]
+    fn initializing_pod_counts_regular_init_restarts_only() {
+        let data = json!({
+            "spec": {
+                "containers": [{"name": "app"}],
+                "initContainers": [{"name": "setup"}, {"name": "later"}]
+            },
+            "status": {
+                "initContainerStatuses": [
+                    {
+                        "name": "setup",
+                        "restartCount": 4,
+                        "state": {"waiting": {"reason": "PodInitializing"}},
+                        "lastState": {"terminated": {"finishedAt": "2026-08-27T14:00:00Z"}}
+                    },
+                    {
+                        "name": "later",
+                        "restartCount": 8,
+                        "lastState": {"terminated": {"finishedAt": "2026-08-27T16:00:00Z"}}
+                    }
+                ],
+                "containerStatuses": [{
+                    "name": "app",
+                    "restartCount": 9,
+                    "lastState": {"terminated": {"finishedAt": "2026-08-27T15:00:00Z"}}
+                }]
+            }
+        });
+
+        assert_eq!(
+            restart_info(&data),
+            (4, Some(timestamp("2026-08-27T14:00:00Z")))
+        );
+    }
+
+    #[test]
+    fn started_status_does_not_turn_a_regular_init_container_into_a_sidecar() {
+        let data = json!({
+            "spec": {"initContainers": [{"name": "setup"}]},
+            "status": {"initContainerStatuses": [{
+                "name": "setup",
+                "started": true,
+                "state": {"running": {}}
+            }]}
+        });
+
+        assert_eq!(init_status(&data).as_deref(), Some("Init:0/1"));
+    }
+
+    #[test]
+    fn restartable_init_sidecar_contributes_to_ready_total() {
+        let data = json!({
+            "spec": {
+                "containers": [{"name": "app"}],
+                "initContainers": [
+                    {"name": "setup"},
+                    {"name": "logger", "restartPolicy": "Always"}
+                ]
+            },
+            "status": {
+                "phase": "Running",
+                "initContainerStatuses": [
+                    {
+                        "name": "setup",
+                        "state": {"terminated": {"exitCode": 0}}
+                    },
+                    {
+                        "name": "logger",
+                        "started": true,
+                        "ready": true,
+                        "state": {"running": {}}
+                    }
+                ],
+                "containerStatuses": [{
+                    "name": "app",
+                    "ready": true,
+                    "state": {"running": {}}
+                }]
+            }
+        });
+
+        let (cells, _, status) = pod_cells(&data, false, None);
+        assert_eq!(cells[0], "2/2");
+        assert_eq!(status, RowStatus::Ok);
     }
 }

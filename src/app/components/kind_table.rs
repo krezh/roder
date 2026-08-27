@@ -1,7 +1,7 @@
 use leptos::prelude::*;
 use roder_core::{ResourceKind, RowStatus, Trend};
 
-use crate::app::components::table::{sortable_th, FlashTd};
+use crate::app::components::table::{cell_value_changed, sortable_th, FlashTd};
 use crate::app::components::table_row::{NameCell, ResourceRow as ResourceRowView};
 use crate::app::events::{make_bulk_open_logs, make_do_bulk, make_do_delete, RowMap};
 use crate::app::hooks::{
@@ -302,7 +302,7 @@ pub(crate) fn KindTable(
             rows.with_untracked(|m| {
                 for r in m.values() {
                     for (i, c) in r.cells.iter().take(ncells).enumerate() {
-                        let rendered = data::humanize_cell(&c.replace('\x1f', " "));
+                        let rendered = data::humanize_cell(c).replace('\x1f', " ");
                         let w = text_width(&rendered);
                         if w > cell_max_w[i] {
                             cell_maxes[i] = rendered;
@@ -623,7 +623,7 @@ pub(crate) fn KindTable(
                                 if let Some(prev_cells) = prev {
                                     let mut bits = 0u64;
                                     for (i, (cur, old)) in cells.iter().zip(prev_cells.iter()).enumerate() {
-                                        if cur != old { bits |= 1u64 << i; }
+                                        if cell_value_changed(cur, old) { bits |= 1u64 << i; }
                                     }
                                     if bits != 0 {
                                         flash_bits.update(|b| *b |= bits);

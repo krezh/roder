@@ -17,7 +17,6 @@
 - Port forwarding
 - Server-side dry-run diff before YAML apply
 - Cluster-wide warning events timeline (sorted, deduped by count)
-- Time since pod restart
 
 ## Integrations
 

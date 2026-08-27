@@ -267,7 +267,9 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                             });
                         }
                         set_timeout(
-                            move || reconnect.update(|n| *n += 1),
+                            move || {
+                                let _ = reconnect.try_update(|n| *n += 1);
+                            },
                             data::reconnect_delay(),
                         );
                     },

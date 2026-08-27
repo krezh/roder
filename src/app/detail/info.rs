@@ -14,12 +14,21 @@ use crate::data;
 pub(crate) fn info_view(d: ObjectDetail, kind: String) -> impl IntoView {
     let o = &d.object;
     let is_event = kind == "Event";
+    let certificate = (kind == "Certificate").then(|| certificate_summary(o));
     let created = json_str(o, &["metadata", "creationTimestamp"]);
     let labels = json_map(o, &["metadata", "labels"]);
     let annotations = json_map(o, &["metadata", "annotations"]);
     let owners = owner_refs(o);
     let conds = conditions(o);
-    let stats = status_scalars(o);
+    let mut stats = status_scalars(o);
+    if certificate.is_some() {
+        stats.retain(|(key, _)| {
+            !matches!(
+                key.as_str(),
+                "notBefore" | "notAfter" | "renewalTime" | "revision"
+            )
+        });
+    }
     let spec = section_scalars(o, "spec");
     let rules = if kind == "Role" || kind == "ClusterRole" {
         rbac_rules(o)
@@ -94,6 +103,37 @@ pub(crate) fn info_view(d: ObjectDetail, kind: String) -> impl IntoView {
                             let age = data::humanize_age(&Some(value.clone()));
                             view! { <div><span>"Last seen"</span><strong data-tip=value>{age}</strong></div> }
                         })}
+                    </div>
+                </section>
+            })}
+
+            {certificate.map(|certificate| view! {
+                <section class="certificate-detail-summary">
+                    <div class="certificate-detail-heading">
+                        <span>"Certificate lifecycle"</span>
+                        <strong class=certificate.state_class>{certificate.state}</strong>
+                    </div>
+                    <div class="detail-stats">
+                        <div class="detail-stat">
+                            <span class="detail-stat-label">"Valid from"</span>
+                            <span class="detail-stat-value" title=certificate.not_before_raw>{certificate.not_before}</span>
+                        </div>
+                        <div class="detail-stat">
+                            <span class="detail-stat-label">"Expires"</span>
+                            <span class="detail-stat-value" title=certificate.not_after_raw>{certificate.not_after}</span>
+                        </div>
+                        <div class="detail-stat">
+                            <span class="detail-stat-label">"Scheduled renewal"</span>
+                            <span class="detail-stat-value" title=certificate.renewal_time_raw>{certificate.renewal_time}</span>
+                        </div>
+                        <div class="detail-stat">
+                            <span class="detail-stat-label">"Revision"</span>
+                            <span class="detail-stat-value">{certificate.revision}</span>
+                        </div>
+                        <div class="detail-stat">
+                            <span class="detail-stat-label">"Target Secret"</span>
+                            <span class="detail-stat-value">{certificate.secret}</span>
+                        </div>
                     </div>
                 </section>
             })}
@@ -239,5 +279,102 @@ pub(crate) fn info_view(d: ObjectDetail, kind: String) -> impl IntoView {
                 </div>
             })}
         </div>
+    }
+}
+
+struct CertificateSummary {
+    state: String,
+    state_class: &'static str,
+    not_before: String,
+    not_before_raw: String,
+    not_after: String,
+    not_after_raw: String,
+    renewal_time: String,
+    renewal_time_raw: String,
+    revision: String,
+    secret: String,
+}
+
+fn certificate_summary(object: &serde_json::Value) -> CertificateSummary {
+    let condition = |type_: &str| {
+        object
+            .pointer("/status/conditions")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|conditions| {
+                conditions.iter().find(|condition| {
+                    condition.get("type").and_then(serde_json::Value::as_str) == Some(type_)
+                })
+            })
+    };
+    let issuing = condition("Issuing").is_some_and(|condition| {
+        condition.get("status").and_then(serde_json::Value::as_str) == Some("True")
+    });
+    let ready = condition("Ready");
+    let ready_status = ready
+        .and_then(|condition| condition.get("status"))
+        .and_then(serde_json::Value::as_str);
+    let ready_reason = ready
+        .and_then(|condition| condition.get("reason"))
+        .and_then(serde_json::Value::as_str);
+    let (state, state_class) = if issuing {
+        ("Renewing".to_string(), "pending")
+    } else if ready_reason.is_some_and(|reason| reason.eq_ignore_ascii_case("expired")) {
+        ("Expired".to_string(), "error")
+    } else {
+        match ready_status {
+            Some("True") => ("Valid".to_string(), "ok"),
+            Some("False") => (ready_reason.unwrap_or("Failed").to_string(), "error"),
+            _ => ("Pending".to_string(), "pending"),
+        }
+    };
+    let not_before_raw = json_str(object, &["status", "notBefore"]).unwrap_or_default();
+    let not_after_raw = json_str(object, &["status", "notAfter"]).unwrap_or_default();
+    let renewal_time_raw = json_str(object, &["status", "renewalTime"]).unwrap_or_default();
+
+    CertificateSummary {
+        state,
+        state_class,
+        not_before: display_certificate_time(&not_before_raw),
+        not_before_raw,
+        not_after: display_certificate_time(&not_after_raw),
+        not_after_raw,
+        renewal_time: display_certificate_time(&renewal_time_raw),
+        renewal_time_raw,
+        revision: json_str(object, &["status", "revision"]).unwrap_or_else(|| "-".to_string()),
+        secret: json_str(object, &["spec", "secretName"]).unwrap_or_else(|| "-".to_string()),
+    }
+}
+
+fn display_certificate_time(value: &str) -> String {
+    if value.is_empty() {
+        return "-".to_string();
+    }
+    value.strip_suffix('Z').unwrap_or(value).replace('T', " ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn certificate_summary_prioritizes_active_renewal() {
+        let summary = certificate_summary(&json!({
+            "spec": {"secretName": "api-tls"},
+            "status": {
+                "notAfter": "2026-10-01T12:00:00Z",
+                "renewalTime": "2026-09-01T12:00:00Z",
+                "revision": 3,
+                "conditions": [
+                    {"type": "Ready", "status": "True"},
+                    {"type": "Issuing", "status": "True"}
+                ]
+            }
+        }));
+        assert_eq!(summary.state, "Renewing");
+        assert_eq!(summary.state_class, "pending");
+        assert_eq!(summary.not_after, "2026-10-01 12:00:00");
+        assert_eq!(summary.revision, "3");
+        assert_eq!(summary.secret, "api-tls");
     }
 }

@@ -1,13 +1,13 @@
 //! Live count of failing Flux Kustomizations and HelmReleases.
 
 use leptos::prelude::*;
-use roder_core::{ResourceKind, ResourceRow, RowStatus};
+use roder_core::{ResourceKind, RowStatus};
 
-use crate::app::hooks::use_sse_subscription;
 use crate::app::state::{Catalog, OnlyProblems};
 use crate::data;
 
 use super::badge::use_animated_badge;
+use super::failure_watch::FailureWatchRows;
 
 #[component]
 pub(crate) fn FluxFailingBadge() -> impl IntoView {
@@ -29,19 +29,9 @@ pub(crate) fn FluxFailingBadge() -> impl IntoView {
             .find(|k| k.group.ends_with("fluxcd.io") && k.kind == "HelmRelease")
     });
 
-    let ks_rows = RwSignal::new(std::collections::HashMap::<String, ResourceRow>::new());
-    let ks_entering = RwSignal::new(std::collections::BTreeSet::<String>::new());
-    let ks_removing = RwSignal::new(std::collections::BTreeSet::<String>::new());
-    let hr_rows = RwSignal::new(std::collections::HashMap::<String, ResourceRow>::new());
-    let hr_entering = RwSignal::new(std::collections::BTreeSet::<String>::new());
-    let hr_removing = RwSignal::new(std::collections::BTreeSet::<String>::new());
-
-    use_sse_subscription(ks_rows, ks_entering, ks_removing, None, move || {
-        Some(data::watch_url(&ks_kind.get()?.key, None, None))
-    });
-    use_sse_subscription(hr_rows, hr_entering, hr_removing, None, move || {
-        Some(data::watch_url(&hr_kind.get()?.key, None, None))
-    });
+    let failure_rows = expect_context::<FailureWatchRows>();
+    let ks_rows = failure_rows.kustomizations;
+    let hr_rows = failure_rows.helm_releases;
 
     // Seed the badge's count from the last-known value so it doesn't vanish and
     // then pop back up across a refresh while the SSE snapshots are in flight.

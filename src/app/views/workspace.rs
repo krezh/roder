@@ -124,7 +124,9 @@ pub(crate) fn WorkspaceView() -> impl IntoView {
                     connection.set(Connectivity::Error(data::probe_error(url).await));
                 });
                 set_timeout(
-                    move || reconnect.update(|n| *n += 1),
+                    move || {
+                        let _ = reconnect.try_update(|n| *n += 1);
+                    },
                     data::reconnect_delay(),
                 );
             },

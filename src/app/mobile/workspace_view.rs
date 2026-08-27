@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use leptos::prelude::*;
-use roder_core::{ResourceKind, WatchEvent};
+use roder_core::{ResourceKind, RowStatus, WatchEvent};
 
 use crate::app::events::{make_bulk_open_logs, make_do_bulk, make_do_delete, RowMap};
 use crate::app::hooks::{use_table_state, Coalescer};
@@ -133,7 +133,9 @@ pub(crate) fn MobileWorkspaceView() -> impl IntoView {
                     connection.set(Connectivity::Error(data::probe_error(url).await));
                 });
                 set_timeout(
-                    move || reconnect.update(|n| *n += 1),
+                    move || {
+                        let _ = reconnect.try_update(|n| *n += 1);
+                    },
                     data::reconnect_delay(),
                 );
             },
@@ -226,10 +228,22 @@ fn MobilePane(kind: ResourceKind, rows: RowMap, columns: RwSignal<Vec<String>>) 
     let is_pod_kind = kind.group.is_empty() && kind.kind == "Pod";
     let kk = KindKind::new(&kind.group, &kind.kind);
     let bulk_workload = kk.is_workload();
+    let bulk_job = kk.is_job();
     let bulk_flux = kk.is_flux();
     let bulk_helmrelease = kk.is_helmrelease();
     let bulk_has_source_ref = kk.has_source_ref();
+    let bulk_certificate = kk.is_certificate();
     let key_sv = StoredValue::new(kind.key.clone());
+    let can_rerun_jobs = Signal::derive(move || {
+        let selected = selected.get();
+        !selected.is_empty()
+            && rows.with(|rows| {
+                selected.iter().all(|uid| {
+                    rows.get(uid)
+                        .is_some_and(|row| matches!(row.status, RowStatus::Ok | RowStatus::Error))
+                })
+            })
+    });
 
     let reset_selection = move || select_mode.set(false);
     let do_bulk = make_do_bulk(toast, key_sv, rows, selected, reset_selection);
@@ -297,8 +311,11 @@ fn MobilePane(kind: ResourceKind, rows: RowMap, columns: RwSignal<Vec<String>>) 
             on_logs=on_logs
             show_logs=is_pod_kind || bulk_workload
             bulk_workload=bulk_workload
+            bulk_job=bulk_job
+            can_rerun_jobs=can_rerun_jobs
             bulk_flux=bulk_flux
             bulk_helmrelease=bulk_helmrelease
-            bulk_has_source_ref=bulk_has_source_ref />
+            bulk_has_source_ref=bulk_has_source_ref
+            bulk_certificate=bulk_certificate />
     }
 }

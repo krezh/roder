@@ -5,6 +5,7 @@
 use leptos::prelude::*;
 
 use crate::app::events::UidSet;
+use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::overlays::delete::{ask_delete, DeleteRequest};
 
 #[component]
@@ -27,10 +28,14 @@ pub(crate) fn MobileBulkBar(
     on_logs: Callback<()>,
     #[prop(default = true)] show_logs: bool,
     #[prop(default = false)] bulk_workload: bool,
+    #[prop(default = false)] bulk_job: bool,
+    #[prop(optional, into)] can_rerun_jobs: Option<Signal<bool>>,
     #[prop(default = false)] bulk_flux: bool,
     #[prop(default = false)] bulk_helmrelease: bool,
     #[prop(default = false)] bulk_has_source_ref: bool,
+    #[prop(default = false)] bulk_certificate: bool,
 ) -> impl IntoView {
+    let confirm = expect_context::<RwSignal<Option<Confirm>>>();
     let delete_confirm = expect_context::<RwSignal<Option<DeleteRequest>>>();
 
     view! {
@@ -45,6 +50,12 @@ pub(crate) fn MobileBulkBar(
                 {bulk_workload.then(|| view! {
                     <button class="act" on:click=move |_| do_bulk("restart")>"Restart"</button>
                 })}
+                {bulk_job.then(|| view! {
+                    <button class="act"
+                        disabled=move || !can_rerun_jobs.is_some_and(|allowed| allowed.get())
+                        title="Only completed or failed Jobs can be re-run"
+                        on:click=move |_| do_bulk("job-rerun")>"Re-run"</button>
+                })}
                 {bulk_flux.then(|| view! {
                     <button class="act" on:click=move |_| do_bulk("flux-reconcile")>"Reconcile"</button>
                     {bulk_has_source_ref.then(|| view! {
@@ -56,6 +67,17 @@ pub(crate) fn MobileBulkBar(
                     })}
                     <button class="act" on:click=move |_| do_bulk("flux-suspend")>"Suspend"</button>
                     <button class="act" on:click=move |_| do_bulk("flux-resume")>"Resume"</button>
+                })}
+                {bulk_certificate.then(|| view! {
+                    <button class="act" on:click=move |_| {
+                        let n = selected.get_untracked().len();
+                        ask_confirm(
+                            confirm,
+                            format!("Force renewal of {n} Certificates?"),
+                            "Renew",
+                            move || do_bulk("certificate-renew"),
+                        );
+                    }>"Force renew"</button>
                 })}
                 <button class="act danger" on:click=move |_| {
                     let n = selected.get_untracked().len();

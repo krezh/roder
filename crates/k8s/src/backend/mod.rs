@@ -36,7 +36,7 @@ mod permissions;
 mod sanitize;
 mod tree;
 
-type CanCacheKey = (String, String, Option<String>);
+type CanCacheKey = (String, String, Option<String>, Option<String>);
 
 /// The per-user façade over a connected cluster: the user's token-passthrough
 /// client, its own informer registry, and small per-user caches. Catalog and

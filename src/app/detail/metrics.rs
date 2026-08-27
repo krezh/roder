@@ -27,7 +27,9 @@ pub(crate) fn MetricsChart(namespace: String, name: String) -> impl IntoView {
             },
             move || {
                 set_timeout(
-                    move || reconnect.update(|attempt| *attempt = attempt.wrapping_add(1)),
+                    move || {
+                        let _ = reconnect.try_update(|attempt| *attempt = attempt.wrapping_add(1));
+                    },
                     data::reconnect_delay(),
                 )
             },

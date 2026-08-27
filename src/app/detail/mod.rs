@@ -106,6 +106,7 @@ pub(crate) fn RowDetail(
     on_delete: impl Fn() + Copy + 'static + Send + Sync,
 ) -> impl IntoView {
     let requested_tab = expect_context::<RwSignal<Option<Tab>>>();
+    let confirm = expect_context::<RwSignal<Option<Confirm>>>();
     let delete_confirm = expect_context::<RwSignal<Option<DeleteRequest>>>();
     let status = RwSignal::new(None::<Result<String, String>>);
     let yaml = RwSignal::new(String::new());
@@ -125,8 +126,10 @@ pub(crate) fn RowDetail(
     let is_helmrelease = kk.is_helmrelease();
     let has_source_ref = kk.has_source_ref();
     let is_eso = kk.is_eso();
+    let is_certificate = kk.is_certificate();
     let is_pod = kk.is_pod();
     let is_node = kk.is_node();
+    let is_job = kk.is_job();
     let features = expect_context::<TalosFeatures>().0;
     let talos_available = move || is_node && features.get().read;
     let talos_actions = move || is_node && features.get().actions;
@@ -215,6 +218,38 @@ pub(crate) fn RowDetail(
             .and_then(|v| v.get("delete").and_then(|b| b.as_bool()))
             .unwrap_or(false)
     };
+    let can_create = move || {
+        perms
+            .get()
+            .flatten()
+            .and_then(|v| v.get("create").and_then(|b| b.as_bool()))
+            .unwrap_or(false)
+    };
+    let can_update_status = move || {
+        perms
+            .get()
+            .flatten()
+            .and_then(|v| v.get("update_status").and_then(|b| b.as_bool()))
+            .unwrap_or(false)
+    };
+    let job_terminal = move || {
+        obj.get().flatten().is_some_and(|detail| {
+            detail
+                .object
+                .get("status")
+                .and_then(|status| status.get("conditions"))
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|conditions| {
+                    conditions.iter().any(|condition| {
+                        matches!(
+                            condition.get("type").and_then(serde_json::Value::as_str),
+                            Some("Complete" | "Failed")
+                        ) && condition.get("status").and_then(serde_json::Value::as_str)
+                            == Some("True")
+                    })
+                })
+        })
+    };
 
     let run = move |action: &'static str, extra: serde_json::Value| {
         let t = tv.get_value();
@@ -233,7 +268,7 @@ pub(crate) fn RowDetail(
                     if action == "delete" {
                         on_delete();
                     }
-                    if action == "flux-suspend" || action == "flux-resume" {
+                    if matches!(action, "flux-suspend" | "flux-resume" | "certificate-renew") {
                         obj.refetch();
                     }
                 }
@@ -274,9 +309,28 @@ pub(crate) fn RowDetail(
                         <button class="act" on:click=move |_| run("eso-refresh", serde_json::json!({}))>"Refresh"</button>
                     </Show>
                 })}
+                {is_certificate.then(|| view! {
+                    <Show when=can_update_status fallback=|| ()>
+                        <button class="act" on:click=move |_| {
+                            ask_confirm(
+                                confirm,
+                                "Force renewal of this Certificate? cert-manager will issue a new revision and update its target Secret.",
+                                "Renew",
+                                move || run("certificate-renew", serde_json::json!({})),
+                            );
+                        }>
+                            "Force renew"
+                        </button>
+                    </Show>
+                })}
                 {is_cronjob.then(|| view! {
                     <Show when=can_patch fallback=|| ()>
                         <button class="act" on:click=move |_| run("cronjob-trigger", serde_json::json!({}))>"Trigger"</button>
+                    </Show>
+                })}
+                {is_job.then(|| view! {
+                    <Show when=move || can_create() && job_terminal() fallback=|| ()>
+                        <button class="act" on:click=move |_| run("job-rerun", serde_json::json!({}))>"Re-run"</button>
                     </Show>
                 })}
                 {is_kopiur_snapshot_policy.then(|| view! {

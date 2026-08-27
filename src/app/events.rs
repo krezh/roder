@@ -36,7 +36,9 @@ fn action_label(action: &str) -> &str {
         "cordon" => "Cordoned",
         "uncordon" => "Uncordoned",
         "eso-refresh" => "Refreshed",
+        "certificate-renew" => "Renewal requested for",
         "cronjob-trigger" => "Triggered",
+        "job-rerun" => "Re-ran",
         "kopiur-snapshot-now" => "Snapshot triggered",
         other => other,
     }
@@ -299,9 +301,9 @@ pub(crate) fn apply_event(
                 });
                 set_timeout(
                     move || {
-                        entering.update(|s| {
+                        let _ = entering.try_update(|s| {
                             s.remove(&uid);
-                        })
+                        });
                     },
                     std::time::Duration::from_millis(280),
                 );
@@ -323,11 +325,14 @@ pub(crate) fn apply_event(
             let uid2 = uid.clone();
             set_timeout(
                 move || {
-                    if removing.with_untracked(|s| s.contains(&uid)) {
-                        rows.update(|m| {
+                    if removing
+                        .try_with_untracked(|s| s.contains(&uid))
+                        .unwrap_or(false)
+                    {
+                        let _ = rows.try_update(|m| {
                             m.remove(&uid);
                         });
-                        removing.update(|s| {
+                        let _ = removing.try_update(|s| {
                             s.remove(&uid2);
                         });
                     }

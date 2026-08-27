@@ -264,6 +264,7 @@ pub fn App() -> impl IntoView {
     provide_context(TableSelected(StoredValue::new(None)));
     provide_context(TableRows(StoredValue::new(None)));
     provide_context(TableTargets(StoredValue::new(None)));
+    components::topbar::use_failure_watch();
 
     // Keep an end-to-end status alive independently of whichever view/SSE streams
     // happen to be open. Browser network events update immediately; the periodic

@@ -30,7 +30,9 @@ pub(crate) fn AlertsButton() -> impl IntoView {
         if prev.is_some_and(|p| p != total) {
             bouncing.set(true);
             set_timeout(
-                move || bouncing.set(false),
+                move || {
+                    let _ = bouncing.try_set(false);
+                },
                 std::time::Duration::from_millis(350),
             );
         }

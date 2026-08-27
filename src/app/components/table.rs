@@ -101,7 +101,9 @@ where
             if p != v {
                 value_changed.set(true);
                 set_timeout(
-                    move || value_changed.set(false),
+                    move || {
+                        let _ = value_changed.try_set(false);
+                    },
                     std::time::Duration::from_millis(1500),
                 );
             }

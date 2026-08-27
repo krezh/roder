@@ -3,9 +3,10 @@
 //! Triggered by long-press on a `MobileRowCard` instead of `oncontextmenu`.
 
 use leptos::prelude::*;
-use roder_core::ResourceKind;
+use roder_core::{ResourceKind, RowStatus};
 
 use crate::app::events::{fire_action, fire_action_with};
+use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::overlays::delete::{ask_delete, delete_extra, DeleteRequest};
 use crate::app::overlays::toast::{show_toast, Toast, ToastKind};
 use crate::app::state::{
@@ -23,6 +24,7 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
     let detail = expect_context::<RwSignal<Option<DetailTarget>>>();
     let selected_kind = expect_context::<RwSignal<Option<ResourceKind>>>();
     let selected_ns = expect_context::<RwSignal<Option<String>>>();
+    let confirm = expect_context::<RwSignal<Option<Confirm>>>();
     let delete_confirm = expect_context::<RwSignal<Option<DeleteRequest>>>();
     let catalog = expect_context::<Catalog>().0;
     let log_pods = expect_context::<LogPods>().0;
@@ -88,7 +90,9 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
             let is_helmrelease = targets_all(&targets, |kind| kind.is_helmrelease());
             let has_source_ref = targets_all(&targets, |kind| kind.has_source_ref());
             let is_eso = targets_all(&targets, |kind| kind.is_eso());
+            let is_certificate = targets_all(&targets, |kind| kind.is_certificate());
             let is_cronjob = targets_all(&targets, |kind| kind.is_cronjob());
+            let is_job = targets_all(&targets, |kind| kind.is_job());
             let is_kopiur_snapshot_policy = targets_all(&targets, |kind| kind.is_kopiur_snapshot_policy());
             let suspend_state: Option<bool> = rows_opt.and_then(|rows| {
                 rows.with_untracked(|rm| {
@@ -99,6 +103,15 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
             });
             let show_suspend = suspend_state != Some(true);
             let show_resume = suspend_state != Some(false);
+            let jobs_terminal = is_job && rows_opt.is_some_and(|rows| {
+                rows.with_untracked(|rows| {
+                    target_uids.iter().all(|uid| {
+                        rows.get(uid).is_some_and(|row| {
+                            matches!(row.status, RowStatus::Ok | RowStatus::Error)
+                        })
+                    })
+                })
+            });
 
             let open = { let t = m.target.clone(); move |_| { detail.set(Some(t.clone())); do_close(); } };
             let has_logs = targets_all(&targets, |kind| {
@@ -172,7 +185,27 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
             let resume    = bulk_act!("flux-resume");
             let refresh   = bulk_act!("eso-refresh");
             let trigger   = bulk_act!("cronjob-trigger");
+            let rerun     = bulk_act!("job-rerun");
             let snapshot_now = bulk_act!("kopiur-snapshot-now");
+            let renew_certificate = {
+                let ts = targets.clone();
+                move |_| {
+                    let ts = ts.clone();
+                    let n = ts.len();
+                    let label = if n == 1 {
+                        "Force renewal of this Certificate?".to_string()
+                    } else {
+                        format!("Force renewal of {n} Certificates?")
+                    };
+                    ask_confirm(confirm, label, "Renew", move || {
+                        fire_action(toast, "certificate-renew", &ts);
+                        if let Some(sel) = table_selected.get_value() {
+                            sel.set(Default::default());
+                        }
+                    });
+                    do_close();
+                }
+            };
             let delete = {
                 let ts = targets.clone();
                 move |_| {
@@ -243,6 +276,7 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
                         }
                     })}
                     {is_cronjob.then(|| view! { <button class="sheet-item" on:click=trigger>"Trigger"</button> })}
+                    {jobs_terminal.then(|| view! { <button class="sheet-item" on:click=rerun>"Re-run"</button> })}
                     {is_kopiur_snapshot_policy.then(|| view! { <button class="sheet-item" on:click=snapshot_now>"Snapshot Now"</button> })}
                     {is_flux.then(|| view! {
                         <button class="sheet-item" on:click=reconcile>"Reconcile"</button>
@@ -257,6 +291,7 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
                         {show_resume.then(|| view! { <button class="sheet-item" on:click=resume>"Resume"</button> })}
                     })}
                     {is_eso.then(|| view! { <button class="sheet-item" on:click=refresh>"Refresh"</button> })}
+                    {is_certificate.then(|| view! { <button class="sheet-item" on:click=renew_certificate>"Force renew"</button> })}
                     <button class="sheet-item danger" on:click=delete>"Delete"</button>
                 </div>
             }

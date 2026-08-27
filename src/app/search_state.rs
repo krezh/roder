@@ -133,7 +133,7 @@ pub(crate) fn apply_event(
         match transition {
             PendingTransition::ClearEntering(key) => set_timeout(
                 move || {
-                    entering.update(|uids| {
+                    let _ = entering.try_update(|uids| {
                         uids.remove(&key);
                     });
                 },
@@ -152,8 +152,9 @@ pub(crate) fn finish_removal(
     removing: UidSet,
     key: &str,
 ) {
-    rows.update(|row_map| {
-        removing.update(|removing_set| finish_removal_values(row_map, removing_set, key));
+    let _ = rows.try_update(|row_map| {
+        let _ =
+            removing.try_update(|removing_set| finish_removal_values(row_map, removing_set, key));
     });
 }
 

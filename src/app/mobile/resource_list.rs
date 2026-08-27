@@ -3,7 +3,7 @@
 //! the action sheet — see `row_card.rs`).
 
 use leptos::prelude::*;
-use roder_core::ResourceKind;
+use roder_core::{ResourceKind, RowStatus};
 
 use crate::app::events::{make_bulk_open_logs, make_do_bulk, make_do_delete};
 use crate::app::hooks::{use_sse_subscription, use_table_state};
@@ -114,14 +114,26 @@ fn MobileKindList(
     let node_col = Memo::new(move |_| columns.get().iter().position(|c| c == "Node"));
     let kk = KindKind::new(&kind.group, &kind.kind);
     let bulk_workload = kk.is_workload();
+    let bulk_job = kk.is_job();
     let bulk_flux = kk.is_flux();
     let bulk_helmrelease = kk.is_helmrelease();
     let bulk_has_source_ref = kk.has_source_ref();
+    let bulk_certificate = kk.is_certificate();
     let key_sv = StoredValue::new(kind.key.clone());
     let title_sv = StoredValue::new(kind.kind.clone());
 
     let rows = t.rows;
     let selected = t.selected;
+    let can_rerun_jobs = Signal::derive(move || {
+        let selected = selected.get();
+        !selected.is_empty()
+            && rows.with(|rows| {
+                selected.iter().all(|uid| {
+                    rows.get(uid)
+                        .is_some_and(|row| matches!(row.status, RowStatus::Ok | RowStatus::Error))
+                })
+            })
+    });
     let select_mode = use_select_mode(selected);
 
     let reset_selection = move || select_mode.set(false);
@@ -202,9 +214,12 @@ fn MobileKindList(
                 do_delete=do_delete
                 on_logs=on_logs
                 bulk_workload=bulk_workload
+                bulk_job=bulk_job
+                can_rerun_jobs=can_rerun_jobs
                 bulk_flux=bulk_flux
                 bulk_helmrelease=bulk_helmrelease
-                bulk_has_source_ref=bulk_has_source_ref />
+                bulk_has_source_ref=bulk_has_source_ref
+                bulk_certificate=bulk_certificate />
         </div>
     }
 }

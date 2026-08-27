@@ -117,7 +117,10 @@ fn explicit_view(group: &str, kind: &str) -> Option<KindView> {
             view!(&["Ready", "Status"], Plain(eso_generic_cells))
         }
         ("cert-manager.io", "Certificate") => {
-            view!(&["Ready", "Status", "Secret"], Plain(certificate_cells))
+            view!(
+                &["Ready", "Status", "Expires", "Renews", "Revision", "Secret"],
+                Plain(certificate_cells)
+            )
         }
         ("cert-manager.io", "ClusterIssuer") | ("cert-manager.io", "Issuer") => {
             view!(&["Ready", "Status"], Plain(issuer_cells))

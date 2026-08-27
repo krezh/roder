@@ -4,7 +4,6 @@
 
 - Rollout history + rollback to revision, pause/resume
 - File copy to/from containers (kubectl cp equivalent over exec streams)
-- Job re-run (recreate completed Job from spec)
 
 ## Helm
 
@@ -21,7 +20,6 @@
 ## Integrations
 
 - Prometheus range queries — CPU/mem history graphs on pod/node detail
-- cert-manager: surface Certificate expiry/renewal state + force renew action
 
 ## Mobile
 

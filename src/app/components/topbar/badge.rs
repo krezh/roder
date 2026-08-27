@@ -24,9 +24,13 @@ pub(crate) fn use_animated_badge<T: Clone + Send + Sync + 'static>(
             closing.set(true);
             set_timeout(
                 move || {
-                    if closing.get_untracked() && generation.get_untracked() == current {
-                        snapshot.set(None);
-                        closing.set(false);
+                    let still_closing = closing.try_get_untracked().unwrap_or(false);
+                    let same_generation = generation
+                        .try_get_untracked()
+                        .is_some_and(|generation| generation == current);
+                    if still_closing && same_generation {
+                        let _ = snapshot.try_set(None);
+                        let _ = closing.try_set(false);
                     }
                 },
                 std::time::Duration::from_millis(FAILURE_BADGE_ANIMATION_MS),

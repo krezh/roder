@@ -62,8 +62,16 @@ pub async fn permissions(
 ) -> Response {
     let ns = ns_filter(&q.namespace);
     let patch = b.can("patch", &q.key, ns).await;
+    let create = b.can("create", &q.key, ns).await;
     let delete = b.can("delete", &q.key, ns).await;
-    Json(serde_json::json!({ "patch": patch, "delete": delete })).into_response()
+    let update_status = b.can_subresource("update", &q.key, ns, "status").await;
+    Json(serde_json::json!({
+        "patch": patch,
+        "create": create,
+        "delete": delete,
+        "update_status": update_status,
+    }))
+    .into_response()
 }
 
 #[derive(Deserialize)]

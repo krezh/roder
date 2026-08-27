@@ -152,7 +152,9 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             let is_kustomization = targets_all(&targets, |kind| kind.is_kustomization());
             let has_source_ref = targets_all(&targets, |kind| kind.has_source_ref());
             let is_eso = targets_all(&targets, |kind| kind.is_eso());
+            let is_certificate = targets_all(&targets, |kind| kind.is_certificate());
             let is_cronjob = targets_all(&targets, |kind| kind.is_cronjob());
+            let is_job = targets_all(&targets, |kind| kind.is_job());
             let is_kopiur_snapshot_policy = targets_all(&targets, |kind| kind.is_kopiur_snapshot_policy());
             let is_node = targets_all(&targets, |kind| kind.is_node());
             let talos_actions = talos_features.get().actions;
@@ -176,6 +178,15 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             });
             let show_cordon = cordon_state != Some(true);
             let show_uncordon = cordon_state != Some(false);
+            let jobs_terminal = is_job && rows_opt.is_some_and(|rows| {
+                rows.with_untracked(|rows| {
+                    target_uids.iter().all(|uid| {
+                        rows.get(uid).is_some_and(|row| {
+                            matches!(row.status, RowStatus::Ok | RowStatus::Error)
+                        })
+                    })
+                })
+            });
             let control_plane = rows_opt.is_some_and(|rows| {
                 rows.with_untracked(|rm| {
                     target_uids
@@ -261,7 +272,27 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             let resume    = bulk_act!("flux-resume");
             let refresh   = bulk_act!("eso-refresh");
             let trigger   = bulk_act!("cronjob-trigger");
+            let rerun     = bulk_act!("job-rerun");
             let snapshot_now = bulk_act!("kopiur-snapshot-now");
+            let renew_certificate = {
+                let ts = targets.clone();
+                move |_| {
+                    let ts = ts.clone();
+                    let n = ts.len();
+                    let label = if n == 1 {
+                        "Force renewal of this Certificate?".to_string()
+                    } else {
+                        format!("Force renewal of {n} Certificates?")
+                    };
+                    ask_confirm(confirm, label, "Renew", move || {
+                        fire_action(toast, "certificate-renew", &ts);
+                        if let Some(sel) = table_selected.get_value() {
+                            sel.set(Default::default());
+                        }
+                    });
+                    do_close();
+                }
+            };
             let cordon    = bulk_act!("cordon");
             let uncordon  = bulk_act!("uncordon");
             // Opens the drain options dialog (`overlays::drain`) rather than
@@ -523,6 +554,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                         }
                     })}
                     {is_cronjob.then(|| view! { <button class="ctx-item" on:click=trigger>"Trigger"</button> })}
+                    {jobs_terminal.then(|| view! { <button class="ctx-item" on:click=rerun>"Re-run"</button> })}
                     {is_kopiur_snapshot_policy.then(|| view! { <button class="ctx-item" on:click=snapshot_now>"Snapshot Now"</button> })}
                     {is_flux.then(|| view! {
                         <div class="ctx-item ctx-reconcile">
@@ -544,6 +576,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                         {show_resume.then(|| view! { <button class="ctx-item" on:click=resume>"Resume"</button> })}
                     })}
                     {is_eso.then(|| view! { <button class="ctx-item" on:click=refresh>"Refresh"</button> })}
+                    {is_certificate.then(|| view! { <button class="ctx-item" on:click=renew_certificate>"Force renew"</button> })}
                     {(is_node && show_cordon).then(|| view! { <button class="ctx-item" on:click=cordon>"Cordon"</button> })}
                     {(is_node && show_uncordon).then(|| view! { <button class="ctx-item" on:click=uncordon>"Uncordon"</button> })}
                     {(!is_bulk && is_node).then(|| view! { <button class="ctx-item danger" on:click=drain>"Drain"</button> })}

@@ -560,6 +560,28 @@ table.cond {
 
   &.warning { color: var(--warn); }
 }
+.certificate-detail-summary {
+  margin: 0.8rem 0 1rem;
+}
+.certificate-detail-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  background: color-mix(in srgb, var(--accent) 5%, var(--panel));
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+
+  strong { font-size: 0.76rem; }
+  strong.ok { color: var(--ok); }
+  strong.pending { color: var(--pending); }
+  strong.error { color: var(--error); }
+}
 .talos-fingerprint {
   display: flex;
   gap: 0.55rem;

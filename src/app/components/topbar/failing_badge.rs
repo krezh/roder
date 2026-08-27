@@ -2,13 +2,13 @@
 //! filtered to problems. Backed by a single all-namespace pod watch.
 
 use leptos::prelude::*;
-use roder_core::{ResourceKind, ResourceRow, RowStatus};
+use roder_core::{ResourceKind, RowStatus};
 
-use crate::app::hooks::use_sse_subscription;
 use crate::app::state::{Catalog, OnlyProblems};
 use crate::data;
 
 use super::badge::use_animated_badge;
+use super::failure_watch::FailureWatchRows;
 
 #[component]
 pub(crate) fn FailingBadge() -> impl IntoView {
@@ -23,14 +23,7 @@ pub(crate) fn FailingBadge() -> impl IntoView {
             .into_iter()
             .find(|k| k.group.is_empty() && k.kind == "Pod")
     });
-    let rows = RwSignal::new(std::collections::HashMap::<String, ResourceRow>::new());
-    let entering = RwSignal::new(std::collections::BTreeSet::<String>::new());
-    let removing = RwSignal::new(std::collections::BTreeSet::<String>::new());
-
-    use_sse_subscription(rows, entering, removing, None, move || {
-        let pk = pod_kind.get()?;
-        Some(data::watch_url(&pk.key, None, None))
-    });
+    let rows = expect_context::<FailureWatchRows>().pods;
 
     // Seed the badge's count from the last-known value so it doesn't vanish and
     // then pop back up across a refresh while the SSE snapshot is in flight.

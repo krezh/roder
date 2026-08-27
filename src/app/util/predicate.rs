@@ -44,6 +44,10 @@ impl<'a> KindKind<'a> {
         self.group == "external-secrets.io"
     }
 
+    pub(crate) fn is_certificate(&self) -> bool {
+        self.group == "cert-manager.io" && self.kind == "Certificate"
+    }
+
     pub(crate) fn is_kopiur_snapshot_policy(&self) -> bool {
         self.group == "kopiur.home-operations.com" && self.kind == "SnapshotPolicy"
     }
@@ -126,6 +130,13 @@ mod tests {
     fn is_kopiur_snapshot_policy_false_for_non_kopiur_group() {
         let kk = KindKind::new("external-secrets.io", "SnapshotPolicy");
         assert!(!kk.is_kopiur_snapshot_policy());
+    }
+
+    #[test]
+    fn is_certificate_only_matches_cert_manager_certificates() {
+        assert!(KindKind::new("cert-manager.io", "Certificate").is_certificate());
+        assert!(!KindKind::new("cert-manager.io", "CertificateRequest").is_certificate());
+        assert!(!KindKind::new("example.com", "Certificate").is_certificate());
     }
 
     #[test]

@@ -7,6 +7,7 @@ use crate::app::events::{make_bulk_open_logs, make_do_bulk, make_do_delete, RowM
 use crate::app::hooks::{
     table_column_truncation, table_window, use_sse_subscription, use_table_state,
 };
+use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::overlays::delete::{ask_delete, DeleteRequest};
 use crate::app::overlays::toast::{show_toast, Toast, ToastKind};
 use crate::app::state::{
@@ -55,6 +56,7 @@ pub(crate) fn KindTable(
     let only_problems = expect_context::<OnlyProblems>().0;
     let resource_filter = expect_context::<ResourceFilter>().0;
     let log_pods = expect_context::<LogPods>().0;
+    let confirm = expect_context::<RwSignal<Option<Confirm>>>();
     let delete_confirm = expect_context::<RwSignal<Option<DeleteRequest>>>();
     let toast = expect_context::<RwSignal<Option<Toast>>>();
     let selected_ns_ctx = use_context::<RwSignal<Option<String>>>();
@@ -237,13 +239,25 @@ pub(crate) fn KindTable(
     });
     let kk = KindKind::new(&kind.group, &kind.kind);
     let bulk_workload = kk.is_workload();
+    let bulk_job = kk.is_job();
     let bulk_flux = kk.is_flux();
+    let bulk_certificate = kk.is_certificate();
     let bulk_helmrelease = kk.is_helmrelease();
     let bulk_has_source_ref = kk.has_source_ref();
     let key_sv = StoredValue::new(kind.key.clone());
 
     let rows = t.rows;
     let selected = t.selected;
+    let can_rerun_selected_jobs = move || {
+        let selected = selected.get();
+        !selected.is_empty()
+            && rows.with(|rows| {
+                selected.iter().all(|uid| {
+                    rows.get(uid)
+                        .is_some_and(|row| matches!(row.status, RowStatus::Ok | RowStatus::Error))
+                })
+            })
+    };
     // Live status breakdown for the stat strip — RowStatus is a fieldless enum,
     // so `as usize` is its declaration-order discriminant (Ok=0, Pending=1,
     // Warn=2, Error=3, Done=4, Unknown=5); Unknown folds into the total only.
@@ -565,6 +579,11 @@ pub(crate) fn KindTable(
                     {bulk_workload.then(|| view! {
                         <button class="act" on:click=move |_| do_bulk("restart")>"Restart"</button>
                     })}
+                    {bulk_job.then(|| view! {
+                        <button class="act" disabled=move || !can_rerun_selected_jobs()
+                            title="Only completed or failed Jobs can be re-run"
+                            on:click=move |_| do_bulk("job-rerun")>"Re-run"</button>
+                    })}
                     {bulk_flux.then(|| view! {
                         <button class="act" on:click=move |_| do_bulk("flux-reconcile")>"Reconcile"</button>
                         {bulk_has_source_ref.then(|| view! {
@@ -580,6 +599,17 @@ pub(crate) fn KindTable(
                         {move || bulk_show_resume().then(|| view! {
                             <button class="act" on:click=move |_| do_bulk("flux-resume")>"Resume"</button>
                         })}
+                    })}
+                    {bulk_certificate.then(|| view! {
+                        <button class="act" on:click=move |_| {
+                            let n = selected.get_untracked().len();
+                            ask_confirm(
+                                confirm,
+                                format!("Force renewal of {n} Certificates?"),
+                                "Renew",
+                                move || do_bulk("certificate-renew"),
+                            );
+                        }>"Force renew"</button>
                     })}
                     <button class="act danger" on:click=move |_| {
                         let n = selected.get_untracked().len();

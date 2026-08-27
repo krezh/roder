@@ -13,8 +13,33 @@ impl Backend {
     /// RBAC: which actions may the current identity take on this kind/namespace.
     /// Cached briefly so the per-detail-open `patch`+`delete` checks don't each SSAR.
     pub async fn can(&self, verb: &str, key: &str, ns: Option<&str>) -> bool {
+        self.can_resource(verb, key, ns, None).await
+    }
+
+    pub async fn can_subresource(
+        &self,
+        verb: &str,
+        key: &str,
+        ns: Option<&str>,
+        subresource: &str,
+    ) -> bool {
+        self.can_resource(verb, key, ns, Some(subresource)).await
+    }
+
+    async fn can_resource(
+        &self,
+        verb: &str,
+        key: &str,
+        ns: Option<&str>,
+        subresource: Option<&str>,
+    ) -> bool {
         const TTL: std::time::Duration = std::time::Duration::from_secs(30);
-        let ck = (verb.to_string(), key.to_string(), ns.map(|s| s.to_string()));
+        let ck = (
+            verb.to_string(),
+            key.to_string(),
+            ns.map(|s| s.to_string()),
+            subresource.map(|value| value.to_string()),
+        );
         {
             let cache = self.can_cache.read().await;
             if let Some((at, allowed)) = cache.get(&ck) {
@@ -32,6 +57,7 @@ impl Backend {
                     verb: Some(verb.to_string()),
                     group: Some(entry.kind.group.clone()),
                     resource: Some(entry.kind.plural.clone()),
+                    subresource: subresource.map(|value| value.to_string()),
                     namespace: ns.map(|s| s.to_string()),
                     ..Default::default()
                 }),

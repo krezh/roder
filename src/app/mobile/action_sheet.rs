@@ -6,14 +6,15 @@ use leptos::prelude::*;
 use roder_core::{ResourceKind, RowStatus};
 
 use crate::app::events::{fire_action, fire_action_with};
-use crate::app::overlays::confirm::{ask_confirm, Confirm};
-use crate::app::overlays::delete::{ask_delete, delete_extra, DeleteRequest};
-use crate::app::overlays::toast::{show_toast, Toast, ToastKind};
 use crate::app::state::{
     open_logs, Catalog, CtxMenu, DetailTarget, ExecOpen, ExecTarget, LogPods, LogTarget, TableRows,
     TableSelected, TableTargets,
 };
 use crate::app::table_logic::{resolve_action_targets, targets_all};
+use crate::app::ui::{
+    ask_confirm, ask_delete, delete_extra, show_toast, use_option_overlay, Confirm, DeleteRequest,
+    Toast, ToastKind,
+};
 use crate::app::util::clipboard::copy_to_clipboard;
 use crate::app::util::format::parse_key;
 use crate::app::util::predicate::KindKind;
@@ -34,7 +35,7 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
     let table_targets = expect_context::<TableTargets>().0;
     let toast = expect_context::<RwSignal<Option<Toast>>>();
 
-    let (snapshot, closing, do_close) = crate::app::overlays::use_option_overlay(ctx);
+    let (snapshot, closing, do_close) = use_option_overlay(ctx);
 
     view! {
         {move || snapshot.get().map(|m| {

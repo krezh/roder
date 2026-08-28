@@ -5,10 +5,8 @@ pub(crate) mod info;
 pub(crate) mod metrics;
 pub(crate) mod pods;
 
-use leptos::prelude::*;
-use roder_core::ObjectDetail;
-
 use crate::app::components::table::ScaleControl;
+use crate::app::controllers::detail::{DetailTab as Tab, ResourceDetailController};
 use crate::app::logs::LogsView;
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::overlays::delete::{ask_delete, delete_extra, DeleteRequest};
@@ -20,19 +18,11 @@ use crate::app::util::json::selector_from;
 use crate::app::util::predicate::KindKind;
 use crate::app::util::yaml_hl;
 use crate::data;
+use leptos::prelude::*;
 
 use self::info::info_view;
 use self::metrics::MetricsChart;
 use self::pods::PodsTab;
-
-#[derive(Clone, Copy, PartialEq)]
-pub(crate) enum Tab {
-    Info,
-    Yaml,
-    Logs,
-    Metrics,
-    Talos,
-}
 
 /// Right-docked, drag-resizable detail drawer. Shows `RowDetail` for the currently
 /// selected object (the `detail` context signal); slides out when nothing is open.
@@ -108,7 +98,6 @@ pub(crate) fn RowDetail(
     let requested_tab = expect_context::<RwSignal<Option<Tab>>>();
     let confirm = expect_context::<RwSignal<Option<Confirm>>>();
     let delete_confirm = expect_context::<RwSignal<Option<DeleteRequest>>>();
-    let status = RwSignal::new(None::<Result<String, String>>);
     let yaml = RwSignal::new(String::new());
     // Honor a tab requested via the context menu (e.g. "Logs"), then clear it.
     let initial_tab = requested_tab.get_untracked().unwrap_or(Tab::Info);
@@ -144,20 +133,9 @@ pub(crate) fn RowDetail(
 
     let tv = StoredValue::new(target.clone());
     let kind_sv = StoredValue::new(kind.clone());
-
-    let t_obj = target.clone();
-    let obj = LocalResource::new(move || {
-        let t = t_obj.clone();
-        async move {
-            data::fetch_json::<ObjectDetail>(&data::detail_url(
-                &t.key,
-                t.namespace.as_deref(),
-                &t.name,
-            ))
-            .await
-            .ok()
-        }
-    });
+    let controller = ResourceDetailController::new(target);
+    let obj = controller.object;
+    let status = controller.status;
     // Live spec.replicas (for pre-filling the scale input).
     let current_replicas = Memo::new(move |_| {
         obj.get().flatten().and_then(|d| {
@@ -188,49 +166,29 @@ pub(crate) fn RowDetail(
         }
     });
 
-    let t_perm = target.clone();
-    let perms = LocalResource::new(move || {
-        let t = t_perm.clone();
-        async move {
-            data::fetch_json::<serde_json::Value>(&format!(
-                "/api/permissions?key={}&namespace={}",
-                t.key,
-                t.namespace
-                    .as_deref()
-                    .map(data::percent_encode)
-                    .unwrap_or_default()
-            ))
-            .await
-            .ok()
-        }
-    });
     let can_patch = move || {
-        perms
+        controller
+            .permissions
             .get()
-            .flatten()
-            .and_then(|v| v.get("patch").and_then(|b| b.as_bool()))
-            .unwrap_or(false)
+            .is_some_and(|value| value.patch)
     };
     let can_delete = move || {
-        perms
+        controller
+            .permissions
             .get()
-            .flatten()
-            .and_then(|v| v.get("delete").and_then(|b| b.as_bool()))
-            .unwrap_or(false)
+            .is_some_and(|value| value.delete)
     };
     let can_create = move || {
-        perms
+        controller
+            .permissions
             .get()
-            .flatten()
-            .and_then(|v| v.get("create").and_then(|b| b.as_bool()))
-            .unwrap_or(false)
+            .is_some_and(|value| value.create)
     };
     let can_update_status = move || {
-        perms
+        controller
+            .permissions
             .get()
-            .flatten()
-            .and_then(|v| v.get("update_status").and_then(|b| b.as_bool()))
-            .unwrap_or(false)
+            .is_some_and(|value| value.update_status)
     };
     let job_terminal = move || {
         obj.get().flatten().is_some_and(|detail| {
@@ -252,29 +210,7 @@ pub(crate) fn RowDetail(
     };
 
     let run = move |action: &'static str, extra: serde_json::Value| {
-        let t = tv.get_value();
-        let mut body = serde_json::json!({
-            "action": action, "key": t.key, "namespace": t.namespace, "name": t.name,
-        });
-        if let (Some(o), Some(ex)) = (body.as_object_mut(), extra.as_object()) {
-            for (k, v) in ex {
-                o.insert(k.clone(), v.clone());
-            }
-        }
-        leptos::task::spawn_local(async move {
-            match data::post_action(&body).await {
-                Ok(_) => {
-                    status.set(Some(Ok(format!("{action} ✓"))));
-                    if action == "delete" {
-                        on_delete();
-                    }
-                    if matches!(action, "flux-suspend" | "flux-resume" | "certificate-renew") {
-                        obj.refetch();
-                    }
-                }
-                Err(e) => status.set(Some(Err(e))),
-            }
-        });
+        controller.run(tv.get_value(), action, extra, on_delete);
     };
 
     view! {

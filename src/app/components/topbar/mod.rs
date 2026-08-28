@@ -7,7 +7,6 @@ mod alerts_button;
 mod badge;
 mod brand;
 mod failing_badge;
-mod failure_watch;
 mod flux_failing_badge;
 mod identity;
 mod sanitize_button;
@@ -16,7 +15,6 @@ mod top_usage;
 
 pub(crate) use alerts_button::AlertsButton;
 pub(crate) use failing_badge::FailingBadge;
-pub(crate) use failure_watch::use_failure_watch;
 pub(crate) use flux_failing_badge::FluxFailingBadge;
 pub(crate) use sanitize_button::SanitizeButton;
 pub(crate) use sync_button::SyncButton;

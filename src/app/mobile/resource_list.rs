@@ -4,38 +4,20 @@
 use leptos::prelude::*;
 use roder_core::{ResourceKind, RowStatus};
 
-use crate::app::components::topbar::{SanitizeButton, SyncButton};
 use crate::app::events::{make_bulk_open_logs, make_do_bulk, make_do_delete};
 use crate::app::hooks::{use_sse_subscription, use_table_state};
 use crate::app::mobile::bulk_bar::MobileBulkBar;
+use crate::app::mobile::dashboard::MobileDashboard;
+use crate::app::mobile::list_actions::MobileListActions;
 use crate::app::mobile::row_card::{use_select_mode, CardFields, MobileRowCard};
-use crate::app::overlays::toast::Toast;
 use crate::app::state::{
     CtxMenu, DetailTarget, LogPods, NavigationRestored, OnlyProblems, SortKey, TableRows,
     TableSelected, Tick,
 };
 use crate::app::table_logic;
+use crate::app::ui::Toast;
 use crate::app::util::predicate::KindKind;
-use crate::app::views::dashboard::Dashboard;
 use crate::data;
-
-#[component]
-pub(crate) fn MobileListActions() -> impl IntoView {
-    let only_problems = expect_context::<OnlyProblems>().0;
-
-    view! {
-        <div class="mobile-list-actions" aria-label="Resource actions">
-            <button type="button" class="mobile-problems-toggle"
-                class:active=move || only_problems.get()
-                aria-pressed=move || only_problems.get().to_string()
-                on:click=move |_| only_problems.update(|active| *active = !*active)>
-                "Problems"
-            </button>
-            <SanitizeButton />
-            <SyncButton />
-        </div>
-    }
-}
 
 #[component]
 pub(crate) fn MobileResourceView() -> impl IntoView {
@@ -47,7 +29,7 @@ pub(crate) fn MobileResourceView() -> impl IntoView {
         {move || if !restored.get() {
             view! { <div aria-label="Restoring view"></div> }.into_any()
         } else { match selected_kind.get() {
-            None => view! { <Dashboard /> }.into_any(),
+            None => view! { <MobileDashboard /> }.into_any(),
             Some(kind) => {
                 let storage_key = format!("roder.filter.{}", kind.key);
                 let initial = data::storage_get(&storage_key).unwrap_or_default();

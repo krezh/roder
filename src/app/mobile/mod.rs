@@ -6,42 +6,50 @@
 //! as-is from the desktop tree (progressively replaced phase by phase).
 
 mod action_sheet;
+mod alerts;
 mod bottom_nav;
 mod bulk_bar;
+mod dashboard;
 mod detail_view;
-mod disclosure;
+mod dialogs;
+mod drain;
+mod exec;
 mod header;
+mod list_actions;
 mod logs_view;
+mod palettes;
+mod pods;
 mod resource_list;
 mod row_card;
 mod search_list;
+mod shortcuts;
+mod sidebar;
 mod status;
+mod toast;
 mod workspace_view;
 
 use leptos::prelude::*;
 use leptos_router::components::{Route, Routes};
 use leptos_router::StaticSegment;
 
-use crate::app::components::sidebar::Sidebar;
-use crate::app::detail::pods::PodModal;
-use crate::app::overlays::confirm::ConfirmDialog;
-use crate::app::overlays::delete::DeleteDialog;
-use crate::app::overlays::drain::DrainOverlay;
-use crate::app::overlays::exec::ExecWindow;
-use crate::app::overlays::ns_palette::NsPalette;
-use crate::app::overlays::palette::CommandPalette;
-use crate::app::overlays::shortcuts::ShortcutsHelp;
-use crate::app::overlays::toast::ToastView;
-use crate::app::overlays::AlertsPanel;
 use crate::app::state::NavOpen;
 
 use action_sheet::MobileActionSheet;
+use alerts::MobileAlertsPanel;
 use bottom_nav::MobileBottomNav;
 use detail_view::MobileDetailView;
+use dialogs::{MobileConfirmDialog, MobileDeleteDialog};
+use drain::MobileDrainOverlay;
+use exec::MobileExecWindow;
 use header::MobileHeader;
 use logs_view::MobileLogsView;
+use palettes::{MobileCommandPalette, MobileNsPalette};
+use pods::MobilePodModal;
 use resource_list::MobileResourceView;
 use search_list::MobileSearchList;
+use shortcuts::MobileShortcutsHelp;
+use sidebar::MobileSidebar;
+use toast::MobileToastView;
 use workspace_view::MobileWorkspaceView;
 
 #[component]
@@ -93,7 +101,7 @@ pub(crate) fn MobileShell() -> impl IntoView {
                     <span class="mobile-home-icon" aria-hidden="true"></span>
                     <span>"Cluster overview"</span>
                 </button>
-                <Sidebar filter=Signal::derive(move || nav_filter.get()) />
+                <MobileSidebar filter=Signal::derive(move || nav_filter.get()) />
             </div>
             <main class="mobile-main">
                 <Routes fallback=|| view! { <p class="empty">"Not found."</p> }>
@@ -105,17 +113,17 @@ pub(crate) fn MobileShell() -> impl IntoView {
             <MobileBottomNav />
             <MobileDetailView />
             <MobileLogsView />
-            <CommandPalette />
-            <NsPalette />
+            <MobileCommandPalette />
+            <MobileNsPalette />
             <MobileActionSheet />
-            <ConfirmDialog />
-            <DeleteDialog />
-            <DrainOverlay />
-            <PodModal />
-            <ExecWindow />
-            <ShortcutsHelp />
-            <AlertsPanel />
-            <ToastView />
+            <MobileConfirmDialog />
+            <MobileDeleteDialog />
+            <MobileDrainOverlay />
+            <MobilePodModal />
+            <MobileExecWindow />
+            <MobileShortcutsHelp />
+            <MobileAlertsPanel />
+            <MobileToastView />
         </div>
     }
 }

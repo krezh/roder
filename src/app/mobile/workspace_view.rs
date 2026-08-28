@@ -11,14 +11,14 @@ use roder_core::{ResourceKind, RowStatus, WatchEvent};
 use crate::app::events::{make_bulk_open_logs, make_do_bulk, make_do_delete, RowMap};
 use crate::app::hooks::{use_table_state, Coalescer};
 use crate::app::mobile::bulk_bar::MobileBulkBar;
-use crate::app::mobile::resource_list::MobileListActions;
+use crate::app::mobile::list_actions::MobileListActions;
 use crate::app::mobile::row_card::{use_select_mode, CardFields, MobileRowCard};
-use crate::app::overlays::toast::{show_toast_detail, Toast, ToastKind};
 use crate::app::state::{
     Catalog, ConnectionState, Connectivity, CtxMenu, DetailTarget, LogPods, OnlyProblems, SortKey,
     Tick, WorkspaceConf,
 };
 use crate::app::table_logic;
+use crate::app::ui::{show_toast_detail, Toast, ToastKind};
 use crate::app::util::predicate::KindKind;
 use crate::data;
 

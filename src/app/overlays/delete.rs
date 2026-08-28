@@ -2,42 +2,11 @@
 //! (`ConfirmDialog`'s cousin — a plain label/callback doesn't leave room for
 //! these, so delete gets its own small dialog instead of overloading `Confirm`).
 
-use std::sync::Arc;
-
 use leptos::prelude::*;
 use roder_core::DeletePropagation;
 
 use crate::app::components::dropdown::{Dropdown, DropdownClose};
-
-/// A pending delete confirmation. `on_confirm` is a plain `Arc`'d closure
-/// (mirrors `ConfirmButton`) so it survives even if the widget that requested
-/// it is unmounted before the user responds.
-#[derive(Clone)]
-pub(crate) struct DeleteRequest {
-    pub(crate) message: String,
-    pub(crate) on_confirm: Arc<dyn Fn(bool, Option<DeletePropagation>) + Send + Sync>,
-}
-
-/// Pop the delete confirmation dialog.
-pub(crate) fn ask_delete(
-    sig: RwSignal<Option<DeleteRequest>>,
-    message: impl Into<String>,
-    on_confirm: impl Fn(bool, Option<DeletePropagation>) + Send + Sync + 'static,
-) {
-    sig.set(Some(DeleteRequest {
-        message: message.into(),
-        on_confirm: Arc::new(on_confirm),
-    }));
-}
-
-/// Merge `force`/`propagation` into the `/api/action` request body, same
-/// shape as the `extra` argument to `fire_action_with`/`run`.
-pub(crate) fn delete_extra(
-    force: bool,
-    propagation: Option<DeletePropagation>,
-) -> serde_json::Value {
-    serde_json::json!({ "force": force, "propagation": propagation })
-}
+pub(crate) use crate::app::ui::{ask_delete, delete_extra, DeleteRequest};
 
 #[component]
 pub(crate) fn DeleteDialog() -> impl IntoView {

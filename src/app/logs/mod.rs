@@ -3,10 +3,10 @@
 use leptos::ev;
 use leptos::prelude::*;
 
+use crate::app::log_stream::{extract_timestamp, use_log_stream};
 use crate::app::state::{LogPods, LogTarget};
 use crate::app::util::color::hue_of;
 use crate::app::util::format::{ansi_to_html, log_level, parse_log_line};
-use crate::data;
 
 /// Right-docked, drag-resizable log sidebar. Holds one streaming `LogsView` pane
 /// per open pod, so several pods can be tailed side by side.
@@ -90,36 +90,14 @@ pub(crate) fn LogsView(
     target: Option<LogTarget>,
 ) -> impl IntoView {
     let log_pods = expect_context::<LogPods>().0;
-    // (id, line) so the keyed <For> appends only the new line instead of
-    // re-rendering the whole buffer on every incoming line.
-    let lines = RwSignal::new(Vec::<(u64, String)>::new());
-    let counter = StoredValue::new(0u64);
-    let follow = RwSignal::new(true);
-    let wrap = RwSignal::new(true);
-    let show_timestamps = RwSignal::new(false);
-    let filter = RwSignal::new(String::new());
-    let level_filter = RwSignal::new(String::new());
+    let stream = use_log_stream(url);
+    let filtered_lines = stream.filtered_lines;
+    let follow = stream.follow;
+    let wrap = stream.wrap;
+    let show_timestamps = stream.show_timestamps;
+    let filter = stream.filter;
+    let level_filter = stream.level_filter;
     let logs_ref = NodeRef::<leptos::html::Div>::new();
-
-    Effect::new(move |_prev: Option<Option<data::SseHandle>>| {
-        lines.set(Vec::new());
-        let url = url.clone();
-        data::subscribe_lines(&url, move |line| {
-            let id = counter
-                .try_update_value(|c| {
-                    *c += 1;
-                    *c
-                })
-                .unwrap_or_default();
-            lines.update(|v| {
-                v.push((id, line));
-                if v.len() > 1000 {
-                    let excess = v.len() - 1000;
-                    v.drain(0..excess);
-                }
-            });
-        })
-    });
 
     // Auto-scroll to the bottom on new lines while following.
     //
@@ -129,7 +107,7 @@ pub(crate) fn LogsView(
     // height and leave the newest line just outside the viewport.
     #[cfg(target_arch = "wasm32")]
     Effect::new(move |_| {
-        lines.get();
+        filtered_lines.track();
         if follow.get() {
             if let Some(el) = logs_ref.get_untracked() {
                 let el2 = el.clone();
@@ -138,18 +116,6 @@ pub(crate) fn LogsView(
                 });
             }
         }
-    });
-
-    // Filter lines based on search text and level
-    let filtered_lines = Memo::new(move |_| {
-        let f = filter.get().to_lowercase();
-        let lvl_f = level_filter.get().to_lowercase();
-        lines.with(|v| {
-            v.iter()
-                .filter(|(_, line)| log_line_matches(line, &f, &lvl_f))
-                .cloned()
-                .collect::<Vec<_>>()
-        })
     });
 
     view! {
@@ -231,86 +197,9 @@ pub(crate) fn LogsView(
     }
 }
 
-fn log_line_matches(line: &str, text_filter_lower: &str, level_filter_lower: &str) -> bool {
-    let (pod, message) = match line.split_once(" │ ") {
-        Some((pod, message)) => (Some(pod), message),
-        None => (None, line),
-    };
-    if !level_filter_lower.is_empty() && log_level(message) != level_filter_lower {
-        return false;
-    }
-    text_filter_lower.is_empty()
-        || pod.is_some_and(|pod| pod.to_lowercase().contains(text_filter_lower))
-        || message.to_lowercase().contains(text_filter_lower)
-}
-
-/// Extract an ISO 8601 timestamp from the beginning of a log line.
-/// Returns `(Some(timestamp), remaining_content)` or `(None, original_line)`.
-fn extract_timestamp(line: &str) -> (Option<String>, String) {
-    let trimmed = line.trim_start();
-    let b = trimmed.as_bytes();
-
-    // Use byte indexing throughout: ISO 8601 timestamps are pure ASCII so
-    // byte offsets == char offsets, and we never risk slicing mid-codepoint.
-    // Bail early if the first 19 bytes aren't all ASCII (e.g. line starts with
-    // a non-ASCII pod name in a multi-pod stream).
-    if b.len() >= 19
-        && b[4] == b'-'
-        && b[7] == b'-'
-        && (b[10] == b'T' || b[10] == b' ')
-        && b[13] == b':'
-        && b[16] == b':'
-        && b[..19].iter().all(|c| c.is_ascii())
-    {
-        // Fractional seconds
-        let end = b[19..]
-            .iter()
-            .position(|&c| c == b' ' || c == b'Z' || c == b'+' || c == b'-')
-            .map(|i| i + 19)
-            .unwrap_or(19);
-
-        let mut ts_end = end;
-        if b.get(end) == Some(&b'.') {
-            ts_end = b[end..]
-                .iter()
-                .position(|c| !c.is_ascii_digit())
-                .map(|i| i + end)
-                .unwrap_or(b.len());
-        }
-        if matches!(b.get(ts_end), Some(&b'Z') | Some(&b'+') | Some(&b'-')) {
-            let was_z = b[ts_end] == b'Z';
-            ts_end += 1;
-            if !was_z {
-                // Consume +HH:MM or -HH:MM (up to 5 more bytes)
-                ts_end = (ts_end + 5).min(b.len());
-            }
-        }
-
-        let timestamp = trimmed[..ts_end].to_string();
-        let content = trimmed[ts_end..].trim_start().to_string();
-        return (Some(timestamp), content);
-    }
-
-    (None, line.to_string())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{extract_timestamp, log_line_matches};
-
-    #[test]
-    fn plain_line_requires_text_filter_to_match_message() {
-        assert!(!log_line_matches("server started", "missing", ""));
-        assert!(log_line_matches("server started", "started", ""));
-    }
-
-    #[test]
-    fn aggregate_line_can_match_pod_or_message_and_level() {
-        let line = "api-7c9 │ ERROR request failed";
-        assert!(log_line_matches(line, "api-7c9", "error"));
-        assert!(log_line_matches(line, "request", "error"));
-        assert!(!log_line_matches(line, "api-7c9", "info"));
-    }
+    use crate::app::log_stream::extract_timestamp;
 
     #[test]
     fn rfc3339_with_z() {

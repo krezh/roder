@@ -10,15 +10,15 @@ use roder_core::{ResourceKind, WatchEvent};
 use crate::app::events::make_do_delete_multi;
 use crate::app::hooks::{use_table_state, Coalescer};
 use crate::app::mobile::bulk_bar::MobileBulkBar;
-use crate::app::mobile::resource_list::MobileListActions;
+use crate::app::mobile::list_actions::MobileListActions;
 use crate::app::mobile::row_card::{use_select_mode, CardFields, MobileRowCard};
-use crate::app::overlays::toast::Toast;
 use crate::app::search_state::{self, MergedRow};
 use crate::app::state::{
     open_logs, Catalog, ConnectionState, Connectivity, CtxMenu, DetailTarget, LogPods, LogTarget,
     MultiKindSearch, OnlyProblems, ResourceFilter, TableRows, TableSelected, TableTargets, Tick,
 };
 use crate::app::table_logic;
+use crate::app::ui::Toast;
 #[cfg(target_arch = "wasm32")]
 use crate::app::util::history::history_back;
 use crate::data;

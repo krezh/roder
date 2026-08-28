@@ -8,15 +8,19 @@ use roder_core::ResourceKind;
 use crate::data;
 
 mod components;
+mod controllers;
 mod detail;
 mod events;
+mod failure_watch;
 mod hooks;
+mod log_stream;
 mod logs;
 mod mobile;
 mod overlays;
 mod search_state;
 mod state;
 mod table_logic;
+mod ui;
 mod util;
 mod views;
 
@@ -25,21 +29,21 @@ pub use state::DetailTarget;
 use components::sidebar::Sidebar;
 use components::tooltip::TooltipLayer;
 use components::topbar::Topbar;
+use controllers::detail::DetailTab;
 use detail::pods::PodModal;
 use detail::DetailDrawer;
-use detail::Tab;
 use logs::LogSidebar;
 use mobile::MobileShell;
 use overlays::access_review::AccessReview;
-use overlays::confirm::{Confirm, ConfirmDialog};
+use overlays::confirm::ConfirmDialog;
 use overlays::context_menu::ContextMenu;
-use overlays::delete::{DeleteDialog, DeleteRequest};
+use overlays::delete::DeleteDialog;
 use overlays::drain::DrainOverlay;
 use overlays::exec::ExecWindow;
 use overlays::ns_palette::NsPalette;
 use overlays::palette::CommandPalette;
 use overlays::shortcuts::ShortcutsHelp;
-use overlays::toast::{Toast, ToastView};
+use overlays::toast::ToastView;
 use overlays::tree::ResourceTreeWindow;
 use overlays::AlertsPanel;
 use state::{
@@ -49,6 +53,7 @@ use state::{
     OnlyProblems, PaletteOpen, PodModalTarget, ResourceFilter, ShortcutsOpen, TableRows,
     TableSelected, TableTargets, TalosFeatures, Tick, TreeOpen, WorkspaceConf, WorkspaceConfig,
 };
+use ui::{Confirm, DeleteRequest, Toast};
 use views::resource::ResourceView;
 use views::search::SearchResultsView;
 use views::workspace::WorkspaceView;
@@ -215,7 +220,7 @@ pub fn App() -> impl IntoView {
     provide_context(NsPaletteOpen(ns_palette_open));
     let catalog = RwSignal::new(Vec::<ResourceKind>::new());
     let ctx_menu = RwSignal::new(None::<CtxMenu>);
-    let requested_tab = RwSignal::new(None::<Tab>);
+    let requested_tab = RwSignal::new(None::<DetailTab>);
     let tick = RwSignal::new(0u32);
     let only_problems = RwSignal::new(false);
     let confirm = RwSignal::new(None::<Confirm>);
@@ -270,7 +275,7 @@ pub fn App() -> impl IntoView {
     provide_context(TableSelected(StoredValue::new(None)));
     provide_context(TableRows(StoredValue::new(None)));
     provide_context(TableTargets(StoredValue::new(None)));
-    components::topbar::use_failure_watch();
+    failure_watch::use_failure_watch();
 
     // Keep an end-to-end status alive independently of whichever view/SSE streams
     // happen to be open. Browser network events update immediately; the periodic

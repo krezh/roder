@@ -1,10 +1,10 @@
 //! The pod-info modal and the workload's live pod list.
 
 use leptos::prelude::*;
-use roder_core::{ResourceRow, RowStatus};
+use roder_core::RowStatus;
 
-use crate::app::hooks::use_sse_subscription;
-use crate::app::state::{Catalog, CtxMenu, DetailTarget, PodModalTarget, Tick};
+use crate::app::controllers::detail::use_pod_watch;
+use crate::app::state::{CtxMenu, DetailTarget, PodModalTarget, Tick};
 use crate::app::util::color::dot_class;
 use crate::data;
 
@@ -41,36 +41,11 @@ pub(crate) fn PodModal() -> impl IntoView {
 pub(crate) fn PodsTab(namespace: String, selector: String) -> impl IntoView {
     let pod_modal = expect_context::<PodModalTarget>().0;
     let ctx = expect_context::<RwSignal<Option<CtxMenu>>>();
-    let catalog = expect_context::<Catalog>().0;
     let tick = expect_context::<Tick>().0;
-
-    let pod_kind = Memo::new(move |_| {
-        catalog
-            .get()
-            .into_iter()
-            .find(|k| k.group.is_empty() && k.kind == "Pod")
-    });
-
-    let rows = RwSignal::new(std::collections::HashMap::<String, ResourceRow>::new());
-    let entering = RwSignal::new(std::collections::BTreeSet::<String>::new());
-    let removing = RwSignal::new(std::collections::BTreeSet::<String>::new());
-
-    let ns = namespace.clone();
-    use_sse_subscription(rows, entering, removing, None, move || {
-        rows.set(std::collections::HashMap::new());
-        let pk = pod_kind.get()?;
-        Some(data::watch_url(&pk.key, Some(&ns), Some(&selector)))
-    });
-
-    let shown_uids = Memo::new(move |_| {
-        rows.with(|m| {
-            let mut v: Vec<&ResourceRow> = m.values().collect();
-            v.sort_by(|a, b| a.name.cmp(&b.name));
-            v.into_iter()
-                .map(|r| r.uid.clone())
-                .collect::<Vec<String>>()
-        })
-    });
+    let watch = use_pod_watch(namespace, selector);
+    let rows = watch.rows;
+    let shown_uids = watch.shown_uids;
+    let pod_kind = watch.pod_kind;
 
     view! {
         <div class="rd-body">

@@ -5,8 +5,7 @@
 use leptos::prelude::*;
 
 use crate::app::events::UidSet;
-use crate::app::overlays::confirm::{ask_confirm, Confirm};
-use crate::app::overlays::delete::{ask_delete, DeleteRequest};
+use crate::app::ui::{ask_confirm, ask_delete, Confirm, DeleteRequest};
 
 #[component]
 pub(crate) fn MobileBulkBar(

@@ -6,10 +6,7 @@ use std::rc::Rc;
 use leptos::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use roder_core::ActiveDrainJob;
-use roder_core::{
-    DrainBlocker, DrainEvent, DrainEventKind, DrainJobRef, DrainOptions,
-    DRAIN_GRACE_PERIOD_MAX_SECS, DRAIN_TIMEOUT_MAX_SECS, DRAIN_TIMEOUT_MIN_SECS,
-};
+use roder_core::{DrainBlocker, DrainEvent, DrainEventKind, DrainJobRef, DrainOptions};
 
 use crate::app::overlays::toast::{
     show_progress_toast, show_toast, show_toast_detail, update_progress_toast, Toast, ToastKind,
@@ -798,44 +795,19 @@ fn options_from_signals(
     grace: RwSignal<String>,
     timeout: RwSignal<String>,
 ) -> DrainOptions {
-    let (grace_period, timeout_secs) =
-        parse_drain_limits(&grace.get_untracked(), &timeout.get_untracked());
-    DrainOptions {
-        force: force.get_untracked(),
-        delete_emptydir_data: delete_emptydir.get_untracked(),
-        ignore_daemonsets: ignore_daemonsets.get_untracked(),
-        disable_eviction: disable_eviction.get_untracked(),
-        grace_period,
-        timeout_secs,
-    }
-}
-
-fn parse_drain_limits(grace: &str, timeout: &str) -> (Option<u32>, u64) {
-    let grace_period = grace
-        .trim()
-        .parse::<u32>()
-        .ok()
-        .map(|secs| secs.min(DRAIN_GRACE_PERIOD_MAX_SECS));
-    let timeout_secs = timeout
-        .trim()
-        .parse::<u64>()
-        .unwrap_or(DrainOptions::default().timeout_secs)
-        .clamp(DRAIN_TIMEOUT_MIN_SECS, DRAIN_TIMEOUT_MAX_SECS);
-    (grace_period, timeout_secs)
+    crate::app::controllers::drain::parse_options(
+        force.get_untracked(),
+        delete_emptydir.get_untracked(),
+        ignore_daemonsets.get_untracked(),
+        disable_eviction.get_untracked(),
+        &grace.get_untracked(),
+        &timeout.get_untracked(),
+    )
 }
 
 /// POST the drain (or drain-first power) action; resolve to the job id.
 async fn start_drain(target: &DrainTarget, options: &DrainOptions) -> Result<DrainJobRef, String> {
-    let payload = match &target.power {
-        None => serde_json::json!({
-            "action": "drain", "key": target.key, "name": target.name, "options": options,
-        }),
-        Some(p) => serde_json::json!({
-            "action": format!("talos-{p}"), "name": target.name, "drain": true, "options": options,
-        }),
-    };
-    let body = crate::data::post_action(&payload).await?;
-    serde_json::from_str::<DrainJobRef>(&body).map_err(|_| format!("unexpected response: {body}"))
+    crate::app::controllers::drain::start(target, options).await
 }
 
 fn progress_url(job: &DrainJobRef) -> String {
@@ -922,20 +894,39 @@ mod tests {
 
     #[test]
     fn parse_drain_limits_clamps_values() {
-        assert_eq!(
-            parse_drain_limits("999999", "999999"),
-            (Some(DRAIN_GRACE_PERIOD_MAX_SECS), DRAIN_TIMEOUT_MAX_SECS)
+        let options = crate::app::controllers::drain::parse_options(
+            false, false, true, false, "999999", "999999",
         );
-        assert_eq!(parse_drain_limits("0", "0"), (Some(0), 0));
+        assert_eq!(
+            (options.grace_period, options.timeout_secs),
+            (
+                Some(roder_core::DRAIN_GRACE_PERIOD_MAX_SECS),
+                roder_core::DRAIN_TIMEOUT_MAX_SECS
+            )
+        );
+        let options =
+            crate::app::controllers::drain::parse_options(false, false, true, false, "0", "0");
+        assert_eq!((options.grace_period, options.timeout_secs), (Some(0), 0));
     }
 
     #[test]
     fn parse_drain_limits_uses_defaults_for_invalid_values() {
+        let options = crate::app::controllers::drain::parse_options(
+            false,
+            false,
+            true,
+            false,
+            "",
+            "not-a-number",
+        );
         assert_eq!(
-            parse_drain_limits("", "not-a-number"),
+            (options.grace_period, options.timeout_secs),
             (None, DrainOptions::default().timeout_secs)
         );
-        assert_eq!(parse_drain_limits("invalid", "30"), (None, 30));
+        let options = crate::app::controllers::drain::parse_options(
+            false, false, true, false, "invalid", "30",
+        );
+        assert_eq!((options.grace_period, options.timeout_secs), (None, 30));
     }
 
     #[test]

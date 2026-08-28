@@ -4,6 +4,7 @@
 use leptos::prelude::*;
 use roder_core::ObjectDetail;
 
+use crate::app::controllers::detail::certificate_summary;
 use crate::app::util::format::camel_label;
 use crate::app::util::json::{
     conditions, container_envs, container_images, data_entries, json_map, json_str, owner_refs,
@@ -280,76 +281,6 @@ pub(crate) fn info_view(d: ObjectDetail, kind: String) -> impl IntoView {
             })}
         </div>
     }
-}
-
-struct CertificateSummary {
-    state: String,
-    state_class: &'static str,
-    not_before: String,
-    not_before_raw: String,
-    not_after: String,
-    not_after_raw: String,
-    renewal_time: String,
-    renewal_time_raw: String,
-    revision: String,
-    secret: String,
-}
-
-fn certificate_summary(object: &serde_json::Value) -> CertificateSummary {
-    let condition = |type_: &str| {
-        object
-            .pointer("/status/conditions")
-            .and_then(serde_json::Value::as_array)
-            .and_then(|conditions| {
-                conditions.iter().find(|condition| {
-                    condition.get("type").and_then(serde_json::Value::as_str) == Some(type_)
-                })
-            })
-    };
-    let issuing = condition("Issuing").is_some_and(|condition| {
-        condition.get("status").and_then(serde_json::Value::as_str) == Some("True")
-    });
-    let ready = condition("Ready");
-    let ready_status = ready
-        .and_then(|condition| condition.get("status"))
-        .and_then(serde_json::Value::as_str);
-    let ready_reason = ready
-        .and_then(|condition| condition.get("reason"))
-        .and_then(serde_json::Value::as_str);
-    let (state, state_class) = if issuing {
-        ("Renewing".to_string(), "pending")
-    } else if ready_reason.is_some_and(|reason| reason.eq_ignore_ascii_case("expired")) {
-        ("Expired".to_string(), "error")
-    } else {
-        match ready_status {
-            Some("True") => ("Valid".to_string(), "ok"),
-            Some("False") => (ready_reason.unwrap_or("Failed").to_string(), "error"),
-            _ => ("Pending".to_string(), "pending"),
-        }
-    };
-    let not_before_raw = json_str(object, &["status", "notBefore"]).unwrap_or_default();
-    let not_after_raw = json_str(object, &["status", "notAfter"]).unwrap_or_default();
-    let renewal_time_raw = json_str(object, &["status", "renewalTime"]).unwrap_or_default();
-
-    CertificateSummary {
-        state,
-        state_class,
-        not_before: display_certificate_time(&not_before_raw),
-        not_before_raw,
-        not_after: display_certificate_time(&not_after_raw),
-        not_after_raw,
-        renewal_time: display_certificate_time(&renewal_time_raw),
-        renewal_time_raw,
-        revision: json_str(object, &["status", "revision"]).unwrap_or_else(|| "-".to_string()),
-        secret: json_str(object, &["spec", "secretName"]).unwrap_or_else(|| "-".to_string()),
-    }
-}
-
-fn display_certificate_time(value: &str) -> String {
-    if value.is_empty() {
-        return "-".to_string();
-    }
-    value.strip_suffix('Z').unwrap_or(value).replace('T', " ")
 }
 
 #[cfg(test)]

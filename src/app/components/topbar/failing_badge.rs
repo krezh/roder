@@ -8,7 +8,7 @@ use crate::app::state::{Catalog, OnlyProblems};
 use crate::data;
 
 use super::badge::use_animated_badge;
-use super::failure_watch::FailureWatchRows;
+use crate::app::failure_watch::FailureWatchRows;
 
 #[component]
 pub(crate) fn FailingBadge() -> impl IntoView {

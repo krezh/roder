@@ -1,4 +1,4 @@
-//! One-click sweep of dead pods and finished jobs, mirroring k9s's `sanitize`.
+//! One-click sweep of dead pods and finished jobs.
 
 use k8s_openapi::api::batch::v1::Job;
 use k8s_openapi::api::core::v1::Pod;
@@ -9,7 +9,7 @@ use super::{api_err, Backend};
 use crate::client::K8sError;
 
 impl Backend {
-    /// Delete all "dead" pods (matching k9s's `toastPhases`) and finished Jobs.
+    /// Delete all "dead" pods (see [`is_toast_pod`]) and finished Jobs.
     /// Best-effort: individual delete failures are silently skipped.
     pub async fn sanitize(&self, namespace: Option<String>) -> Result<CleanupSummary, K8sError> {
         let pod_api: Api<Pod> = match namespace.as_deref() {
@@ -61,7 +61,7 @@ impl Backend {
     }
 }
 
-/// Matches k9s's `toastPhases`: pods that are dead or permanently stuck.
+/// Pods that are dead or permanently stuck, and so safe to sweep.
 /// Skips pods that already have a deletion timestamp (already being removed).
 fn is_toast_pod(pod: &Pod) -> bool {
     if pod.metadata.deletion_timestamp.is_some() {

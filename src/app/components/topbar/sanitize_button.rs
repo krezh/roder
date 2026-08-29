@@ -1,4 +1,4 @@
-//! One-click sweep of dead pods + finished jobs, mirroring k9s's sanitize command.
+//! One-click sweep of dead pods + finished jobs.
 
 use leptos::prelude::*;
 

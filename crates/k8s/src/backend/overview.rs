@@ -28,17 +28,19 @@ impl Backend {
                 }
             }
         }
-        let fresh = self.compute_overview().await?;
-        let mut cache = self.overview_cache.write().await;
-        // Re-check under the write lock: another concurrent caller may have
-        // already populated a fresh entry while we were computing.
-        if cache
-            .as_ref()
-            .map(|(at, _)| at.elapsed() >= TTL)
-            .unwrap_or(true)
+
+        let _refresh = self.overview_refresh.lock().await;
         {
-            *cache = Some((std::time::Instant::now(), fresh.clone()));
+            let cache = self.overview_cache.read().await;
+            if let Some((at, ov)) = cache.as_ref() {
+                if at.elapsed() < TTL {
+                    return Ok(ov.clone());
+                }
+            }
         }
+
+        let fresh = self.compute_overview().await?;
+        *self.overview_cache.write().await = Some((std::time::Instant::now(), fresh.clone()));
         Ok(fresh)
     }
 

@@ -51,6 +51,7 @@ pub struct Backend {
     /// Short-lived cache so rapid (re)connects don't each re-LIST the cluster.
     /// RwLock allows concurrent reads when the cache is fresh.
     overview_cache: tokio::sync::RwLock<Option<(std::time::Instant, ClusterOverview)>>,
+    overview_refresh: tokio::sync::Mutex<()>,
     /// Short-TTL SelfSubjectAccessReview cache keyed (verb, key, namespace).
     /// RwLock so concurrent permission reads don't serialize.
     can_cache: tokio::sync::RwLock<HashMap<CanCacheKey, (std::time::Instant, bool)>>,
@@ -72,6 +73,7 @@ impl Backend {
             shared,
             registry,
             overview_cache: tokio::sync::RwLock::new(None),
+            overview_refresh: tokio::sync::Mutex::new(()),
             can_cache: tokio::sync::RwLock::new(HashMap::new()),
             log_seen: tokio::sync::RwLock::new(HashMap::new()),
         }

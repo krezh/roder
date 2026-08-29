@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.1.46](https://github.com/krezh/roder/compare/0.1.45...0.1.46) (2026-08-29)
+
+
+### Features
+
+* **alertmanager:** color alerts button by highest severity ([c8e162f](https://github.com/krezh/roder/commit/c8e162f5f35d785eb26d047224fcd8a4b0100081))
+* **k8s:** add certificate renewal and job rerun actions ([fbdeb15](https://github.com/krezh/roder/commit/fbdeb15fb595ad2d449a53fd9218ee3c5d9b1545))
+* **k8s:** migrate resource watches to tables ([4e6ced4](https://github.com/krezh/roder/commit/4e6ced4a8f39557ce46b81a0ceae93ca978283f9))
+* **mobile:** redesign mobile interface ([29033ef](https://github.com/krezh/roder/commit/29033efb36f423bf1a3be80d59fa022c4c24342b))
+* **pods:** show live restart age ([0c53e25](https://github.com/krezh/roder/commit/0c53e25add8831bfe2c9f24300fd1d6c7e3b5474))
+* **talos:** add node power actions to context menu ([96e4e40](https://github.com/krezh/roder/commit/96e4e40041a738fe9f50c9f02b8b87d84d11b4cf))
+* **tree:** add generic resource relationships ([99d8f5c](https://github.com/krezh/roder/commit/99d8f5cb2e1b238c3975b7c29611eea047f38e37))
+* **ui:** add vim-style keyboard navigation ([5a3c24e](https://github.com/krezh/roder/commit/5a3c24e225bd16e522c87776f867478592ebd846))
+
+
+### Bug Fixes
+
+* **cargo:** update rust crate flate2 (1.1.9 ➔ 1.1.10) ([#203](https://github.com/krezh/roder/issues/203)) ([048f18b](https://github.com/krezh/roder/commit/048f18b4ad82ff6d764a96a3fc8b5e0e242ea655))
+* **cargo:** update rust crate hyper (1.11.0 ➔ 1.11.1) ([#204](https://github.com/krezh/roder/issues/204)) ([1c72d15](https://github.com/krezh/roder/commit/1c72d15ad822471866b8887989434fe3fc0b7d11))
+* **cargo:** update rust crate rcgen (0.14.9 ➔ 0.14.10) ([#205](https://github.com/krezh/roder/issues/205)) ([b77194e](https://github.com/krezh/roder/commit/b77194e8b1b40718933f056e37b80c204985d65f))
+* **container:** update image gcr.io/distroless/cc-debian13 (e86cf4f ➔ 9b615ff) ([#201](https://github.com/krezh/roder/issues/201)) ([8666db6](https://github.com/krezh/roder/commit/8666db6672cd9bdf9dceaf038fd3f42a9675970e))
+* **container:** update image ghcr.io/rust-lang/rust (7f7a53a ➔ 271849e) ([#199](https://github.com/krezh/roder/issues/199)) ([0215f4f](https://github.com/krezh/roder/commit/0215f4f865385cc7629497ceb9e0a3714acea593))
+* **k8s:** avoid periodic informer relists ([6be1ac1](https://github.com/krezh/roder/commit/6be1ac128b083b1cd7d1cdb85198178d10bc593c))
+* **ui:** cancel overview pollers on cleanup ([c77bec1](https://github.com/krezh/roder/commit/c77bec1bf637a33a4ae2079f8d95905ff70da754))
+* **ui:** stabilize dropdown menus ([c71e34b](https://github.com/krezh/roder/commit/c71e34bb1c143fa00a308547899d94f2952c4999))
+
+
+### Performance Improvements
+
+* **logs:** update filtered stream incrementally ([b58bd23](https://github.com/krezh/roder/commit/b58bd23c73aced7a2518c153a6f07f2c140145f4))
+* **metrics:** bound kubelet PVC scrapes ([dbdb1d7](https://github.com/krezh/roder/commit/dbdb1d7f69f88722afbf6640f2fa88070cccd5a2))
+* **overview:** single-flight cache refreshes ([19d44e4](https://github.com/krezh/roder/commit/19d44e45cd2bba629eda665e832954d92dbd3f70))
+
+
+### Miscellaneous Chores
+
+* **cargo:** lock file maintenance cargo.lock ([#197](https://github.com/krezh/roder/issues/197)) ([172c488](https://github.com/krezh/roder/commit/172c4884d330a967106ce080a1e6a99c9c66b30b))
+* **cargo:** lock file maintenance cargo.lock ([#200](https://github.com/krezh/roder/issues/200)) ([b5b5db0](https://github.com/krezh/roder/commit/b5b5db03ae730a890e37a7e37a776e8239b9efc3))
+* **cargo:** lock file maintenance cargo.lock ([#202](https://github.com/krezh/roder/issues/202)) ([3af5ec2](https://github.com/krezh/roder/commit/3af5ec243f91c3a1762dfed5edbe51a0e8497e90))
+* **cargo:** lock file maintenance cargo.lock ([#206](https://github.com/krezh/roder/issues/206)) ([6dc42a9](https://github.com/krezh/roder/commit/6dc42a96b7000cfd86d4b3a04a68848fefc2ed60))
+* **k8s:** tidy sanitize doc comments ([ac7d25a](https://github.com/krezh/roder/commit/ac7d25a144bcc73e57e24002cb0ea18991d04fa5))
+
+
+### Code Refactoring
+
+* **ui:** separate mobile and desktop renderers ([a84a01e](https://github.com/krezh/roder/commit/a84a01e3e236298d01ed69a802eeae219875f95e))
+
 ## [0.1.45](https://github.com/krezh/roder/compare/0.1.44...0.1.45) (2026-08-25)
 
 

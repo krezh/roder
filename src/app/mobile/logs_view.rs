@@ -108,7 +108,7 @@ fn MobileLogPane(
                 {
                     let (pod, message) = item.1.split_once(" │ ")
                         .map(|(pod, message)| (Some(pod.to_string()), message.to_string()))
-                        .unwrap_or((None, item.1));
+                        .unwrap_or((None, item.1.to_string()));
                     let level = log_level(&message);
                     let parsed = parse_log_line(&message);
                     let caller = parsed.caller;

@@ -1,11 +1,17 @@
+use std::collections::VecDeque;
+use std::sync::Arc;
+
 use leptos::prelude::*;
 
 use crate::app::util::format::log_level;
 use crate::data;
 
+const MAX_LINES: usize = 1000;
+type LogLine = (u64, Arc<str>);
+
 #[derive(Clone, Copy)]
 pub(crate) struct LogStream {
-    pub(crate) filtered_lines: Memo<Vec<(u64, String)>>,
+    pub(crate) filtered_lines: RwSignal<VecDeque<LogLine>>,
     pub(crate) follow: RwSignal<bool>,
     pub(crate) wrap: RwSignal<bool>,
     pub(crate) show_timestamps: RwSignal<bool>,
@@ -14,16 +20,19 @@ pub(crate) struct LogStream {
 }
 
 pub(crate) fn use_log_stream(url: String) -> LogStream {
-    let lines = RwSignal::new(Vec::<(u64, String)>::new());
+    let lines = StoredValue::new(VecDeque::<LogLine>::new());
+    let filtered_lines = RwSignal::new(VecDeque::<LogLine>::new());
     let counter = StoredValue::new(0u64);
     let follow = RwSignal::new(true);
     let wrap = RwSignal::new(true);
     let show_timestamps = RwSignal::new(false);
     let filter = RwSignal::new(String::new());
     let level_filter = RwSignal::new(String::new());
+    let normalized_filters = StoredValue::new((String::new(), String::new()));
 
     Effect::new(move |_prev: Option<Option<data::SseHandle>>| {
-        lines.set(Vec::new());
+        lines.set_value(VecDeque::new());
+        filtered_lines.set(VecDeque::new());
         let url = url.clone();
         data::subscribe_lines(&url, move |line| {
             let id = counter
@@ -32,26 +41,35 @@ pub(crate) fn use_log_stream(url: String) -> LogStream {
                     *counter
                 })
                 .unwrap_or_default();
-            lines.update(|lines| {
-                lines.push((id, line));
-                if lines.len() > 1000 {
-                    let excess = lines.len() - 1000;
-                    lines.drain(0..excess);
+            let line: Arc<str> = line.into();
+            let matches =
+                normalized_filters.with_value(|(text, level)| log_line_matches(&line, text, level));
+            let evicted = lines
+                .try_update_value(|lines| push_bounded(lines, (id, Arc::clone(&line))))
+                .flatten();
+            filtered_lines.update(|filtered| {
+                if evicted.is_some_and(|id| filtered.front().is_some_and(|line| line.0 == id)) {
+                    filtered.pop_front();
+                }
+                if matches {
+                    filtered.push_back((id, line));
                 }
             });
         })
     });
 
-    let filtered_lines = Memo::new(move |_| {
+    Effect::new(move |_| {
         let text = filter.get().to_lowercase();
         let level = level_filter.get().to_lowercase();
-        lines.with(|lines| {
+        normalized_filters.set_value((text.clone(), level.clone()));
+        let filtered = lines.with_value(|lines| {
             lines
                 .iter()
                 .filter(|(_, line)| log_line_matches(line, &text, &level))
                 .cloned()
                 .collect()
-        })
+        });
+        filtered_lines.set(filtered);
     });
 
     LogStream {
@@ -62,6 +80,13 @@ pub(crate) fn use_log_stream(url: String) -> LogStream {
         filter,
         level_filter,
     }
+}
+
+fn push_bounded(lines: &mut VecDeque<LogLine>, line: LogLine) -> Option<u64> {
+    lines.push_back(line);
+    (lines.len() > MAX_LINES)
+        .then(|| lines.pop_front().map(|line| line.0))
+        .flatten()
 }
 
 fn log_line_matches(line: &str, text_filter_lower: &str, level_filter_lower: &str) -> bool {
@@ -121,7 +146,13 @@ pub(crate) fn extract_timestamp(line: &str) -> (Option<String>, String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_timestamp, log_line_matches};
+    use super::{extract_timestamp, log_line_matches, push_bounded, LogLine, MAX_LINES};
+    use std::collections::VecDeque;
+    use std::sync::Arc;
+
+    fn line(id: u64) -> LogLine {
+        (id, Arc::from(format!("line-{id}")))
+    }
 
     #[test]
     fn aggregate_filter_matches_source_message_and_level() {
@@ -136,5 +167,15 @@ mod tests {
         let (timestamp, message) = extract_timestamp("2024-01-15T10:30:45.123Z payload");
         assert_eq!(timestamp.as_deref(), Some("2024-01-15T10:30:45.123Z"));
         assert_eq!(message, "payload");
+    }
+
+    #[test]
+    fn bounded_log_evicts_from_the_front() {
+        let mut lines = (0..MAX_LINES as u64).map(line).collect::<VecDeque<_>>();
+
+        assert_eq!(push_bounded(&mut lines, line(MAX_LINES as u64)), Some(0));
+        assert_eq!(lines.len(), MAX_LINES);
+        assert_eq!(lines.front().map(|line| line.0), Some(1));
+        assert_eq!(lines.back().map(|line| line.0), Some(MAX_LINES as u64));
     }
 }

@@ -157,7 +157,7 @@ pub(crate) fn LogsView(
                     // Aggregated workload lines are "pod │ message" — show the pod as a pill.
                     let (pod, msg) = match item.1.split_once(" │ ") {
                         Some((p, m)) => (Some(p.to_string()), m.to_string()),
-                        None => (None, item.1),
+                        None => (None, item.1.to_string()),
                     };
                     let lvl = log_level(&msg);
                     let parsed = parse_log_line(&msg);

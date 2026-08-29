@@ -48,10 +48,12 @@ pub(crate) fn Dashboard() -> impl IntoView {
     });
 
     Effect::new(move |_| {
-        set_interval(
+        if let Ok(handle) = set_interval_with_handle(
             move || resource.refetch(),
             std::time::Duration::from_secs(15),
-        );
+        ) {
+            on_cleanup(move || handle.clear());
+        }
     });
 
     view! {

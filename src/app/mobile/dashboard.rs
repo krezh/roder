@@ -53,10 +53,12 @@ pub(crate) fn MobileDashboard() -> impl IntoView {
         }
     });
     Effect::new(move |_| {
-        set_interval(
+        if let Ok(handle) = set_interval_with_handle(
             move || resource.refetch(),
             std::time::Duration::from_secs(15),
-        )
+        ) {
+            on_cleanup(move || handle.clear());
+        }
     });
     view! { <div class="mobile-dashboard">
         <header class="mobile-dashboard-head"><div><small>"Cluster"</small><h1>"Overview"</h1></div><div>

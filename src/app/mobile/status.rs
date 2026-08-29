@@ -109,10 +109,12 @@ pub(crate) fn MobileStatusRow() -> impl IntoView {
         }
     });
     Effect::new(move |_| {
-        set_interval(
+        if let Ok(handle) = set_interval_with_handle(
             move || resource.refetch(),
             std::time::Duration::from_secs(10),
-        )
+        ) {
+            on_cleanup(move || handle.clear());
+        }
     });
     view! { <div class="mobile-status-row">{move || match overview.get() {
         None if stale.get() => view! { <span class="mobile-usage-unavailable">"Usage unavailable"</span> }.into_any(),

@@ -51,7 +51,7 @@ pub(crate) fn TopUsage() -> impl IntoView {
     // cache TTL (8s, see overview.rs), so CPU/mem/node counts stay live instead
     // of freezing at whatever they were when the page first loaded.
     Effect::new(move |_| {
-        set_interval(
+        if let Ok(handle) = set_interval_with_handle(
             move || {
                 #[cfg(target_arch = "wasm32")]
                 leptos::task::spawn_local(async move {
@@ -59,7 +59,9 @@ pub(crate) fn TopUsage() -> impl IntoView {
                 });
             },
             std::time::Duration::from_secs(10),
-        );
+        ) {
+            on_cleanup(move || handle.clear());
+        }
     });
 
     view! {

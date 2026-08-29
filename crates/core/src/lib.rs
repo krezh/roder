@@ -217,9 +217,31 @@ pub struct ObjectEvent {
     pub count: i32,
 }
 
-/// One node in the fully-resolved recursive ownership tree of everything a
-/// Kustomization/HelmRelease transitively creates (Flux "app-of-apps"),
-/// resolved entirely server-side in one shot — see `Backend::resource_tree`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ResourceTreeRelation {
+    Owner,
+    OwnedResource,
+    SelectedPod,
+    EndpointSlice,
+    FluxInventory,
+    HelmManifest,
+}
+
+impl ResourceTreeRelation {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Owner => "Owner",
+            Self::OwnedResource => "Owned resource",
+            Self::SelectedPod => "Selected pod",
+            Self::EndpointSlice => "Endpoint slice",
+            Self::FluxInventory => "Flux inventory",
+            Self::HelmManifest => "Helm manifest",
+        }
+    }
+}
+
+/// One node in a server-resolved resource relationship tree.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResourceTreeNode {
     /// The resource's Kind, e.g. "Kustomization", "HelmRelease", "Deployment".
@@ -242,6 +264,11 @@ pub struct ResourceTreeNode {
     /// HelmRelease "owner" nodes — leaves intentionally carry `None` (no live
     /// status fetched per-leaf, by design, to keep the tree cheap).
     pub status: Option<RowStatus>,
+    /// How this node relates to its parent. The root has no relation.
+    pub relation: Option<ResourceTreeRelation>,
+    /// Whether this node should render as a collapsible branch even when its
+    /// children could not be resolved or it has no relationships.
+    pub expandable: bool,
     pub children: Vec<ResourceTreeNode>,
     /// Best-effort note when this node's *children* couldn't be (fully)
     /// resolved — RBAC denied reading the inventory/Helm secret, HelmRelease

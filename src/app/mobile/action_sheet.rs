@@ -8,7 +8,7 @@ use roder_core::{ResourceKind, RowStatus};
 use crate::app::events::{fire_action, fire_action_with};
 use crate::app::state::{
     open_logs, Catalog, CtxMenu, DetailTarget, ExecOpen, ExecTarget, LogPods, LogTarget, TableRows,
-    TableSelected, TableTargets,
+    TableSelected, TableTargets, TreeOpen,
 };
 use crate::app::table_logic::{resolve_action_targets, targets_all};
 use crate::app::ui::{
@@ -34,6 +34,7 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
     let table_rows = expect_context::<TableRows>().0;
     let table_targets = expect_context::<TableTargets>().0;
     let toast = expect_context::<RwSignal<Option<Toast>>>();
+    let tree_open = expect_context::<TreeOpen>().0;
 
     let (snapshot, closing, do_close) = use_option_overlay(ctx);
 
@@ -115,6 +116,7 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
             });
 
             let open = { let t = m.target.clone(); move |_| { detail.set(Some(t.clone())); do_close(); } };
+            let open_tree = { let t = m.target.clone(); move |_| { tree_open.set(Some(t.clone())); do_close(); } };
             let has_logs = targets_all(&targets, |kind| {
                 kind.is_pod() || kind.is_workload() || kind.is_job()
             });
@@ -250,6 +252,7 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
                         <div class="sheet-item sheet-header">{targets.len()}" resources"</div>
                     })}
                     {(!is_bulk).then(|| view! { <button class="sheet-item" on:click=open>"Open details"</button> })}
+                    {(!is_bulk).then(|| view! { <button class="sheet-item" on:click=open_tree>"Relationships"</button> })}
                     {has_logs.then(|| view! { <button class="sheet-item" on:click=logs>"Logs"</button> })}
                     {shell.map(|s| view! { <button class="sheet-item" on:click=s>"Shell"</button> })}
                     {ns_item.map(|ns| view! { <button class="sheet-item" on:click=goto_ns>"Go to namespace "<span class="sheet-sub">{ns}</span></button> })}

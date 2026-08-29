@@ -2497,6 +2497,95 @@
   .mobile-toast-progress i { display: block; height: 100%; background: var(--accent); }
 }
 
+.mobile-shell .mobile-relationship-view {
+  position: fixed;
+  inset: 0;
+  z-index: 72;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+
+  > header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: calc(0.8rem + env(safe-area-inset-top)) 1rem 0.8rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+
+    div { display: grid; gap: 0.1rem; min-width: 0; }
+    span { color: var(--muted); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.12em; }
+    strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    button { min-width: 44px; min-height: 44px; border: 0; background: none; color: var(--fg); font-size: 1.5rem; }
+  }
+}
+
+.mobile-shell .mobile-relationship-body {
+  flex: 1;
+  overflow: auto;
+  padding: 0.8rem 0.8rem calc(0.8rem + env(safe-area-inset-bottom));
+}
+
+.mobile-shell .mobile-relationship-status {
+  padding: 2rem 1rem;
+  color: var(--muted);
+  text-align: center;
+  &.error { color: var(--error); }
+}
+
+.mobile-shell .mobile-relationship-node { margin-bottom: 0.45rem; }
+.mobile-shell .mobile-relationship-row {
+  display: flex;
+  min-height: 54px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+}
+.mobile-shell .mobile-relationship-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.55rem 0.65rem;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  text-align: left;
+
+  > span:last-child { display: grid; min-width: 0; }
+  strong, small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  small { color: var(--muted); font-size: 0.7rem; }
+  &:disabled { opacity: 0.55; }
+}
+.mobile-shell .mobile-relationship-kind {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  background: color-mix(in srgb, var(--accent) 18%, var(--panel));
+  color: var(--accent);
+  font-weight: 800;
+}
+.mobile-shell .mobile-relationship-toggle {
+  width: 48px;
+  border: 0;
+  border-left: 1px solid var(--border);
+  background: none;
+  color: var(--muted);
+  font-size: 1.2rem;
+}
+.mobile-shell .mobile-relationship-children {
+  margin: 0.45rem 0 0 0.85rem;
+  padding-left: 0.65rem;
+  border-left: 2px solid var(--border);
+}
+.mobile-shell .mobile-relationship-error {
+  padding: 0.35rem 0 0.6rem;
+  color: var(--warn);
+  font-size: 0.75rem;
+}
+
 @media (max-width: 360px) {
   .mobile-shell {
     .mobile-topbar {

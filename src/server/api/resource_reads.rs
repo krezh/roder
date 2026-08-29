@@ -36,8 +36,8 @@ pub struct ResourceTreeQuery {
     name: String,
 }
 
-/// Full recursive ownership tree for a Kustomization/HelmRelease, resolved
-/// server-side in one shot (see `Backend::resource_tree`).
+/// Bounded relationship tree for any discoverable resource, resolved under
+/// the current user's Kubernetes identity.
 pub async fn resource_tree(
     Extension(b): Extension<Arc<Backend>>,
     Query(q): Query<ResourceTreeQuery>,

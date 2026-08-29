@@ -62,11 +62,6 @@ impl<'a> KindKind<'a> {
         self.is_flux() && self.kind == "HelmRelease"
     }
 
-    /// Only Kustomization and HelmRelease can show a "Resource Tree".
-    pub(crate) fn is_kustomization(&self) -> bool {
-        self.is_flux() && self.kind == "Kustomization"
-    }
-
     /// Only Kustomization and HelmRelease reference a source that
     /// `flux reconcile --with-source` can reconcile first.
     pub(crate) fn has_source_ref(&self) -> bool {
@@ -94,24 +89,6 @@ mod tests {
     fn is_helmrelease_false_for_non_flux_group() {
         let kk = KindKind::new("apps", "HelmRelease");
         assert!(!kk.is_helmrelease());
-    }
-
-    #[test]
-    fn is_kustomization_true_for_flux_kustomization() {
-        let kk = KindKind::new("kustomize.toolkit.fluxcd.io", "Kustomization");
-        assert!(kk.is_kustomization());
-    }
-
-    #[test]
-    fn is_kustomization_false_for_helmrelease() {
-        let kk = KindKind::new("helm.toolkit.fluxcd.io", "HelmRelease");
-        assert!(!kk.is_kustomization());
-    }
-
-    #[test]
-    fn is_kustomization_false_for_non_flux_group() {
-        let kk = KindKind::new("apps", "Kustomization");
-        assert!(!kk.is_kustomization());
     }
 
     #[test]

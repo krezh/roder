@@ -26,6 +26,7 @@ mod shortcuts;
 mod sidebar;
 mod status;
 mod toast;
+mod tree;
 mod workspace_view;
 
 use leptos::prelude::*;
@@ -50,6 +51,7 @@ use search_list::MobileSearchList;
 use shortcuts::MobileShortcutsHelp;
 use sidebar::MobileSidebar;
 use toast::MobileToastView;
+use tree::MobileRelationshipTree;
 use workspace_view::MobileWorkspaceView;
 
 #[component]
@@ -116,6 +118,7 @@ pub(crate) fn MobileShell() -> impl IntoView {
             <MobileCommandPalette />
             <MobileNsPalette />
             <MobileActionSheet />
+            <MobileRelationshipTree />
             <MobileConfirmDialog />
             <MobileDeleteDialog />
             <MobileDrainOverlay />

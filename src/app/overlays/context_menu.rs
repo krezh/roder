@@ -149,7 +149,6 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             let is_scalable = targets_all(&targets, |kind| kind.is_scalable());
             let is_flux = targets_all(&targets, |kind| kind.is_flux());
             let is_helmrelease = targets_all(&targets, |kind| kind.is_helmrelease());
-            let is_kustomization = targets_all(&targets, |kind| kind.is_kustomization());
             let has_source_ref = targets_all(&targets, |kind| kind.has_source_ref());
             let is_eso = targets_all(&targets, |kind| kind.is_eso());
             let is_certificate = targets_all(&targets, |kind| kind.is_certificate());
@@ -400,8 +399,8 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                         <div class="ctx-item ctx-bulk-header">{targets.len()}" resources"</div>
                     })}
                     {(!is_bulk).then(|| view! { <button class="ctx-item" on:click=open>"Open details"</button> })}
-                    {(!is_bulk && (is_kustomization || is_helmrelease)).then(|| view! {
-                        <button class="ctx-item" on:click=open_tree>"Resource Tree"</button>
+                    {(!is_bulk).then(|| view! {
+                        <button class="ctx-item" on:click=open_tree>"Relationships"</button>
                     })}
                     {has_logs.then(|| view! { <button class="ctx-item" on:click=logs>"Logs"</button> })}
                     {shell.map(|s| view! { <button class="ctx-item" on:click=s>"Shell"</button> })}

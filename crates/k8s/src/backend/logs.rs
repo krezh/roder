@@ -275,7 +275,7 @@ impl Backend {
     }
 }
 
-fn workload_label_selector(data: &serde_json::Value) -> Result<String, String> {
+pub(super) fn workload_label_selector(data: &serde_json::Value) -> Result<String, String> {
     let selector = data
         .get("spec")
         .and_then(|spec| spec.get("selector"))

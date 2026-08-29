@@ -198,6 +198,14 @@
   gap: 6px;
   flex-shrink: 0;
 }
+.tree-node-open {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 0.7rem;
+  cursor: pointer;
+  &:hover { color: var(--accent); }
+}
 .tree-chevron {
   color: var(--muted);
   font-size: 0.7rem;

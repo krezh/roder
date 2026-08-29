@@ -1,9 +1,4 @@
-//! Modal window showing the full recursive ownership tree of a Kustomization/
-//! HelmRelease (resolved in one shot by `/api/resource-tree`). Kustomization/
-//! HelmRelease ("owner") nodes render as fixed-width status-bordered cards,
-//! collapsible (root expanded by default, everything else collapsed); leaf
-//! resources render as compact chips that wrap several-per-line. See
-//! `docs/superpowers/specs/2026-07-02-resource-tree-visual-design.md`.
+//! Modal window showing a server-resolved resource relationship tree.
 
 use leptos::prelude::*;
 use roder_core::{ResourceTreeNode, RowStatus};
@@ -12,31 +7,22 @@ use crate::app::components::icons::TreeKindIcon;
 use crate::app::detail::RowDetail;
 use crate::app::overlays::use_option_overlay;
 use crate::app::state::{DetailTarget, TreeOpen};
-use crate::app::util::predicate::KindKind;
 use crate::data;
 
-/// A run of consecutive same-shape siblings, in original order: leaf
-/// resources (which wrap several-per-line) get batched together; each owner
-/// (Kustomization/HelmRelease, which needs its own full-width card) stands
-/// alone. "Owner" is classified by *kind* (Kustomization/HelmRelease),
-/// regardless of whether its `status` resolved — a nested owner whose object
-/// fetch failed still has an owner kind, just `status: None, error: Some(_)`,
-/// and must still render as a card (showing its error) rather than a leaf.
 pub(crate) enum ChildGroup {
     Leaves(Vec<ResourceTreeNode>),
-    Owner(ResourceTreeNode),
+    Branch(ResourceTreeNode),
 }
 
 pub(crate) fn group_children(children: Vec<ResourceTreeNode>) -> Vec<ChildGroup> {
     let mut groups = Vec::new();
     let mut pending_leaves = Vec::new();
     for child in children {
-        let kk = KindKind::new(&child.group, &child.kind);
-        if kk.is_kustomization() || kk.is_helmrelease() {
+        if child.expandable {
             if !pending_leaves.is_empty() {
                 groups.push(ChildGroup::Leaves(std::mem::take(&mut pending_leaves)));
             }
-            groups.push(ChildGroup::Owner(child));
+            groups.push(ChildGroup::Branch(child));
         } else {
             pending_leaves.push(child);
         }
@@ -47,17 +33,11 @@ pub(crate) fn group_children(children: Vec<ResourceTreeNode>) -> Vec<ChildGroup>
     groups
 }
 
-/// Total number of resources under `node`, recursively — shown as the count
-/// badge on a collapsed owner card. Computed client-side from the already-
-/// fetched tree; no backend/wire change needed.
+/// Total resources below a relationship branch.
 pub(crate) fn descendant_count(node: &ResourceTreeNode) -> usize {
     node.children.len() + node.children.iter().map(descendant_count).sum::<usize>()
 }
 
-/// Status → CSS class for an owner card's border color. Mirrors
-/// `crate::app::util::color::dot_class` (used for the plain status dot
-/// elsewhere) but named distinctly since it's applied to a card border here,
-/// not a dot.
 fn status_border_class(status: RowStatus) -> &'static str {
     match status {
         RowStatus::Ok => "status-ok",
@@ -68,26 +48,14 @@ fn status_border_class(status: RowStatus) -> &'static str {
     }
 }
 
-/// Broadcasts "set every row's expand state to `desired`" — an epoch bump
-/// (rather than just the bool) is how each row's `Effect` tells "the toolbar
-/// fired again" apart from "no change yet", so clicking the same button twice
-/// in a row (e.g. Collapse-all, Collapse-all) still re-applies.
+/// The epoch makes repeated expand/collapse commands observable.
 #[derive(Clone, Copy)]
 struct TreeExpandCommand(RwSignal<(u32, bool)>);
 
-/// The resource currently shown in the tree's own attached detail pane —
-/// scoped to one tree-window instance, entirely separate from the
-/// app-global `DetailTarget` signal the main `DetailDrawer` reads. Opening a
-/// leaf from within the tree must never touch (or be touched by) the global
-/// drawer elsewhere in the app.
+/// Resource shown in this window's attached detail pane.
 #[derive(Clone, Copy)]
 struct TreeDetailTarget(RwSignal<Option<DetailTarget>>);
 
-/// True if `target` is `node` itself, or lives anywhere in its subtree —
-/// used to highlight the full ownership path from the tree's root down to
-/// whatever's currently selected in the attached detail pane, not just the
-/// selected leaf itself. A childless leaf's own "subtree" is just itself, so
-/// this one function covers both leaf-exact-match and owner-ancestor checks.
 fn subtree_contains(node: &ResourceTreeNode, target: &DetailTarget) -> bool {
     let is_self = node.key.as_deref() == Some(target.key.as_str())
         && node.namespace == target.namespace
@@ -132,7 +100,7 @@ fn TreeContent(target: DetailTarget, do_close: impl Fn() + Copy + 'static) -> im
                     .unwrap_or_default(),
                 data::percent_encode(&t.name),
             );
-            data::fetch_json::<ResourceTreeNode>(&url).await.ok()
+            data::fetch_json::<ResourceTreeNode>(&url).await
         }
     });
 
@@ -149,7 +117,7 @@ fn TreeContent(target: DetailTarget, do_close: impl Fn() + Copy + 'static) -> im
 
     view! {
         <div class="tree-head">
-            <span class="tree-title">"Resource Tree — " {title}</span>
+            <span class="tree-title">"Relationships — " {title}</span>
             <button class="tree-close" on:click=move |_| do_close()>"✕"</button>
         </div>
         <div class="tree-toolbar">
@@ -160,8 +128,8 @@ fn TreeContent(target: DetailTarget, do_close: impl Fn() + Copy + 'static) -> im
             <div class="tree-pane">
                 {move || match root.get() {
                     None => view! { <div class="tree-status">"Resolving tree…"</div> }.into_any(),
-                    Some(None) => view! { <div class="tree-status tree-err">"Failed to load resource tree."</div> }.into_any(),
-                    Some(Some(node)) => view! { <OwnerCard node=node is_root=true /> }.into_any(),
+                    Some(Err(error)) => view! { <div class="tree-status tree-err">{error}</div> }.into_any(),
+                    Some(Ok(node)) => view! { <BranchCard node=node is_root=true /> }.into_any(),
                 }}
             </div>
             {move || tree_detail.0.get().map(|dt| {
@@ -180,21 +148,8 @@ fn TreeContent(target: DetailTarget, do_close: impl Fn() + Copy + 'static) -> im
     }
 }
 
-/// An owner (Kustomization/HelmRelease) card: icon, name, kind/namespace,
-/// status-colored border, and a trailer that's either just a chevron
-/// (expanded) or a descendant-count badge + chevron (collapsed). Clicking the
-/// card toggles its own children; clicking a leaf's name (in `LeafChip`)
-/// opens the attached detail pane instead — cards themselves don't open the
-/// detail pane since their primary click action is expand/collapse. Gets a
-/// `tree-selected` highlight when the detail pane's target is this node or
-/// anywhere in its subtree, so the whole ownership path to a selection is
-/// visible, not just the selected leaf.
-///
-/// Returns `AnyView` (not `impl IntoView`): this component's children can
-/// recurse back into `OwnerCard` (via `group_children`), and an opaque
-/// `impl IntoView` return type can't participate in that recursion (E0720).
 #[component]
-fn OwnerCard(node: ResourceTreeNode, is_root: bool) -> AnyView {
+fn BranchCard(node: ResourceTreeNode, is_root: bool) -> AnyView {
     let cmd = expect_context::<TreeExpandCommand>();
     let tree_detail = expect_context::<TreeDetailTarget>();
     let expanded = RwSignal::new(is_root);
@@ -215,11 +170,18 @@ fn OwnerCard(node: ResourceTreeNode, is_root: bool) -> AnyView {
     let category = node.category.clone();
     let kind = node.kind.clone();
     let name = node.name.clone();
-    let subtitle = match &node.namespace {
-        Some(ns) => format!("{} · {}", node.kind, ns),
-        None => node.kind.clone(),
+    let relation = node.relation.map(|relation| relation.label());
+    let subtitle = match (&node.namespace, relation) {
+        (Some(ns), Some(relation)) => format!("{relation} · {} · {ns}", node.kind),
+        (None, Some(relation)) => format!("{relation} · {}", node.kind),
+        (Some(ns), None) => format!("{} · {ns}", node.kind),
+        (None, None) => node.kind.clone(),
     };
     let error = node.error.clone();
+    let clickable = node.key.is_some();
+    let open_key = node.key.clone();
+    let open_namespace = node.namespace.clone();
+    let open_name = node.name.clone();
     let node_snapshot = node.clone();
     let selected = move || {
         tree_detail
@@ -242,6 +204,18 @@ fn OwnerCard(node: ResourceTreeNode, is_root: bool) -> AnyView {
                 <div class="tree-name">{name}</div>
                 <div class="tree-kind-line">{subtitle}</div>
             </div>
+            {clickable.then(|| view! {
+                <button class="tree-node-open" on:click=move |event: leptos::ev::MouseEvent| {
+                    event.stop_propagation();
+                    if let Some(key) = open_key.clone() {
+                        tree_detail.0.set(Some(DetailTarget {
+                            key,
+                            namespace: open_namespace.clone(),
+                            name: open_name.clone(),
+                        }));
+                    }
+                }>"Open"</button>
+            })}
             <div class="tree-trailer">
                 {move || (!expanded.get()).then(|| view! { <span class="tree-count">{count}</span> })}
                 <span class="tree-chevron">{move || if expanded.get() { "\u{25BE}" } else { "\u{25B8}" }}</span>
@@ -259,8 +233,8 @@ fn OwnerCard(node: ResourceTreeNode, is_root: bool) -> AnyView {
 
 fn render_group(group: &ChildGroup) -> AnyView {
     match group {
-        ChildGroup::Owner(node) => {
-            view! { <OwnerCard node=node.clone() is_root=false /> }.into_any()
+        ChildGroup::Branch(node) => {
+            view! { <BranchCard node=node.clone() is_root=false /> }.into_any()
         }
         ChildGroup::Leaves(leaves) => view! {
             <div class="tree-leaf-flow">
@@ -271,14 +245,6 @@ fn render_group(group: &ChildGroup) -> AnyView {
     }
 }
 
-/// A leaf resource: a compact, content-sized chip (not a full card) — several
-/// wrap onto one line via the parent `.tree-leaf-flow` container. Clicking it
-/// opens the resource in the tree's own attached detail pane (`TreeDetailTarget`,
-/// separate from the app-global `DetailTarget` drawer) alongside the tree list.
-/// Structurally identical to `OwnerCard`'s text block (name above kind, same
-/// classes/sizes) but with the smaller icon and no border/trailer — leaves
-/// carry no live status, by design (see spec). Gets a `tree-selected`
-/// highlight when it's the current detail-pane target.
 #[component]
 fn LeafChip(node: ResourceTreeNode) -> impl IntoView {
     let tree_detail = expect_context::<TreeDetailTarget>();
@@ -316,7 +282,10 @@ fn LeafChip(node: ResourceTreeNode) -> impl IntoView {
             <TreeKindIcon category=node.category kind=node.kind.clone() small=true />
             <div class="tree-owner-text">
                 <div class="tree-name">{node.name}</div>
-                <div class="tree-kind-line">{node.kind}</div>
+                <div class="tree-kind-line">{match node.relation {
+                    Some(relation) => format!("{} · {}", relation.label(), node.kind),
+                    None => node.kind,
+                }}</div>
             </div>
         </div>
     }
@@ -335,12 +304,14 @@ mod shaping_tests {
             key: Some("v1/ConfigMap".into()),
             category: None,
             status: None,
+            relation: None,
+            expandable: false,
             children: Vec::new(),
             error: None,
         }
     }
 
-    fn owner(name: &str, children: Vec<ResourceTreeNode>) -> ResourceTreeNode {
+    fn branch(name: &str, children: Vec<ResourceTreeNode>) -> ResourceTreeNode {
         ResourceTreeNode {
             kind: "Kustomization".into(),
             group: "kustomize.toolkit.fluxcd.io".into(),
@@ -349,6 +320,8 @@ mod shaping_tests {
             key: Some("kustomize.toolkit.fluxcd.io/v1/Kustomization".into()),
             category: None,
             status: Some(RowStatus::Ok),
+            relation: None,
+            expandable: true,
             children,
             error: None,
         }
@@ -363,9 +336,9 @@ mod shaping_tests {
 
     #[test]
     fn all_owners_become_separate_groups() {
-        let groups = group_children(vec![owner("a", vec![]), owner("b", vec![])]);
+        let groups = group_children(vec![branch("a", vec![]), branch("b", vec![])]);
         assert_eq!(groups.len(), 2);
-        assert!(groups.iter().all(|g| matches!(g, ChildGroup::Owner(_))));
+        assert!(groups.iter().all(|g| matches!(g, ChildGroup::Branch(_))));
     }
 
     #[test]
@@ -373,18 +346,18 @@ mod shaping_tests {
         let groups = group_children(vec![
             leaf("a"),
             leaf("b"),
-            owner("o1", vec![]),
+            branch("o1", vec![]),
             leaf("c"),
-            owner("o2", vec![]),
-            owner("o3", vec![]),
+            branch("o2", vec![]),
+            branch("o3", vec![]),
             leaf("d"),
         ]);
         assert_eq!(groups.len(), 6);
         assert!(matches!(&groups[0], ChildGroup::Leaves(v) if v.len() == 2));
-        assert!(matches!(&groups[1], ChildGroup::Owner(n) if n.name == "o1"));
+        assert!(matches!(&groups[1], ChildGroup::Branch(n) if n.name == "o1"));
         assert!(matches!(&groups[2], ChildGroup::Leaves(v) if v.len() == 1 && v[0].name == "c"));
-        assert!(matches!(&groups[3], ChildGroup::Owner(n) if n.name == "o2"));
-        assert!(matches!(&groups[4], ChildGroup::Owner(n) if n.name == "o3"));
+        assert!(matches!(&groups[3], ChildGroup::Branch(n) if n.name == "o2"));
+        assert!(matches!(&groups[4], ChildGroup::Branch(n) if n.name == "o3"));
         assert!(matches!(&groups[5], ChildGroup::Leaves(v) if v.len() == 1 && v[0].name == "d"));
     }
 
@@ -395,18 +368,21 @@ mod shaping_tests {
 
     #[test]
     fn descendant_count_is_zero_for_no_children() {
-        assert_eq!(descendant_count(&owner("x", vec![])), 0);
+        assert_eq!(descendant_count(&branch("x", vec![])), 0);
     }
 
     #[test]
     fn descendant_count_counts_flat_children() {
-        let node = owner("x", vec![leaf("a"), leaf("b"), leaf("c")]);
+        let node = branch("x", vec![leaf("a"), leaf("b"), leaf("c")]);
         assert_eq!(descendant_count(&node), 3);
     }
 
     #[test]
     fn descendant_count_is_recursive() {
-        let node = owner("x", vec![leaf("a"), owner("y", vec![leaf("b"), leaf("c")])]);
+        let node = branch(
+            "x",
+            vec![leaf("a"), branch("y", vec![leaf("b"), leaf("c")])],
+        );
         assert_eq!(descendant_count(&node), 4);
     }
 
@@ -425,13 +401,15 @@ mod shaping_tests {
             key: Some("kustomize.toolkit.fluxcd.io/v1/Kustomization".into()),
             category: None,
             status: None,
+            relation: Some(roder_core::ResourceTreeRelation::Owner),
+            expandable: true,
             children: Vec::new(),
             error: Some("could not fetch object: rbac denied".into()),
         };
         let groups = group_children(vec![errored_owner]);
         assert_eq!(groups.len(), 1);
         assert!(
-            matches!(&groups[0], ChildGroup::Owner(n) if n.name == "broken" && n.error.is_some())
+            matches!(&groups[0], ChildGroup::Branch(n) if n.name == "broken" && n.error.is_some())
         );
     }
 
@@ -448,7 +426,7 @@ mod shaping_tests {
 
     #[test]
     fn subtree_contains_true_for_a_nested_descendant() {
-        let node = owner("root", vec![leaf("a"), owner("mid", vec![leaf("b")])]);
+        let node = branch("root", vec![leaf("a"), branch("mid", vec![leaf("b")])]);
         let target = DetailTarget {
             key: "v1/ConfigMap".into(),
             namespace: None,
@@ -459,7 +437,7 @@ mod shaping_tests {
 
     #[test]
     fn subtree_contains_false_for_an_unrelated_target() {
-        let node = owner("root", vec![leaf("a")]);
+        let node = branch("root", vec![leaf("a")]);
         let target = DetailTarget {
             key: "v1/ConfigMap".into(),
             namespace: None,

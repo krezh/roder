@@ -5,8 +5,42 @@ use std::collections::HashSet;
 use leptos::prelude::*;
 use roder_core::{Category, ResourceKind};
 
-use crate::app::state::{Catalog, NavOpen, PaneConfig, WorkspaceConf};
+use crate::app::components::icons::CtrlIcon;
+use crate::app::state::{
+    pinned_in_catalog_order, Catalog, NavOpen, PaneConfig, PinnedKinds, WorkspaceConf,
+};
 use crate::data;
+
+/// The digit that reaches favourite `index`, following the keyboard's own row:
+/// slots 1-9 take `1`..`9` and the tenth takes `0`. Beyond that there is no key,
+/// so the pin simply has no shortcut.
+pub(crate) fn hotkey_digit(index: usize) -> Option<char> {
+    match index {
+        0..=8 => char::from_digit(index as u32 + 1, 10),
+        9 => Some('0'),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hotkey_digit;
+
+    /// The chip drawn beside a pin and the key that reaches it come from this
+    /// one function, so the row it implies must be exactly 1234567890.
+    #[test]
+    fn hotkeys_follow_the_number_row() {
+        let row: String = (0..10).filter_map(hotkey_digit).collect();
+        assert_eq!(row, "1234567890");
+    }
+
+    #[test]
+    fn eleventh_pin_onwards_has_no_hotkey() {
+        assert_eq!(hotkey_digit(9), Some('0'));
+        assert_eq!(hotkey_digit(10), None);
+        assert_eq!(hotkey_digit(99), None);
+    }
+}
 
 /// Render a single kind entry `<li>` with navigation and context-menu.
 fn kind_li(
@@ -14,6 +48,8 @@ fn kind_li(
     selected_kind: RwSignal<Option<ResourceKind>>,
     nav_open: RwSignal<bool>,
     kind_ctx: RwSignal<Option<(ResourceKind, i32, i32)>>,
+    // Shown as a `⌃n` chip on pinned entries; `None` everywhere else.
+    hotkey: Option<char>,
 ) -> impl IntoView {
     let k2 = k.clone();
     let k3 = k.clone();
@@ -60,6 +96,13 @@ fn kind_li(
             <button type="button" class="kind" class:active=active
                 on:click=on_click on:contextmenu=on_ctx>
                 {kind_name}
+                // The same `<kbd>` chip the topbar uses for its hints: a drawn
+                // modifier icon plus the key, exactly as its "⇧K" is built. The
+                // literal "⌃" character degraded into a stray-looking caret at
+                // this size, hence the SVG.
+                {hotkey.map(|d| view! {
+                    <kbd class="kind-hotkey"><CtrlIcon />{d.to_string()}</kbd>
+                })}
             </button>
         </li>
     }
@@ -73,20 +116,9 @@ pub(crate) fn Sidebar(#[prop(optional)] filter: Option<Signal<String>>) -> impl 
     let workspace = expect_context::<WorkspaceConf>().0;
     let kind_ctx: RwSignal<Option<(ResourceKind, i32, i32)>> = RwSignal::new(None);
 
-    // --- Pinned favorites ---
-    let pinned: RwSignal<HashSet<String>> = RwSignal::new(
-        data::storage_get("roder.pinned-kinds")
-            .and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok())
-            .map(|v| v.into_iter().collect())
-            .unwrap_or_default(),
-    );
-    Effect::new(move |_| {
-        let mut v: Vec<String> = pinned.get().into_iter().collect();
-        v.sort();
-        if let Ok(json) = serde_json::to_string(&v) {
-            data::storage_set("roder.pinned-kinds", &json);
-        }
-    });
+    // Pinned favorites. Owned by `App` (and persisted there) so the keyboard
+    // dispatcher can bind Ctrl+1..Ctrl+0 to the same set.
+    let pinned = expect_context::<PinnedKinds>().0;
 
     // --- Category open/closed state ---
     let open_cats = RwSignal::new(
@@ -145,26 +177,31 @@ pub(crate) fn Sidebar(#[prop(optional)] filter: Option<Signal<String>>) -> impl 
             // Pinned favorites section — hidden when empty.
             {move || {
                 let cat = catalog.get();
-                let pins: Vec<ResourceKind> = {
-                    let p = pinned.get();
+                // Number every pin from the unfiltered list, so a pin's hotkey
+                // is stable while the sidebar search box is narrowing the view.
+                let numbered: Vec<(usize, ResourceKind)> =
+                    pinned_in_catalog_order(&cat, &pinned.get())
+                        .into_iter()
+                        .enumerate()
+                        .collect();
+                let pins: Vec<(usize, ResourceKind)> = {
                     let query = filter
                         .map(|filter| filter.get().trim().to_lowercase())
                         .unwrap_or_default();
-                    cat.iter()
-                        .filter(|k| {
-                            p.contains(&k.key)
-                                && (query.is_empty()
-                                    || k.kind.to_lowercase().contains(&query)
-                                    || k.plural.to_lowercase().contains(&query))
+                    numbered
+                        .into_iter()
+                        .filter(|(_, k)| {
+                            query.is_empty()
+                                || k.kind.to_lowercase().contains(&query)
+                                || k.plural.to_lowercase().contains(&query)
                         })
-                        .cloned()
                         .collect()
                 };
                 (!pins.is_empty()).then(|| {
                     let n = pins.len();
                     let items = pins
                         .into_iter()
-                        .map(|k| kind_li(k, selected_kind, nav_open, kind_ctx))
+                        .map(|(i, k)| kind_li(k, selected_kind, nav_open, kind_ctx, hotkey_digit(i)))
                         .collect_view();
                     view! {
                             <div class="cat cat-favorites open">
@@ -209,7 +246,7 @@ pub(crate) fn Sidebar(#[prop(optional)] filter: Option<Signal<String>>) -> impl 
                     let cat_click = cat.clone();
                     let items = kinds
                         .into_iter()
-                        .map(|k| kind_li(k, selected_kind, nav_open, kind_ctx))
+                        .map(|k| kind_li(k, selected_kind, nav_open, kind_ctx, None))
                         .collect_view();
                     out.push(view! {
                         <div class="cat"

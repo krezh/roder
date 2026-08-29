@@ -513,11 +513,22 @@
   display: flex;
   gap: 0.4rem;
   align-items: baseline;
-  &:hover {
+  // `j`/`k` move real DOM focus between items, so focus has to read as the
+  // highlight — the default focus ring is nearly invisible on this panel.
+  &:hover,
+  &:focus {
     color: var(--accent);
   }
-  &.danger:hover {
+  &:focus {
+    outline: none;
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+  }
+  &.danger:hover,
+  &.danger:focus {
     color: var(--error);
+  }
+  &.danger:focus {
+    background: color-mix(in srgb, var(--error) 14%, transparent);
   }
   &.ctx-bulk-header {
     color: var(--muted);
@@ -838,7 +849,9 @@
   inset: 0;
   margin: auto;
   z-index: 51;
-  width: min(520px, 92vw);
+  // Wide enough for the six generated sections to sit two-or-three across
+  // rather than stacking into a long scroll.
+  width: min(760px, 92vw);
   height: fit-content;
   max-height: 80vh;
   background: var(--panel);
@@ -891,6 +904,19 @@
     color: var(--muted);
   }
 }
+.shortcuts-hint {
+  margin-left: auto;
+  margin-right: 0.75rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  kbd {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    padding: 0.05rem 0.3rem;
+    font-family: inherit;
+    font-size: 0.7rem;
+  }
+}
 .shortcut-row {
   display: flex;
   align-items: center;
@@ -912,6 +938,37 @@
     font-size: 0.82rem;
     color: var(--fg-dim, var(--fg));
   }
+}
+// Aliases for one binding, e.g. `j` and `↓`, as separate chips.
+.shortcut-keys {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex: 0 0 auto;
+  order: -1;
+}
+// Marks a motion that accepts a `{count}` prefix.
+.shortcut-count {
+  margin-left: 0.35rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+  opacity: 0.75;
+}
+
+/* ---- pending-key indicator (vim's showcmd) ---- */
+.showcmd {
+  position: fixed;
+  right: 0.9rem;
+  bottom: 0.7rem;
+  z-index: 60;
+  padding: 0.15rem 0.5rem;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+  pointer-events: none;
 }
 
 /* ---- access review overlay ---- */

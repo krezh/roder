@@ -154,6 +154,15 @@
     background: color-mix(in srgb, var(--accent) 12%, transparent);
   }
 }
+/* The keyboard cursor row. An outline rather than a cell background, so it
+   layers cleanly over `.selected`'s tint and left bar (see _bulk.scss) — a row
+   is frequently both at once — and costs no layout. */
+.grid-row.row.cursor {
+  position: relative;
+  z-index: 2;
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
 .cell {
   /* Vertical padding lives on .cwi so rows can fully collapse during animations. */
   padding: 0 0.75rem;

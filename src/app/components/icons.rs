@@ -11,6 +11,19 @@ pub(crate) fn ShiftIcon() -> impl IntoView {
     }
 }
 
+/// Control key chevron icon — the `⌃` glyph as a filled shape, so it holds its
+/// weight at the ~7px the key chips render it at (the literal character
+/// degrades into a stray-looking caret). Same 10×10 box as [`ShiftIcon`] so the
+/// two align inside a `<kbd>`.
+#[component]
+pub(crate) fn CtrlIcon() -> impl IntoView {
+    view! {
+        <svg class="key-ctrl" viewBox="0 0 10 10" fill="currentColor" aria-hidden="true">
+            <path d="M5 1.4 9.6 6 8.2 7.4 5 4.2 1.8 7.4 0.4 6Z" />
+        </svg>
+    }
+}
+
 /// CSS class selecting the icon chip's background/foreground color pair for
 /// a resource's sidebar `Category` — see `style/_tree.scss` for the `.cat-*`
 /// rules. Reuses the same category taxonomy as the sidebar rather than a

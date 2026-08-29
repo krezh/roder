@@ -23,10 +23,17 @@
   }
 }
 
-// Inline SVG shift-key icon used inside kbd elements.
+// Inline SVG modifier-key icons used inside kbd elements.
 .key-shift {
   width: 0.8em;
   height: 0.72em;
+  flex-shrink: 0;
+}
+// The ctrl chevron only occupies the upper half of its 10×10 box, so it needs a
+// squarer footprint than the shift arrow to read at the same visual weight.
+.key-ctrl {
+  width: 0.8em;
+  height: 0.8em;
   flex-shrink: 0;
 }
 

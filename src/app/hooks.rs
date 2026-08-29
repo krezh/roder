@@ -160,6 +160,10 @@ pub(crate) struct RowPress {
 pub(crate) struct ResourceTable {
     pub rows: RowMap,
     pub selected: UidSet,
+    /// uid of the row under the keyboard cursor, independent of `selected` —
+    /// vim's cursor line, not a selection. Desktop only; the mobile lists build
+    /// the same state but never move it. See `table_logic::move_cursor`.
+    pub cursor: RwSignal<Option<String>>,
     pub last_clicked: RwSignal<Option<String>>,
     pub sort: RwSignal<(SortKey, bool)>,
     pub entering: UidSet,
@@ -179,6 +183,7 @@ pub(crate) const OVERSCAN: usize = 12;
 pub(crate) fn use_table_state() -> ResourceTable {
     let rows: RowMap = RwSignal::new(Default::default());
     let selected: UidSet = RwSignal::new(Default::default());
+    let cursor = RwSignal::new(None::<String>);
     let last_clicked = RwSignal::new(None::<String>);
     let sort = RwSignal::new((SortKey::Namespace, true));
     let entering: UidSet = RwSignal::new(Default::default());
@@ -206,6 +211,7 @@ pub(crate) fn use_table_state() -> ResourceTable {
     ResourceTable {
         rows,
         selected,
+        cursor,
         last_clicked,
         sort,
         entering,
@@ -312,6 +318,45 @@ pub(crate) fn table_window(
     });
 
     window
+}
+
+/// Scroll the virtual viewport so the row at `index` is on screen.
+///
+/// Keyboard motion routinely jumps to a row that was never rendered — the
+/// window only materialises `viewport ± OVERSCAN` — so there is no element to
+/// call `scrollIntoView` on and the offset has to be derived from `row_h`.
+/// Leaves one row of context at whichever edge the cursor arrived from (vim's
+/// `scrolloff`), and does nothing when the row is already comfortably visible,
+/// so plain `j`/`k` inside the viewport don't jitter the scroll position.
+pub(crate) fn scroll_cursor_into_view(table: ResourceTable, index: usize) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        // `try_get_untracked`, for the same dispose-during-teardown reason as
+        // the rAF measure above.
+        let Some(wrap) = table.table_ref.try_get_untracked().flatten() else {
+            return;
+        };
+        let row_h = table.row_h.get_untracked().max(1.0);
+        let viewport_h = table.viewport_h.get_untracked();
+        let scrolled = table.scroll_top.get_untracked();
+        let row_top = index as f64 * row_h;
+        let row_bottom = row_top + row_h;
+        // One row of lookahead past the cursor, clamped so the first and last
+        // rows can still be reached.
+        let want = if row_top - row_h < scrolled {
+            (row_top - row_h).max(0.0)
+        } else if row_bottom + row_h > scrolled + viewport_h {
+            row_bottom + row_h - viewport_h
+        } else {
+            return;
+        };
+        wrap.set_scroll_top(want.round() as i32);
+        // Mirror it into the signal rather than waiting for the scroll event, so
+        // the virtual window re-slices in the same tick as the cursor move.
+        table.scroll_top.set(want);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = (table, index);
 }
 
 /// Minimum width the single truncated column is ever squeezed to, so it stays

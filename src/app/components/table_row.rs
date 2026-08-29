@@ -36,6 +36,10 @@ pub(crate) fn ResourceRow<N>(
     shown_uids: Memo<Vec<String>>,
     press: RowPress,
     node_for_ctx: N,
+    /// uid under the keyboard cursor. Absent for lists with no keyboard of their
+    /// own (the multi-kind search view), which simply never draw a cursor.
+    #[prop(optional)]
+    cursor: Option<RwSignal<Option<String>>>,
     children: Children,
 ) -> impl IntoView
 where
@@ -47,6 +51,7 @@ where
     };
     let t_click = target.clone();
     let t_ctx = target;
+    let uid_cur = uid.clone();
     let uid_chk = uid.clone();
     let uid_en = uid.clone();
     let uid_rm = uid.clone();
@@ -58,6 +63,9 @@ where
     view! {
         <div class="grid-row row"
             class:active=is_active
+            class:cursor=move || {
+                cursor.is_some_and(|c| c.with(|u| u.as_deref() == Some(uid_cur.as_str())))
+            }
             class:selected=move || selected.get().contains(&uid_chk)
             class:entering=move || entering.get().contains(&uid_en)
             class:removing=move || removing.get().contains(&uid_rm)

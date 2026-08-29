@@ -9,14 +9,13 @@ use crate::app::hooks::{
 };
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::overlays::delete::{ask_delete, DeleteRequest};
-use crate::app::overlays::toast::{show_toast, Toast, ToastKind};
+use crate::app::overlays::toast::Toast;
 use crate::app::state::{
-    open_logs, CtxMenu, DetailTarget, FilterFocus, LogPods, LogTarget, OnlyProblems,
-    ResourceFilter, SortKey, TableRows, TableSelected, Tick,
+    CtxMenu, DetailTarget, FilterFocus, LogPods, OnlyProblems, ResourceFilter, SortKey, TableRows,
+    TableSelected, Tick,
 };
 use crate::app::table_logic;
 use crate::app::util::color::{dot_class, pct_thresh_color};
-use crate::app::util::format::parse_key;
 use crate::app::util::predicate::KindKind;
 use crate::app::util::text_width::text_width;
 use crate::data;
@@ -83,69 +82,6 @@ pub(crate) fn KindTable(
         (SortKey::Namespace, true)
     });
 
-    // Global keyboard shortcuts — primary table only; workspace panes skip this.
-    if keyboard {
-        let kind_sv = StoredValue::new(kind.clone());
-        let rows_kb = t.rows;
-        let sel_kb = t.selected;
-        let detail_kb = detail;
-        let log_pods_kb = log_pods;
-        let toast_kb = toast;
-        Effect::new(move |_| {
-            let h = window_event_listener(leptos::ev::keydown, move |e| {
-                let key = e.key();
-                if key == "Escape" && !sel_kb.with_untracked(|s| s.is_empty()) {
-                    sel_kb.set(std::collections::BTreeSet::new());
-                } else if (e.meta_key() || e.ctrl_key()) && key.eq_ignore_ascii_case("c") {
-                    let uids = sel_kb.with_untracked(|s| s.clone());
-                    if !uids.is_empty() {
-                        let names: Vec<String> = rows_kb.with_untracked(|m| {
-                            uids.iter()
-                                .filter_map(|uid| m.get(uid).map(|r| r.name.clone()))
-                                .collect()
-                        });
-                        if !names.is_empty() {
-                            crate::app::util::clipboard::copy_to_clipboard(&names.join("\n"));
-                            show_toast(toast_kb, "Copied to clipboard", ToastKind::Ok);
-                        }
-                    } else if let Some(t) = detail_kb.with_untracked(|d| d.clone()) {
-                        crate::app::util::clipboard::copy_to_clipboard(&t.name);
-                        show_toast(toast_kb, "Copied to clipboard", ToastKind::Ok);
-                    }
-                } else if key == "Enter" && !data::is_text_input_focused() {
-                    let uids = sel_kb.with_untracked(|s| s.clone());
-                    if uids.len() == 1 {
-                        let uid = uids.into_iter().next().unwrap();
-                        let k = kind_sv.get_value();
-                        if let Some(row) = rows_kb.with_untracked(|m| m.get(&uid).cloned()) {
-                            detail_kb.set(Some(DetailTarget {
-                                key: k.key,
-                                namespace: row.namespace,
-                                name: row.name,
-                            }));
-                        }
-                    }
-                } else if key.eq_ignore_ascii_case("l") && !data::is_text_input_focused() {
-                    let k = kind_sv.get_value();
-                    let (group, knd) = parse_key(&k.key);
-                    let kk = KindKind::new(&group, &knd);
-                    if kk.is_pod() || kk.is_workload() || kk.is_job() {
-                        let agg = !kk.is_pod();
-                        let uids = sel_kb.with_untracked(|s| s.clone());
-                        rows_kb.with_untracked(|m| {
-                            for uid in &uids {
-                                if let Some(row) = m.get(uid) {
-                                    open_logs(log_pods_kb, LogTarget::from_row(&k.key, row, agg));
-                                }
-                            }
-                        });
-                    }
-                }
-            });
-            on_cleanup(move || h.remove());
-        });
-    }
-
     // Namespace list for the per-pane selector — shared context resource (fetched once at
     // App level) so individual panes don't each open a separate HTTP connection.
     let ns_list =
@@ -199,6 +135,30 @@ pub(crate) fn KindTable(
     let title = kind.kind.clone();
     let is_pod_kind = kind.group.is_empty() && kind.kind == "Pod";
     let node_col = Memo::new(move |_| columns.get().iter().position(|c| c == "Node"));
+
+    // Hand this table's state to the one global key dispatcher (`app::keys`).
+    // Primary view only — workspace panes pass `keyboard = false`, so they never
+    // claim the keyboard and the last-registered pane can't hijack it.
+    if keyboard {
+        let table_keys = expect_context::<crate::app::keys::TableKeys>().0;
+        let rows_for_node = t.rows;
+        table_keys.set_value(Some(crate::app::keys::TableKeyHandle {
+            table: t,
+            shown: shown_uids,
+            kind_key: StoredValue::new(kind.key.clone()),
+            columns,
+            node_for: Callback::new(move |uid: String| {
+                if !is_pod_kind {
+                    return None;
+                }
+                let col = node_col.get_untracked()?;
+                rows_for_node
+                    .with_untracked(|rows| rows.get(&uid).and_then(|r| r.cells.get(col).cloned()))
+            }),
+        }));
+        on_cleanup(move || table_keys.set_value(None));
+    }
+
     let colored_cols = Memo::new(move |_| {
         columns
             .get()
@@ -703,7 +663,8 @@ pub(crate) fn KindTable(
                                     on_unmount=on_unmount
                                     shown_uids=shown_uids
                                     press=press
-                                    node_for_ctx=node_for_ctx>
+                                    node_for_ctx=node_for_ctx
+                                    cursor=t.cursor>
                                     {schema.into_iter().enumerate().map(|(i, column)| {
                                         let val = move || row.get().and_then(|r| r.cells.get(i).cloned()).unwrap_or_default();
                                         let trend_sig = Signal::derive(move || row.get().and_then(|r| r.trends.get(i).copied()).unwrap_or(roder_core::Trend::None));

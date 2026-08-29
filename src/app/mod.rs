@@ -1,3 +1,6 @@
+// Every remaining `ev::` use sits behind a wasm-only block (the online/offline,
+// focus and popstate listeners); the desktop keymap moved to `app::keys`.
+#[cfg(target_arch = "wasm32")]
 use leptos::ev;
 use leptos::prelude::*;
 use leptos_meta::{provide_meta_context, MetaTags, Title};
@@ -13,6 +16,7 @@ mod detail;
 mod events;
 mod failure_watch;
 mod hooks;
+mod keys;
 mod log_stream;
 mod logs;
 mod mobile;
@@ -50,8 +54,9 @@ use state::{
     AccessReviewOpen, AlertSilencesEnabled, AlertsData, AlertsLastRefresh, AlertsOpen, Catalog,
     ConnectionState, Connectivity, CtxMenu, DebugImage, DrainOpen, DrainTarget, ExecOpen,
     ExecTarget, FilterFocus, LogPods, LogTarget, NavOpen, NavigationRestored, NsPaletteOpen,
-    OnlyProblems, PaletteOpen, PodModalTarget, ResourceFilter, ShortcutsOpen, TableRows,
-    TableSelected, TableTargets, TalosFeatures, Tick, TreeOpen, WorkspaceConf, WorkspaceConfig,
+    OnlyProblems, PaletteOpen, PinnedKinds, PodModalTarget, ResourceFilter, ShortcutsOpen,
+    TableRows, TableSelected, TableTargets, TalosFeatures, Tick, TreeOpen, WorkspaceConf,
+    WorkspaceConfig,
 };
 use ui::{Confirm, DeleteRequest, Toast};
 use views::resource::ResourceView;
@@ -275,6 +280,49 @@ pub fn App() -> impl IntoView {
     provide_context(TableSelected(StoredValue::new(None)));
     provide_context(TableRows(StoredValue::new(None)));
     provide_context(TableTargets(StoredValue::new(None)));
+    provide_context(keys::TableKeys(StoredValue::new(None)));
+
+    // Pinned kinds: owned here rather than in `Sidebar` so the key dispatcher
+    // can resolve Ctrl+1..Ctrl+0 against the same set the sidebar renders.
+    let pinned_kinds: RwSignal<std::collections::HashSet<String>> = RwSignal::new(
+        data::storage_get("roder.pinned-kinds")
+            .and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok())
+            .map(|v| v.into_iter().collect())
+            .unwrap_or_default(),
+    );
+    provide_context(PinnedKinds(pinned_kinds));
+    Effect::new(move |_| {
+        let mut v: Vec<String> = pinned_kinds.get().into_iter().collect();
+        v.sort();
+        if let Ok(json) = serde_json::to_string(&v) {
+            data::storage_set("roder.pinned-kinds", &json);
+        }
+    });
+
+    // One layer decision, read by the single keydown listener, so a keypress
+    // can't be acted on by the table while a palette has the focus.
+    let active_layer = Signal::derive(move || {
+        if palette_open.get()
+            || ns_palette_open.get()
+            || shortcuts_open.get()
+            || alerts_open.get()
+            || access_review_open.get()
+            || exec_open.with(Option::is_some)
+            || tree_open.with(Option::is_some)
+            || drain_open.with(Option::is_some)
+            || pod_modal.with(Option::is_some)
+            || confirm.with(Option::is_some)
+            || delete_confirm.with(Option::is_some)
+        {
+            keys::Layer::Overlay
+        } else if ctx_menu.with(Option::is_some) {
+            keys::Layer::Menu
+        } else {
+            keys::Layer::Table
+        }
+    });
+    provide_context(keys::ActiveLayer(active_layer));
+    provide_context(keys::PendingKeys(RwSignal::new(keys::Pending::default())));
     failure_watch::use_failure_watch();
 
     // Keep an end-to-end status alive independently of whichever view/SSE streams
@@ -566,38 +614,6 @@ pub fn App() -> impl IntoView {
         }
     });
 
-    // Global keyboard shortcuts.
-    let filter_focus = expect_context::<FilterFocus>().0;
-    Effect::new(move |_| {
-        let handle = window_event_listener(ev::keydown, move |e| {
-            let key = e.key();
-            if key == "K" && !data::is_text_input_focused() {
-                e.prevent_default();
-                palette_open.update(|o| *o = !*o);
-            } else if key == "N" && !data::is_text_input_focused() {
-                e.prevent_default();
-                ns_palette_open.update(|o| *o = !*o);
-            } else if key == "E" && !data::is_text_input_focused() {
-                e.prevent_default();
-                only_problems.update(|o| *o = !*o);
-            } else if key == "/" && !data::is_text_input_focused() {
-                e.prevent_default();
-                filter_focus.update(|n| *n += 1);
-            } else if key == "?" && !data::is_text_input_focused() {
-                shortcuts_open.update(|o| *o = !*o);
-            } else if key == "Escape" {
-                palette_open.set(false);
-                ns_palette_open.set(false);
-                shortcuts_open.set(false);
-                alerts_open.set(false);
-                access_review_open.set(false);
-                ctx_menu.set(None);
-                detail.set(None);
-            }
-        });
-        on_cleanup(move || handle.remove());
-    });
-
     // Tick once a second so the Age column updates live.
     Effect::new(move |_| {
         set_interval(
@@ -669,6 +685,7 @@ pub fn App() -> impl IntoView {
                         <AlertsPanel />
                         <AccessReview />
                         <ToastView />
+                        <keys::KeyLayer />
                     </div>
                     <TooltipLayer />
                 }.into_any()

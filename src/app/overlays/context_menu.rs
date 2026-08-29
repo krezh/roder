@@ -42,6 +42,66 @@ pub(crate) fn ContextMenu() -> impl IntoView {
     let pos = RwSignal::new((0i32, 0i32));
     let menu_ref = NodeRef::<leptos::html::Div>::new();
 
+    // Keyboard nav for the menu. The item list is built from ~40 kind-specific
+    // conditionals below, so rather than mirror that into an index, this walks
+    // the rendered `.ctx-item` buttons and uses native focus — `Enter` then
+    // activates the focused button with no extra wiring, and the same code
+    // works whichever items a given resource kind ends up showing.
+    #[cfg(target_arch = "wasm32")]
+    {
+        let step_focus = move |delta: i32| {
+            use wasm_bindgen::JsCast;
+            let Some(menu) = menu_ref.get_untracked() else {
+                return;
+            };
+            let Ok(items) = menu.query_selector_all("button.ctx-item") else {
+                return;
+            };
+            let n = items.length() as i32;
+            if n == 0 {
+                return;
+            }
+            let active = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| d.active_element());
+            let current = (0..n).find(|i| match (items.item(*i as u32), active.as_ref()) {
+                (Some(item), Some(a)) => &item == a.as_ref(),
+                _ => false,
+            });
+            // Nothing focused yet: `j` enters at the top, `k` at the bottom.
+            let next = match current {
+                Some(i) => (i + delta).rem_euclid(n),
+                None if delta >= 0 => 0,
+                None => n - 1,
+            };
+            if let Some(el) = items
+                .item(next as u32)
+                .and_then(|node| node.dyn_into::<web_sys::HtmlElement>().ok())
+            {
+                let _ = el.focus();
+            }
+        };
+        Effect::new(move |_| {
+            let handle = window_event_listener(leptos::ev::keydown, move |e| {
+                if ctx.with_untracked(Option::is_none) {
+                    return;
+                }
+                match e.key().as_str() {
+                    "j" | "ArrowDown" => {
+                        e.prevent_default();
+                        step_focus(1);
+                    }
+                    "k" | "ArrowUp" => {
+                        e.prevent_default();
+                        step_focus(-1);
+                    }
+                    _ => {}
+                }
+            });
+            on_cleanup(move || handle.remove());
+        });
+    }
+
     Effect::new(move |_| {
         if let Some(menu) = snapshot.get() {
             pos.set((menu.x, menu.y));
@@ -56,6 +116,19 @@ pub(crate) fn ContextMenu() -> impl IntoView {
         let Some(el) = menu_ref.get() else {
             return;
         };
+
+        // Put focus on the first item as soon as the menu exists, so a menu
+        // opened with `a` responds to `Enter` immediately instead of needing a
+        // `j` first. Harmless for right-click users — it reads as the usual
+        // "first item highlighted" that native menus already do.
+        {
+            use wasm_bindgen::JsCast;
+            if let Ok(Some(first)) = el.query_selector("button.ctx-item") {
+                if let Ok(first) = first.dyn_into::<web_sys::HtmlElement>() {
+                    let _ = first.focus();
+                }
+            }
+        }
 
         // Measure the untransformed layout box; getBoundingClientRect is scaled
         // by the opening animation and can underestimate the final menu size.

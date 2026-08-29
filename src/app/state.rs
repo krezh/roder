@@ -2,7 +2,7 @@
 //! newtype-wrapped context signals (so multiple same-typed signals can coexist in
 //! Leptos context).
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use leptos::prelude::*;
 use roder_core::{FiringAlert, ResourceKind, ResourceRow};
@@ -43,7 +43,7 @@ pub(crate) struct TableTargets(
 );
 
 /// Which column the resource table is sorted by.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub(crate) enum SortKey {
     Namespace,
     Name,
@@ -54,7 +54,7 @@ pub(crate) enum SortKey {
 /// Increments once a second so relative ages can recompute live.
 #[derive(Clone, Copy)]
 pub(crate) struct Tick(pub(crate) RwSignal<u32>);
-/// Quick filter (k9s ⌃Z): show only rows in a Warn/Error state.
+/// Quick filter (⌃Z): show only rows in a Warn/Error state.
 #[derive(Clone, Copy)]
 pub(crate) struct OnlyProblems(pub(crate) RwSignal<bool>);
 #[derive(Clone, Copy)]
@@ -67,6 +67,31 @@ pub(crate) struct PaletteOpen(pub(crate) RwSignal<bool>);
 pub(crate) struct NsPaletteOpen(pub(crate) RwSignal<bool>);
 #[derive(Clone, Copy)]
 pub(crate) struct Catalog(pub(crate) RwSignal<Vec<ResourceKind>>);
+
+/// Kind keys the user has pinned, shown as the sidebar's "Favorites" section
+/// and reachable with `Ctrl+1`..`Ctrl+0`.
+///
+/// Lives at App level rather than inside `Sidebar` because the key dispatcher
+/// needs the same set; [`pinned_in_catalog_order`] resolves it to the order the
+/// sidebar actually renders, which is what the number keys have to agree with.
+#[derive(Clone, Copy)]
+pub(crate) struct PinnedKinds(pub(crate) RwSignal<HashSet<String>>);
+
+/// The pinned kinds in the order the sidebar lists them.
+///
+/// The set is persisted sorted by key, but rendered by walking the catalog and
+/// keeping pinned entries — so catalog order, not key order, is what the user
+/// sees and therefore what `Ctrl+<n>` must count.
+pub(crate) fn pinned_in_catalog_order(
+    catalog: &[ResourceKind],
+    pinned: &HashSet<String>,
+) -> Vec<ResourceKind> {
+    catalog
+        .iter()
+        .filter(|k| pinned.contains(&k.key))
+        .cloned()
+        .collect()
+}
 /// A pod to show in the centered pod-info modal (opened from a workload's Pods tab).
 #[derive(Clone, Copy)]
 pub(crate) struct PodModalTarget(pub(crate) RwSignal<Option<DetailTarget>>);

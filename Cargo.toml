@@ -163,6 +163,9 @@ web-sys = { version = "0.3", features = [
   "Storage",
   "Document",
   "Element",
+  # `query_selector_all`, for stepping focus through the context menu's items
+  # from the keyboard (see `overlays::context_menu`).
+  "NodeList",
   "EventTarget",
   "TransitionEvent",
   "DomRect",

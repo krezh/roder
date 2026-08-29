@@ -13,6 +13,32 @@ use crate::app::state::{DetailTarget, SortKey};
 use crate::app::util::format::parse_key;
 use crate::app::util::predicate::KindKind;
 
+/// Where the keyboard cursor lands after moving `delta` rows.
+///
+/// The cursor is stored as a uid rather than an index because rows stream in
+/// and out over SSE continuously: an index cursor would slide onto a different
+/// resource every time a row was inserted above it. The index is derived here,
+/// per motion, from the current `shown` order.
+///
+/// A cursor whose row has vanished (deleted, or filtered out) restarts from the
+/// nearest end, and motion clamps rather than wrapping — vim's behaviour, so
+/// holding `j` parks on the last row instead of cycling back to the top.
+pub(crate) fn move_cursor(shown: &[String], current: Option<&str>, delta: isize) -> Option<String> {
+    if shown.is_empty() {
+        return None;
+    }
+    let last = shown.len() as isize - 1;
+    let from = match current.and_then(|uid| shown.iter().position(|u| u == uid)) {
+        Some(i) => i as isize,
+        // No cursor yet, or it pointed at a row that is gone. Entering from
+        // nothing should land on the first row for a downward motion and the
+        // last for an upward one, so bias the origin against the travel.
+        None if delta >= 0 => -1,
+        None => shown.len() as isize,
+    };
+    Some(shown[(from + delta).clamp(0, last) as usize].clone())
+}
+
 /// Natural (human) sort: numeric runs in strings are compared by value so that
 /// "osd-2" < "osd-10" rather than "osd-10" < "osd-2" (lexicographic order).
 pub(crate) fn nat_cmp(a: &str, b: &str) -> Ordering {
@@ -244,10 +270,56 @@ pub(crate) fn targets_all(
 
 #[cfg(test)]
 mod tests {
-    use super::{node_is_control_plane, resolve_action_targets, surfaced_cells, targets_all};
+    use super::{
+        move_cursor, node_is_control_plane, resolve_action_targets, surfaced_cells, targets_all,
+    };
     use crate::app::state::DetailTarget;
     use roder_core::{ResourceRow, RowStatus};
     use std::collections::{BTreeMap, BTreeSet, HashMap};
+
+    fn uids(n: usize) -> Vec<String> {
+        (0..n).map(|i| format!("uid-{i}")).collect()
+    }
+
+    #[test]
+    fn cursor_steps_and_takes_a_count() {
+        let shown = uids(5);
+        assert_eq!(move_cursor(&shown, Some("uid-1"), 1).unwrap(), "uid-2");
+        assert_eq!(move_cursor(&shown, Some("uid-3"), -1).unwrap(), "uid-2");
+        assert_eq!(move_cursor(&shown, Some("uid-0"), 3).unwrap(), "uid-3");
+    }
+
+    #[test]
+    fn cursor_clamps_instead_of_wrapping() {
+        let shown = uids(3);
+        assert_eq!(move_cursor(&shown, Some("uid-2"), 1).unwrap(), "uid-2");
+        assert_eq!(move_cursor(&shown, Some("uid-0"), -1).unwrap(), "uid-0");
+        // A count that overshoots lands on the end, not out of bounds.
+        assert_eq!(move_cursor(&shown, Some("uid-0"), 99).unwrap(), "uid-2");
+        assert_eq!(move_cursor(&shown, Some("uid-2"), -99).unwrap(), "uid-0");
+    }
+
+    #[test]
+    fn first_motion_enters_from_the_matching_end() {
+        let shown = uids(4);
+        // `j` with no cursor yet starts at the top, `k` at the bottom.
+        assert_eq!(move_cursor(&shown, None, 1).unwrap(), "uid-0");
+        assert_eq!(move_cursor(&shown, None, -1).unwrap(), "uid-3");
+    }
+
+    /// Rows disappear constantly over SSE; a cursor left pointing at a deleted
+    /// row must not strand the keyboard.
+    #[test]
+    fn vanished_cursor_row_re_enters_the_list() {
+        let shown = uids(3);
+        assert_eq!(move_cursor(&shown, Some("uid-gone"), 1).unwrap(), "uid-0");
+    }
+
+    #[test]
+    fn empty_table_has_no_cursor() {
+        assert!(move_cursor(&[], None, 1).is_none());
+        assert!(move_cursor(&[], Some("uid-0"), -1).is_none());
+    }
 
     fn row(uid: &str, name: &str) -> ResourceRow {
         ResourceRow {

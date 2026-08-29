@@ -819,7 +819,12 @@ fn spawn_schema_watch(
                         Err(broadcast::error::RecvError::Lagged(_)) | Ok(()) => {}
                     }
                 }
-                _ = liveness.tick() => {}
+                _ = liveness.tick() => {
+                    if registry.upgrade().is_none() {
+                        break;
+                    }
+                    continue;
+                }
             }
             let Some(registry) = registry.upgrade() else {
                 break;

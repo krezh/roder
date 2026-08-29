@@ -2,9 +2,14 @@
 //! usage is simply absent and the dashboard renders capacity without usage.
 
 use std::collections::HashMap;
+use std::time::Duration;
 
+use futures::StreamExt;
 use kube::Client;
 use serde::Deserialize;
+
+const PVC_SCRAPE_CONCURRENCY: usize = 8;
+const PVC_NODE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// GET `path` and deserialize the body with sonic-rs (SIMD; faster than
 /// serde_json for these large metrics / kubelet-stats payloads), into a typed
@@ -187,53 +192,49 @@ pub async fn pvc_usage(client: &Client) -> HashMap<String, PvcUsage> {
         .filter(|n| !n.is_empty())
         .collect();
 
-    // Fetch every node's stats summary concurrently. The kube proxy path is
+    // Fetch node summaries with bounded concurrency. The kube proxy path is
     // /api/v1/nodes/{name}/proxy/stats/summary. Any 403/404 just yields an
     // empty node; we still want the rest of the cluster's data.
-    let fetches = names.iter().map(|name| {
-        let client = client.clone();
-        let name = name.clone();
-        async move {
-            let path = format!("/api/v1/nodes/{}/proxy/stats/summary", name);
-            let summary: StatsSummary = match get_json(&client, &path).await {
-                Some(v) => v,
-                None => return Vec::new(),
-            };
-            let mut out = Vec::new();
-            for pod in &summary.pods {
-                for vol in &pod.volume {
-                    let Some(pvc) = &vol.pvc_ref else { continue };
-                    if pvc.name.is_empty() {
-                        continue;
+    futures::stream::iter(names)
+        .map(|name| {
+            let client = client.clone();
+            async move {
+                let path = format!("/api/v1/nodes/{}/proxy/stats/summary", name);
+                let summary: StatsSummary =
+                    match tokio::time::timeout(PVC_NODE_TIMEOUT, get_json(&client, &path)).await {
+                        Ok(Some(summary)) => summary,
+                        Ok(None) | Err(_) => return Vec::new(),
+                    };
+                let mut out = Vec::new();
+                for pod in &summary.pods {
+                    for vol in &pod.volume {
+                        let Some(pvc) = &vol.pvc_ref else { continue };
+                        if pvc.name.is_empty() {
+                            continue;
+                        }
+                        // `capacityBytes` from kubelet is the *filesystem* size
+                        // (excludes reserved blocks, journal, inode tables) — it
+                        // doesn't match the user's mental model of "150Gi". The row
+                        // UI uses the PVC's bound capacity as the % base instead.
+                        out.push((
+                            format!("{}/{}", pvc.namespace, pvc.name),
+                            PvcUsage {
+                                used: vol.used_bytes,
+                            },
+                        ));
                     }
-                    // `capacityBytes` from kubelet is the *filesystem* size
-                    // (excludes reserved blocks, journal, inode tables) — it
-                    // doesn't match the user's mental model of "150Gi". The row
-                    // UI uses the PVC's bound capacity as the % base instead.
-                    out.push((
-                        format!("{}/{}", pvc.namespace, pvc.name),
-                        PvcUsage {
-                            used: vol.used_bytes,
-                        },
-                    ));
                 }
+                out
+            }
+        })
+        .buffer_unordered(PVC_SCRAPE_CONCURRENCY)
+        .fold(HashMap::new(), |mut out, entries| async move {
+            for (key, usage) in entries {
+                out.insert(key, usage);
             }
             out
-        }
-    });
-    let per_node = futures::future::join_all(fetches).await;
-
-    // Last writer wins. In practice every node sees its own pods' volumes, and
-    // a PVC is mounted on exactly one node, so collisions are rare; when they
-    // do happen (RWX volumes mounted on multiple nodes), taking the most
-    // recent sample is the right behaviour.
-    let mut out = HashMap::new();
-    for entries in per_node {
-        for (k, v) in entries {
-            out.insert(k, v);
-        }
-    }
-    out
+        })
+        .await
 }
 
 /// Parse a Kubernetes memory quantity into bytes ("128Mi", "1Gi", "1024Ki", "1000000").

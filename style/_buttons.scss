@@ -158,17 +158,24 @@
 
 // Topbar alerts count button with severity tooltip. Carries `.tip-anchor-end`
 // in markup for its hover tooltip.
+// Tint for a firing alerts button, keyed to the loudest active severity.
+@mixin alerts-severity($color) {
+  background: color-mix(in srgb, #{$color} 16%, transparent);
+  border-color: $color;
+  color: $color;
+  &:hover { background: color-mix(in srgb, #{$color} 26%, transparent); }
+}
+
 .alerts-btn {
   @extend %chip-btn;
   white-space: nowrap;
   font-weight: 600;
 
-  &.alerts-firing {
-    background: color-mix(in srgb, var(--warn) 16%, transparent);
-    border-color: var(--warn);
-    color: var(--warn);
-    &:hover { background: color-mix(in srgb, var(--warn) 26%, transparent); }
-  }
+  // The same three colours as the `.sev-dot` severity dots below, so the button
+  // agrees with the breakdown its tooltip reveals on hover.
+  &.alerts-critical { @include alerts-severity(var(--error)); }
+  &.alerts-warning  { @include alerts-severity(var(--warn)); }
+  &.alerts-info     { @include alerts-severity(var(--ok)); }
 
   &.bouncing {
     animation: alerts-btn-bounce 0.35s ease-out;

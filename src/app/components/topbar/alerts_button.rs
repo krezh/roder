@@ -4,6 +4,33 @@ use leptos::prelude::*;
 
 use crate::app::state::{AlertsData, AlertsOpen};
 
+/// The loudest severity currently firing, which tints the button.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Loudest {
+    Quiet,
+    Info,
+    Warning,
+    Critical,
+}
+
+/// Rank the firing alerts by severity.
+///
+/// Deliberately derived from the same counts the tooltip renders rather than
+/// re-inspecting the alerts, so the colour can never disagree with the
+/// breakdown that explains it — including the tooltip's rule that any severity
+/// which isn't `critical` or `warning` is bucketed as info.
+fn loudest(total: usize, critical: usize, warning: usize) -> Loudest {
+    if total == 0 {
+        Loudest::Quiet
+    } else if critical > 0 {
+        Loudest::Critical
+    } else if warning > 0 {
+        Loudest::Warning
+    } else {
+        Loudest::Info
+    }
+}
+
 /// Alerts button — hidden entirely when AlertManager is not configured (data is None).
 /// Shows total count and a hover tooltip with critical/warning/info breakdown.
 #[component]
@@ -42,10 +69,14 @@ pub(crate) fn AlertsButton() -> impl IntoView {
     view! {
         {move || {
             counts.get().map(|(total, critical, warning, info)| {
+                let loud = loudest(total, critical, warning);
                 view! {
                     <button
                         class="alerts-btn tip-anchor-end"
-                        class:alerts-firing={move || total > 0}
+                        class:alerts-firing=loud != Loudest::Quiet
+                        class:alerts-critical=loud == Loudest::Critical
+                        class:alerts-warning=loud == Loudest::Warning
+                        class:alerts-info=loud == Loudest::Info
                         class:bouncing=move || bouncing.get()
                         aria-label=format!("{total} active alerts")
                         on:click=move |_| open.set(true)
@@ -60,5 +91,33 @@ pub(crate) fn AlertsButton() -> impl IntoView {
                 }
             })
         }}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{loudest, Loudest};
+
+    #[test]
+    fn critical_outranks_a_larger_pile_of_warnings() {
+        assert_eq!(loudest(9, 1, 8), Loudest::Critical);
+    }
+
+    #[test]
+    fn warning_wins_only_when_nothing_is_critical() {
+        assert_eq!(loudest(3, 0, 3), Loudest::Warning);
+        assert_eq!(loudest(3, 1, 2), Loudest::Critical);
+    }
+
+    /// Severities outside critical/warning ("none", "page", …) are bucketed as
+    /// info by the tooltip, so the colour has to follow.
+    #[test]
+    fn anything_else_firing_reads_as_info() {
+        assert_eq!(loudest(2, 0, 0), Loudest::Info);
+    }
+
+    #[test]
+    fn no_active_alerts_is_quiet() {
+        assert_eq!(loudest(0, 0, 0), Loudest::Quiet);
     }
 }

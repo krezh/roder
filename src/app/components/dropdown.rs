@@ -87,6 +87,7 @@ pub(crate) fn Dropdown(
     };
 
     let handle_keydown = move |_event: leptos::ev::KeyboardEvent| {
+        #[cfg(target_arch = "wasm32")]
         if !open.get_untracked() {
             return;
         }

@@ -16,6 +16,7 @@ mod detail;
 mod events;
 mod failure_watch;
 mod hooks;
+mod jobs;
 mod keys;
 mod log_stream;
 mod logs;

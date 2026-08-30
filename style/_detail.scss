@@ -939,3 +939,34 @@ table.rules {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+
+.jobs-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.job-mini-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 6rem;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.3rem 0.5rem;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--fg);
+  text-align: left;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  &:hover,
+  &:focus-visible {
+    background: var(--panel-2);
+  }
+  &:disabled {
+    cursor: default;
+    opacity: 0.55;
+  }
+  .pm-phase { color: var(--muted); }
+}

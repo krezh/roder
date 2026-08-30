@@ -23,6 +23,7 @@ use leptos::prelude::*;
 use self::info::info_view;
 use self::metrics::MetricsChart;
 use self::pods::PodsTab;
+use crate::app::jobs::CronJobJobs;
 
 /// Right-docked, drag-resizable detail drawer. Shows `RowDetail` for the currently
 /// selected object (the `detail` context signal); slides out when nothing is open.
@@ -315,6 +316,9 @@ pub(crate) fn RowDetail(
                 {move || talos_available().then(|| view! {
                     <button class="rd-tab" class:active=move || tab.get() == Tab::Talos on:click=move |_| tab.set(Tab::Talos)>"Talos"</button>
                 })}
+                {is_cronjob.then(|| view! {
+                    <button class="rd-tab" class:active=move || tab.get() == Tab::Jobs on:click=move |_| tab.set(Tab::Jobs)>"Jobs"</button>
+                })}
             </div>
 
             <Suspense fallback=|| view! { <div class="pad muted">"Loading…"</div> }>
@@ -337,6 +341,7 @@ pub(crate) fn RowDetail(
                         },
                         Tab::Metrics => view! { <MetricsChart namespace=ns.clone() name=pod.clone() /> }.into_any(),
                         Tab::Talos => view! { <TalosNodeView node=pod.clone() key=tv.get_value().key actions=talos_actions() config=talos_config() /> }.into_any(),
+                        Tab::Jobs => view! { <CronJobJobs target=tv.get_value() /> }.into_any(),
                         Tab::Yaml => view! {
                             <div class="yaml-pane">
                                 <div class="yaml-head">

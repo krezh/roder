@@ -5,6 +5,7 @@ use crate::app::controllers::detail::{
     certificate_summary, format_bytes, short_fingerprint, talos_action, talos_config_diff,
     talos_node, use_metrics, DetailTab, ResourceDetailController,
 };
+use crate::app::jobs::CronJobJobs;
 use crate::app::log_stream::{extract_timestamp, use_log_stream};
 use crate::app::state::{
     DetailTarget, DrainOpen, DrainTarget, ExecOpen, ExecTarget, TalosFeatures,
@@ -150,6 +151,7 @@ pub(crate) fn MobileRowDetail(
                 {is_pod.then(|| view! { <MobileTab tab current=DetailTab::Metrics label="Metrics" /> })}
                 {move || (is_pod || talos_available()).then(|| view! { <MobileTab tab current=DetailTab::Logs label="Logs" /> })}
                 {move || talos_available().then(|| view! { <MobileTab tab current=DetailTab::Talos label="Talos" /> })}
+                {is_cronjob.then(|| view! { <MobileTab tab current=DetailTab::Jobs label="Jobs" /> })}
             </nav>
             <Suspense fallback=|| view! { <div class="pad muted">"Loading..."</div> }>
                 {move || controller.object.get().flatten().map(|detail| {
@@ -164,6 +166,7 @@ pub(crate) fn MobileRowDetail(
                         }
                         DetailTab::Metrics => view! { <MobileMetrics namespace=target.namespace.unwrap_or_default() name=target.name /> }.into_any(),
                         DetailTab::Talos => view! { <MobileTalos node=target.name key=target.key actions=features.get().actions config=features.get().config /> }.into_any(),
+                        DetailTab::Jobs => view! { <CronJobJobs target=target_value.get_value() /> }.into_any(),
                     };
                     view! { {pods} {content} }
                 })}

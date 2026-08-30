@@ -15,6 +15,7 @@ pub(crate) enum DetailTab {
     Logs,
     Metrics,
     Talos,
+    Jobs,
 }
 
 #[derive(Clone, Copy, Default)]

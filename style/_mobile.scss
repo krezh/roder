@@ -1762,7 +1762,21 @@
     .pm-phase { grid-column: 2; grid-row: 2; }
     .pm-num:nth-child(4) { grid-column: 3; grid-row: 2; }
     .pm-num:nth-child(5) { grid-column: 4; grid-row: 2; }
+
     .pm-num:nth-child(6) { grid-column: 2 / -1; grid-row: 3; }
+  }
+
+  .mobile-detail .rd-jobs {
+    padding: 0.7rem;
+
+    .job-mini-row {
+      grid-template-columns: 12px minmax(0, 1fr) auto;
+      min-height: 52px;
+      padding: 0.65rem;
+      border: 1px solid var(--mobile-hairline);
+      border-radius: 11px;
+      background: var(--mobile-surface);
+    }
   }
 
   .palette {

@@ -167,8 +167,13 @@
   cursor: pointer;
   white-space: nowrap;
   display: block;
-  &:hover {
+  &:hover,
+  &:focus {
     color: var(--accent);
+  }
+  &:focus {
+    outline: none;
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
   }
 }
 

@@ -73,6 +73,8 @@ fn DrainOpenView(
     let request_pending = RwSignal::new(false);
     let name = StoredValue::new(target.name.clone());
     let power = StoredValue::new(target.power.clone());
+    let dialog_ref = NodeRef::<leptos::html::Div>::new();
+    crate::app::ui::use_dialog_focus(dialog_ref);
 
     let scrim_close = move |_: leptos::ev::MouseEvent| {
         if closing.get_untracked() || request_pending.get_untracked() {
@@ -89,7 +91,8 @@ fn DrainOpenView(
     view! {
         <div class="modal-scrim" class:closing=move || closing.get()
             on:click=scrim_close></div>
-        <div class="modal drain-modal" class:closing=move || closing.get()>
+        <div class="modal drain-modal" class:closing=move || closing.get() node_ref=dialog_ref
+            role="dialog" aria-modal="true" tabindex="-1">
             <DrainForm
                 target=target phase=phase request_pending=request_pending do_close=do_close
             />

@@ -254,6 +254,78 @@ pub(crate) fn use_option_overlay<T: Clone + Send + Sync + 'static>(
     (snapshot, closing, do_close)
 }
 
+pub(crate) fn use_dialog_focus(dialog_ref: NodeRef<leptos::html::Div>) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use wasm_bindgen::JsCast;
+
+        Effect::new(move |_| {
+            let Some(dialog) = dialog_ref.get() else {
+                return;
+            };
+            let items = dialog_focusables(&dialog);
+            if let Some(first) = items.first() {
+                let _ = first.focus();
+            } else {
+                let _ = dialog.focus();
+            }
+        });
+
+        Effect::new(move |_| {
+            let handle = window_event_listener(leptos::ev::keydown, move |event| {
+                if event.key() != "Tab" {
+                    return;
+                }
+                let Some(dialog) = dialog_ref.get_untracked() else {
+                    return;
+                };
+                let items = dialog_focusables(&dialog);
+                if items.is_empty() {
+                    event.prevent_default();
+                    let _ = dialog.focus();
+                    return;
+                }
+                let active = web_sys::window()
+                    .and_then(|window| window.document())
+                    .and_then(|document| document.active_element());
+                let current = items.iter().position(|item| {
+                    active
+                        .as_ref()
+                        .is_some_and(|active| item.dyn_ref::<web_sys::Element>() == Some(active))
+                });
+                let next = match (current, event.shift_key()) {
+                    (Some(0), true) | (None, true) => items.len() - 1,
+                    (Some(index), true) => index - 1,
+                    (Some(index), false) if index + 1 < items.len() => index + 1,
+                    _ => 0,
+                };
+                event.prevent_default();
+                let _ = items[next].focus();
+            });
+            on_cleanup(move || handle.remove());
+        });
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = dialog_ref;
+}
+
+#[cfg(target_arch = "wasm32")]
+fn dialog_focusables(dialog: &web_sys::HtmlDivElement) -> Vec<web_sys::HtmlElement> {
+    use wasm_bindgen::JsCast;
+
+    let Ok(nodes) = dialog.query_selector_all(
+        "button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])",
+    ) else {
+        return Vec::new();
+    };
+    (0..nodes.length())
+        .filter_map(|index| nodes.item(index))
+        .filter_map(|node| node.dyn_into::<web_sys::HtmlElement>().ok())
+        .filter(|element| element.offset_width() > 0 || element.offset_height() > 0)
+        .collect()
+}
+
 pub(crate) fn fuzzy_match(pattern: &str, text: &str) -> Option<(Vec<usize>, i32)> {
     let pattern: Vec<char> = pattern.to_lowercase().chars().collect();
     let lowered = text.to_lowercase();

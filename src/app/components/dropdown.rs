@@ -51,6 +51,10 @@ pub(crate) fn Dropdown(
         close_menu(shell_ref, btn_ref);
         open.set(false);
         closing.set(true);
+        #[cfg(target_arch = "wasm32")]
+        if let Some(button) = btn_ref.get_untracked() {
+            let _ = button.focus();
+        }
         set_timeout(
             move || {
                 if closing.get_untracked() {
@@ -78,6 +82,43 @@ pub(crate) fn Dropdown(
         open_menu(shell_ref);
         closing.set(false);
         open.set(true);
+        #[cfg(target_arch = "wasm32")]
+        focus_dropdown_item(shell_ref, 0);
+    };
+
+    let handle_keydown = move |_event: leptos::ev::KeyboardEvent| {
+        if !open.get_untracked() {
+            return;
+        }
+        #[cfg(target_arch = "wasm32")]
+        match _event.key().as_str() {
+            "ArrowDown" | "j" => {
+                _event.prevent_default();
+                _event.stop_propagation();
+                step_dropdown_focus(shell_ref, 1);
+            }
+            "ArrowUp" | "k" => {
+                _event.prevent_default();
+                _event.stop_propagation();
+                step_dropdown_focus(shell_ref, -1);
+            }
+            "Home" => {
+                _event.prevent_default();
+                _event.stop_propagation();
+                focus_dropdown_item(shell_ref, 0);
+            }
+            "End" => {
+                _event.prevent_default();
+                _event.stop_propagation();
+                focus_dropdown_item(shell_ref, -1);
+            }
+            "Escape" | "Tab" => {
+                _event.prevent_default();
+                _event.stop_propagation();
+                do_close();
+            }
+            _ => {}
+        }
     };
 
     Effect::new(move |_| {
@@ -100,11 +141,12 @@ pub(crate) fn Dropdown(
             <span class="dropdown-spacer" aria-hidden="true">
                 <span>{move || label.with_value(|l| l())}</span>
             </span>
-            <div class="dropdown-shell" node_ref=shell_ref>
-                <button class="dropdown-face-btn" node_ref=btn_ref on:click=toggle>
+            <div class="dropdown-shell" node_ref=shell_ref on:keydown=handle_keydown>
+                <button class="dropdown-face-btn" node_ref=btn_ref on:click=toggle
+                    aria-haspopup="menu" aria-expanded=move || open.get().to_string()>
                     <span>{move || label.with_value(|l| l())}</span>
                 </button>
-                <div class="dropdown-face-menu">
+                <div class="dropdown-face-menu" role="menu">
                     {children()}
                 </div>
             </div>
@@ -113,6 +155,59 @@ pub(crate) fn Dropdown(
             })}
         </div>
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn dropdown_items(shell: &web_sys::HtmlDivElement) -> Vec<web_sys::HtmlElement> {
+    use wasm_bindgen::JsCast;
+
+    let Ok(nodes) = shell.query_selector_all(".dropdown-face-menu .dropdown-item") else {
+        return Vec::new();
+    };
+    (0..nodes.length())
+        .filter_map(|index| nodes.item(index))
+        .filter_map(|node| node.dyn_into::<web_sys::HtmlElement>().ok())
+        .collect()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn focus_dropdown_item(shell_ref: NodeRef<leptos::html::Div>, index: i32) {
+    let Some(shell) = shell_ref.get_untracked() else {
+        return;
+    };
+    let items = dropdown_items(&shell);
+    if items.is_empty() {
+        return;
+    }
+    let index = index.rem_euclid(items.len() as i32) as usize;
+    let _ = items[index].focus();
+}
+
+#[cfg(target_arch = "wasm32")]
+fn step_dropdown_focus(shell_ref: NodeRef<leptos::html::Div>, delta: i32) {
+    use wasm_bindgen::JsCast;
+
+    let Some(shell) = shell_ref.get_untracked() else {
+        return;
+    };
+    let items = dropdown_items(&shell);
+    if items.is_empty() {
+        return;
+    }
+    let active = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.active_element());
+    let current = items.iter().position(|item| {
+        active
+            .as_ref()
+            .is_some_and(|active| item.dyn_ref::<web_sys::Element>() == Some(active))
+    });
+    let next = match current {
+        Some(index) => (index as i32 + delta).rem_euclid(items.len() as i32),
+        None if delta >= 0 => 0,
+        None => items.len() as i32 - 1,
+    };
+    let _ = items[next as usize].focus();
 }
 
 /// Measure the shell's natural size with a given class temporarily applied

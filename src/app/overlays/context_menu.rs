@@ -633,14 +633,14 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                             <button class="ctx-reconcile-btn" on:click=reconcile>"Reconcile"</button>
                             <span class="ctx-chips">
                                 {has_source_ref.then(|| view! {
-                                    <span class="ctx-chip" class:active=move || with_source_checked.get()
-                                        on:click=move |e: leptos::ev::MouseEvent| { e.stop_propagation(); with_source_checked.update(|v| *v = !*v); }>"src"</span>
+                                    <button type="button" class="ctx-chip" class:active=move || with_source_checked.get()
+                                        on:click=move |e: leptos::ev::MouseEvent| { e.stop_propagation(); with_source_checked.update(|v| *v = !*v); }>"src"</button>
                                 })}
                                 {is_helmrelease.then(|| view! {
-                                    <span class="ctx-chip" class:active=move || force_checked.get()
-                                        on:click=move |e: leptos::ev::MouseEvent| { e.stop_propagation(); force_checked.update(|v| *v = !*v); }>"force"</span>
-                                    <span class="ctx-chip" class:active=move || reset_checked.get()
-                                        on:click=move |e: leptos::ev::MouseEvent| { e.stop_propagation(); reset_checked.update(|v| *v = !*v); }>"reset"</span>
+                                    <button type="button" class="ctx-chip" class:active=move || force_checked.get()
+                                        on:click=move |e: leptos::ev::MouseEvent| { e.stop_propagation(); force_checked.update(|v| *v = !*v); }>"force"</button>
+                                    <button type="button" class="ctx-chip" class:active=move || reset_checked.get()
+                                        on:click=move |e: leptos::ev::MouseEvent| { e.stop_propagation(); reset_checked.update(|v| *v = !*v); }>"reset"</button>
                                 })}
                             </span>
                         </div>

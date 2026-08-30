@@ -44,7 +44,7 @@ pub(crate) fn Identity() -> impl IntoView {
                     <Dropdown label=move || who_label.clone()>
                         <div class="dropdown-head">{who}</div>
                         <AccessItem access_open=access_open />
-                        <a class="dropdown-item" href="/auth/logout" rel="external">"Sign out"</a>
+                        <a class="dropdown-item" role="menuitem" href="/auth/logout" rel="external">"Sign out"</a>
                     </Dropdown>
                 }
             })}
@@ -60,7 +60,7 @@ pub(crate) fn Identity() -> impl IntoView {
 fn AccessItem(access_open: RwSignal<bool>) -> impl IntoView {
     let close = expect_context::<DropdownClose>().0;
     view! {
-        <button class="dropdown-item"
+        <button class="dropdown-item" role="menuitem"
             on:click=move |_| { close.run(()); access_open.set(true); }>
             "Access"
         </button>

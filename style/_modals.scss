@@ -568,7 +568,9 @@
   margin-left: auto;
 }
 .ctx-chip {
+  background: none;
   font-size: 0.68rem;
+  font-family: inherit;
   line-height: 1;
   padding: 0.2rem 0.4rem;
   border-radius: 0;

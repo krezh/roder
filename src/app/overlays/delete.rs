@@ -31,6 +31,8 @@ fn DeleteDialogView(
     // Force/Propagation choice never leaks into the next delete dialog.
     let force = RwSignal::new(false);
     let propagation = RwSignal::new(String::new()); // "" = server default
+    let dialog_ref = NodeRef::<leptos::html::Div>::new();
+    crate::app::ui::use_dialog_focus(dialog_ref);
 
     let propagation_label = move || {
         match propagation.get().as_str() {
@@ -61,7 +63,8 @@ fn DeleteDialogView(
     view! {
         <div class="modal-scrim" class:closing=move || closing.get()
             on:click=move |_| do_close()></div>
-        <div class="modal delete-modal" class:closing=move || closing.get()>
+        <div class="modal delete-modal" class:closing=move || closing.get() node_ref=dialog_ref
+            role="alertdialog" aria-modal="true" tabindex="-1">
             <div class="modal-msg">{req.message.clone()}</div>
             <div class="delete-options">
                 <div class="delete-opt">
@@ -101,7 +104,7 @@ fn PropagationItem(
 ) -> impl IntoView {
     let close = expect_context::<DropdownClose>().0;
     view! {
-        <button type="button" class="dropdown-item"
+        <button type="button" class="dropdown-item" role="menuitem"
             on:click=move |_| { propagation.set(value.to_string()); close.run(()); }>
             {item_label}
         </button>

@@ -69,6 +69,8 @@ pub(crate) fn ResourceTreeWindow() -> impl IntoView {
     let (snapshot, closing, do_close) = use_option_overlay(tree_open);
     let tree_detail = TreeDetailTarget(RwSignal::new(None::<DetailTarget>));
     provide_context(tree_detail);
+    let dialog_ref = NodeRef::<leptos::html::Div>::new();
+    crate::app::ui::use_dialog_focus(dialog_ref);
 
     view! {
         <Show when=move || snapshot.get().is_some()>
@@ -77,6 +79,10 @@ pub(crate) fn ResourceTreeWindow() -> impl IntoView {
                 class="tree-window"
                 class:closing=move || closing.get()
                 class:with-detail=move || tree_detail.0.get().is_some()
+                node_ref=dialog_ref
+                role="dialog"
+                aria-modal="true"
+                tabindex="-1"
             >
                 {move || snapshot.get().map(|target| view! { <TreeContent target=target do_close=do_close /> })}
             </div>
@@ -192,12 +198,20 @@ fn BranchCard(node: ResourceTreeNode, is_root: bool) -> AnyView {
     };
     let children = node.children;
     let groups = group_children(children);
+    let toggle = move || expanded.update(|value| *value = !*value);
 
     view! {
         <div
             class=format!("tree-owner-card {border_class}")
             class:tree-selected=selected
-            on:click=move |_| expanded.update(|e| *e = !*e)
+            role="button"
+            tabindex="0"
+            aria-expanded=move || expanded.get().to_string()
+            on:click=move |_| toggle()
+            on:keydown=move |event: leptos::ev::KeyboardEvent| match event.key().as_str() {
+                "Enter" | " " => { event.prevent_default(); toggle(); }
+                _ => {}
+            }
         >
             <TreeKindIcon category=category kind=kind small=false />
             <div class="tree-owner-text">
@@ -205,7 +219,9 @@ fn BranchCard(node: ResourceTreeNode, is_root: bool) -> AnyView {
                 <div class="tree-kind-line">{subtitle}</div>
             </div>
             {clickable.then(|| view! {
-                <button class="tree-node-open" on:click=move |event: leptos::ev::MouseEvent| {
+                <button class="tree-node-open"
+                    on:keydown=move |event: leptos::ev::KeyboardEvent| event.stop_propagation()
+                    on:click=move |event: leptos::ev::MouseEvent| {
                     event.stop_propagation();
                     if let Some(key) = open_key.clone() {
                         tree_detail.0.set(Some(DetailTarget {
@@ -261,7 +277,7 @@ fn LeafChip(node: ResourceTreeNode) -> impl IntoView {
         let key = node.key.clone();
         let ns = node.namespace.clone();
         let name = node.name.clone();
-        move |_| {
+        Callback::new(move |()| {
             if let Some(key) = key.clone() {
                 tree_detail.0.set(Some(DetailTarget {
                     key,
@@ -269,7 +285,7 @@ fn LeafChip(node: ResourceTreeNode) -> impl IntoView {
                     name: name.clone(),
                 }));
             }
-        }
+        })
     };
     view! {
         <div
@@ -277,7 +293,14 @@ fn LeafChip(node: ResourceTreeNode) -> impl IntoView {
             class:tree-leaf-disabled=!clickable
             class:tree-selected=selected
             data-tip=(!clickable).then_some("Kind not found in this cluster's catalog")
-            on:click=open
+            role="button"
+            tabindex=if clickable { 0 } else { -1 }
+            aria-disabled=(!clickable).then_some("true")
+            on:click=move |_| open.run(())
+            on:keydown=move |event: leptos::ev::KeyboardEvent| match event.key().as_str() {
+                "Enter" | " " if clickable => { event.prevent_default(); open.run(()); }
+                _ => {}
+            }
         >
             <TreeKindIcon category=node.category kind=node.kind.clone() small=true />
             <div class="tree-owner-text">

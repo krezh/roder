@@ -13,12 +13,15 @@ use crate::app::state::ShortcutsOpen;
 pub(crate) fn ShortcutsHelp() -> impl IntoView {
     let open = expect_context::<ShortcutsOpen>().0;
     let (visible, closing, do_close) = super::use_bool_overlay(open);
+    let dialog_ref = NodeRef::<leptos::html::Div>::new();
+    crate::app::ui::use_dialog_focus(dialog_ref);
 
     view! {
         {move || visible.get().then(|| view! {
             <div class="shortcuts-scrim" class:closing=move || closing.get()
                 on:click=move |_| do_close()></div>
-            <div class="shortcuts-modal" class:closing=move || closing.get()
+            <div class="shortcuts-modal" class:closing=move || closing.get() node_ref=dialog_ref
+                role="dialog" aria-modal="true" tabindex="-1"
                 on:click=move |e: leptos::ev::MouseEvent| e.stop_propagation()>
                 <div class="shortcuts-head">
                     <span class="shortcuts-title">"Keyboard Shortcuts"</span>

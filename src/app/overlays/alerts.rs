@@ -16,6 +16,8 @@ pub(crate) fn AlertsPanel() -> impl IntoView {
     let show_silenced = RwSignal::new(false);
     let refreshing = RwSignal::new(false);
     let refresh_error = RwSignal::new(None::<String>);
+    let dialog_ref = NodeRef::<leptos::html::Div>::new();
+    crate::app::ui::use_dialog_focus(dialog_ref);
 
     let refresh = move |_| {
         #[cfg(target_arch = "wasm32")]
@@ -60,7 +62,8 @@ pub(crate) fn AlertsPanel() -> impl IntoView {
     view! {
         <Show when=move || visible.get()>
             <div class="alerts-scrim" on:click=move |_| do_close()></div>
-            <div class="alerts-panel" class:closing=move || closing.get()>
+            <div class="alerts-panel" class:closing=move || closing.get() node_ref=dialog_ref
+                role="dialog" aria-modal="true" tabindex="-1">
                 <div class="alerts-header">
                     <div class="alerts-heading">
                         <span class="alerts-title">"Firing Alerts"</span>
@@ -288,7 +291,7 @@ fn DurationUnitItem(
 ) -> impl IntoView {
     let close = expect_context::<DropdownClose>().0;
     view! {
-        <button type="button" class="dropdown-item" on:click=move |_| {
+        <button type="button" class="dropdown-item" role="menuitem" on:click=move |_| {
             duration_unit.set(value);
             close.run(());
         }>

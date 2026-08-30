@@ -23,6 +23,8 @@ pub(crate) fn AccessReview() -> impl IntoView {
     let open = expect_context::<AccessReviewOpen>().0;
     let selected_ns = expect_context::<RwSignal<Option<String>>>();
     let (visible, closing, do_close) = super::use_bool_overlay(open);
+    let dialog_ref = NodeRef::<leptos::html::Div>::new();
+    crate::app::ui::use_dialog_focus(dialog_ref);
 
     let rows = RwSignal::new(None::<Result<Vec<AccessRow>, String>>);
     // Fetch fresh on every open (permissions can change) rather than eagerly
@@ -49,7 +51,8 @@ pub(crate) fn AccessReview() -> impl IntoView {
         {move || visible.get().then(|| view! {
             <div class="access-scrim" class:closing=move || closing.get()
                 on:click=move |_| do_close()></div>
-            <div class="access-modal" class:closing=move || closing.get()
+            <div class="access-modal" class:closing=move || closing.get() node_ref=dialog_ref
+                role="dialog" aria-modal="true" tabindex="-1"
                 on:click=move |e: leptos::ev::MouseEvent| e.stop_propagation()>
                 <div class="access-head">
                     <span class="access-title">"Access Review"</span>

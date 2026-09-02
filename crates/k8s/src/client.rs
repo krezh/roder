@@ -16,6 +16,9 @@ pub enum K8sError {
 
     #[error("Kubernetes API error: {0}")]
     Api(String),
+
+    #[error("{0}")]
+    Container(String),
 }
 
 pub type Result<T> = std::result::Result<T, K8sError>;

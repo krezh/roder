@@ -160,9 +160,13 @@ web-sys = { version = "0.3", features = [
   "ServiceWorkerContainer",
   "ServiceWorkerRegistration",
   "Clipboard",
+  "Blob",
   "Storage",
   "Document",
   "Element",
+  "File",
+  "FileList",
+  "HtmlInputElement",
   # `query_selector_all`, for stepping focus through the context menu's items
   # from the keyboard (see `overlays::context_menu`).
   "NodeList",

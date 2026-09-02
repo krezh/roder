@@ -13,6 +13,7 @@ use roder_auth::Identity;
 pub(crate) mod action;
 mod drain;
 mod exec;
+mod files;
 mod logs;
 mod misc;
 mod resource_reads;
@@ -24,6 +25,9 @@ pub use drain::{active_drain, drain_progress};
 pub use exec::{
     debug_shell, exec_ws, node_shell_create, terminal_page, terminal_xterm_addon_fit_js,
     terminal_xterm_css, terminal_xterm_js,
+};
+pub use files::{
+    create_file, delete_file, download_file, list_files, read_file, upload_file, write_file,
 };
 pub use logs::{logs, metrics_history};
 pub use misc::{alerts, features, health, namespaces, overview, resources, silence_alert};

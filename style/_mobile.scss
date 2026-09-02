@@ -404,7 +404,8 @@
 
   /* ---- full-screen detail / logs ---- */
   .mobile-detail,
-  .mobile-logs {
+  .mobile-logs,
+  .mobile-files-window {
     position: fixed;
     inset: 0;
     z-index: 15;
@@ -424,7 +425,8 @@
   }
 
   .mobile-detail-head,
-  .mobile-logs-head {
+  .mobile-logs-head,
+  .mobile-files-head {
     display: flex;
     align-items: center;
     gap: 0.6rem;
@@ -433,6 +435,40 @@
     border-bottom: 1px solid var(--border);
     flex: 0 0 auto;
   }
+
+  .mobile-files-window {
+    position: fixed;
+    inset: 0;
+    z-index: 88;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .mobile-files-head {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 0.65rem;
+    button {
+      display: grid;
+      min-width: 44px;
+      min-height: 44px;
+      place-items: center;
+      border: 0;
+      border-radius: 50%;
+      background: var(--mobile-surface-raised);
+      color: var(--fg);
+      font-size: 1.4rem;
+    }
+    div {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      span { color: var(--muted); font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.08em; }
+      strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    }
+  }
+  .mobile-files-body { flex: 1 1 0; min-height: 0; overflow: auto; }
 
   .mobile-detail-back,
   .mobile-logs-close-all {
@@ -1457,6 +1493,28 @@
       padding: 0.6rem 0.85rem;
     }
   }
+
+  .mobile-files-body .file-browser { padding: 0.7rem 0.7rem calc(1rem + env(safe-area-inset-bottom)); }
+  .mobile-files-body .file-toolbar { flex-direction: column; }
+  .mobile-files-body .file-container { width: 100%; justify-content: space-between; }
+  .mobile-files-body .file-container select { min-height: 44px; }
+  .mobile-files-body .file-path,
+  .mobile-files-body .file-path input,
+  .mobile-files-body .file-path button { height: 44px; min-height: 44px; }
+  .mobile-files-body .file-path { width: 100%; }
+  .mobile-files-body .file-entry { min-height: 48px; }
+  .mobile-files-body .file-actions { height: 44px; overflow-x: auto; flex-wrap: nowrap; }
+  .mobile-files-body .file-actions button,
+  .mobile-files-body .file-upload,
+  .mobile-files-body .file-create button,
+  .mobile-files-body .file-delete-confirm button { height: 44px; min-height: 44px; flex: 0 0 auto; }
+  .mobile-files-body .file-create { flex-wrap: wrap; }
+  .mobile-files-body .file-create input { flex-basis: 100%; min-height: 44px; }
+  .mobile-files-body .file-delete-confirm { align-items: stretch; flex-wrap: wrap; }
+  .mobile-files-body .file-delete-confirm span { flex-basis: 100%; }
+  .mobile-files-body .file-preview-head { align-items: flex-start; flex-direction: column; }
+  .mobile-files-body .file-preview-head button { min-height: 40px; }
+  .mobile-files-body .file-editor { min-height: 50vh; }
 
   .mobile-detail-body .info {
     overflow-x: hidden;

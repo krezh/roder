@@ -14,6 +14,7 @@ mod detail_view;
 mod dialogs;
 mod drain;
 mod exec;
+mod files;
 mod header;
 mod list_actions;
 mod logs_view;
@@ -42,6 +43,7 @@ use detail_view::MobileDetailView;
 use dialogs::{MobileConfirmDialog, MobileDeleteDialog};
 use drain::MobileDrainOverlay;
 use exec::MobileExecWindow;
+use files::MobileFileBrowserWindow;
 use header::MobileHeader;
 use logs_view::MobileLogsView;
 use palettes::{MobileCommandPalette, MobileNsPalette};
@@ -124,6 +126,7 @@ pub(crate) fn MobileShell() -> impl IntoView {
             <MobileDrainOverlay />
             <MobilePodModal />
             <MobileExecWindow />
+            <MobileFileBrowserWindow />
             <MobileShortcutsHelp />
             <MobileAlertsPanel />
             <MobileToastView />

@@ -9,8 +9,8 @@ use crate::app::overlays::delete::{ask_delete, delete_extra, DeleteRequest};
 use crate::app::overlays::toast::{show_toast, show_toast_detail, Toast, ToastKind};
 use crate::app::state::{
     open_logs, Catalog, CtxMenu, DebugImage, DetailTarget, DrainOpen, DrainTarget, ExecOpen,
-    ExecTarget, LogPods, LogTarget, TableRows, TableSelected, TableTargets, TalosFeatures,
-    TreeOpen,
+    ExecTarget, FileBrowserOpen, LogPods, LogTarget, TableRows, TableSelected, TableTargets,
+    TalosFeatures, TreeOpen,
 };
 use crate::app::table_logic::{node_is_control_plane, resolve_action_targets, targets_all};
 use crate::app::util::clipboard::copy_to_clipboard;
@@ -28,6 +28,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
     let catalog = expect_context::<Catalog>().0;
     let log_pods = expect_context::<LogPods>().0;
     let exec_open = expect_context::<ExecOpen>().0;
+    let file_browser_open = expect_context::<FileBrowserOpen>().0;
     let debug_image = expect_context::<DebugImage>().0;
     let tree_open = expect_context::<TreeOpen>().0;
     let drain_open = expect_context::<DrainOpen>().0;
@@ -458,6 +459,13 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                     do_close();
                 }
             });
+            let files = (!is_bulk && is_pod).then(|| {
+                let target = m.target.clone();
+                move |_| {
+                    file_browser_open.set(Some(target.clone()));
+                    do_close();
+                }
+            });
 
             let ns_item = (!is_bulk).then(|| m.target.namespace.clone()).flatten();
             let node_item = (!is_bulk && is_pod).then(|| m.node.clone()).flatten();
@@ -477,6 +485,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                     })}
                     {has_logs.then(|| view! { <button class="ctx-item" on:click=logs>"Logs"</button> })}
                     {shell.map(|s| view! { <button class="ctx-item" on:click=s>"Shell"</button> })}
+                    {files.map(|open| view! { <button class="ctx-item" on:click=open>"Files"</button> })}
                     {(!is_bulk && is_pod).then(|| {
                         let ns  = m.target.namespace.clone().unwrap_or_default();
                         let pod = m.target.name.clone();

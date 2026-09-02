@@ -67,6 +67,7 @@ async fn main() {
         .install_default()
         .expect("Failed to install rustls crypto provider");
 
+    use axum::extract::DefaultBodyLimit;
     use axum::middleware::{from_fn, from_fn_with_state};
     use axum::routing::{get, post};
     use axum::Router;
@@ -135,6 +136,14 @@ async fn main() {
         .route("/api/drain-active", get(api::active_drain))
         .route("/api/drain-progress", get(api::drain_progress))
         .route("/api/exec", get(api::exec_ws))
+        .route("/api/files", get(api::list_files).post(api::create_file))
+        .route("/api/file", get(api::read_file).post(api::write_file))
+        .route("/api/file/download", get(api::download_file))
+        .route(
+            "/api/file/upload",
+            post(api::upload_file).layer(DefaultBodyLimit::max(23 * 1024 * 1024)),
+        )
+        .route("/api/file/delete", post(api::delete_file))
         .route("/api/debug-shell", post(api::debug_shell))
         .route("/api/node-shell", post(api::node_shell_create))
         .route("/terminal", get(api::terminal_page))

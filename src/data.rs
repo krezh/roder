@@ -52,6 +52,22 @@ pub fn detail_url(key: &str, namespace: Option<&str>, name: &str) -> String {
     )
 }
 
+pub fn container_file_url(
+    endpoint: &str,
+    namespace: &str,
+    pod: &str,
+    container: &str,
+    path: &str,
+) -> String {
+    format!(
+        "/api/{endpoint}?namespace={}&pod={}&container={}&path={}",
+        percent_encode(namespace),
+        percent_encode(pod),
+        percent_encode(container),
+        percent_encode(path),
+    )
+}
+
 // ---- REST fetch -----------------------------------------------------------
 
 /// A 401 means the session is gone (cookie expired, or its refresh token can no
@@ -77,7 +93,11 @@ pub async fn fetch_json<T: DeserializeOwned>(url: &str) -> Result<T, String> {
     let resp = Request::get(url).send().await.map_err(|e| e.to_string())?;
     if !resp.ok() {
         redirect_to_login_if_unauthorized(resp.status());
-        return Err(format!("{} {}", resp.status(), resp.status_text()));
+        let fallback = format!("{} {}", resp.status(), resp.status_text());
+        return Err(match resp.text().await {
+            Ok(message) if !message.trim().is_empty() => message,
+            _ => fallback,
+        });
     }
     resp.json::<T>().await.map_err(|e| e.to_string())
 }
@@ -101,7 +121,11 @@ pub async fn post_json<T: DeserializeOwned>(
         .map_err(|e| e.to_string())?;
     if !resp.ok() {
         redirect_to_login_if_unauthorized(resp.status());
-        return Err(resp.text().await.unwrap_or_else(|_| resp.status_text()));
+        let fallback = format!("{} {}", resp.status(), resp.status_text());
+        return Err(match resp.text().await {
+            Ok(message) if !message.trim().is_empty() => message,
+            _ => fallback,
+        });
     }
     resp.json::<T>().await.map_err(|e| e.to_string())
 }
@@ -558,6 +582,15 @@ mod tests {
         assert_eq!(
             u,
             "/api/detail?key=v1/Pod&namespace=kube%20system&name=my%3Dpod"
+        );
+    }
+
+    #[test]
+    fn container_file_url_encodes_every_query_value() {
+        let url = container_file_url("files", "kube system", "web=1", "side/car", "/var/log/a b");
+        assert_eq!(
+            url,
+            "/api/files?namespace=kube%20system&pod=web%3D1&container=side%2Fcar&path=%2Fvar%2Flog%2Fa%20b"
         );
     }
 

@@ -20,7 +20,7 @@ mod table;
 mod test_alloc;
 
 pub use alertmanager::{alertmanager_url, AlertsCache, SilenceError};
-pub use backend::{Backend, DrainSession};
+pub use backend::{normalize_file_path, Backend, DrainSession};
 pub use client::{ClusterAccess, K8sError};
 pub use coordination::{
     AcquireError, HeldNodeLease, NodeCoordinator, RoderPod, TLS_FINGERPRINT_ANNOTATION,

@@ -115,6 +115,9 @@ pub(crate) struct ExecTarget {
 #[derive(Clone, Copy)]
 pub(crate) struct ExecOpen(pub(crate) RwSignal<Option<ExecTarget>>);
 
+#[derive(Clone, Copy)]
+pub(crate) struct FileBrowserOpen(pub(crate) RwSignal<Option<DetailTarget>>);
+
 /// Resolved debug-image reference, populated from `/api/features` at startup
 /// so the exec overlay can show the actual image during the spinner.
 #[derive(Clone, Copy)]

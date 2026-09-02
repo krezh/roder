@@ -23,8 +23,9 @@ use crate::app::controllers::detail::DetailTab;
 use crate::app::hooks::{scroll_cursor_into_view, ResourceTable};
 use crate::app::state::{
     open_logs, pinned_in_catalog_order, AccessReviewOpen, AlertsOpen, Catalog, CtxMenu,
-    DetailTarget, DrainOpen, ExecOpen, ExecTarget, FilterFocus, LogPods, LogTarget, NsPaletteOpen,
-    OnlyProblems, PaletteOpen, PinnedKinds, PodModalTarget, ShortcutsOpen, SortKey, TreeOpen,
+    DetailTarget, DrainOpen, ExecOpen, ExecTarget, FileBrowserOpen, FilterFocus, LogPods,
+    LogTarget, NsPaletteOpen, OnlyProblems, PaletteOpen, PinnedKinds, PodModalTarget,
+    ShortcutsOpen, SortKey, TreeOpen,
 };
 use crate::app::table_logic::{bulk_targets, move_cursor};
 use crate::app::ui::{
@@ -307,6 +308,7 @@ fn use_key_dispatch() {
     let alerts_open = expect_context::<AlertsOpen>().0;
     let access_review_open = expect_context::<AccessReviewOpen>().0;
     let exec_open = expect_context::<ExecOpen>().0;
+    let file_browser_open = expect_context::<FileBrowserOpen>().0;
     let tree_open = expect_context::<TreeOpen>().0;
     let drain_open = expect_context::<DrainOpen>().0;
     let pod_modal = expect_context::<PodModalTarget>().0;
@@ -405,6 +407,7 @@ fn use_key_dispatch() {
                     alerts_open.set(false);
                     access_review_open.set(false);
                     exec_open.set(None);
+                    file_browser_open.set(None);
                     tree_open.set(None);
                     drain_open.set(None);
                     pod_modal.set(None);

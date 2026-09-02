@@ -7,8 +7,8 @@ use roder_core::{ResourceKind, RowStatus};
 
 use crate::app::events::{fire_action, fire_action_with};
 use crate::app::state::{
-    open_logs, Catalog, CtxMenu, DetailTarget, ExecOpen, ExecTarget, LogPods, LogTarget, TableRows,
-    TableSelected, TableTargets, TreeOpen,
+    open_logs, Catalog, CtxMenu, DetailTarget, ExecOpen, ExecTarget, FileBrowserOpen, LogPods,
+    LogTarget, TableRows, TableSelected, TableTargets, TreeOpen,
 };
 use crate::app::table_logic::{resolve_action_targets, targets_all};
 use crate::app::ui::{
@@ -30,6 +30,7 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
     let catalog = expect_context::<Catalog>().0;
     let log_pods = expect_context::<LogPods>().0;
     let exec_open = expect_context::<ExecOpen>().0;
+    let file_browser_open = expect_context::<FileBrowserOpen>().0;
     let table_selected = expect_context::<TableSelected>().0;
     let table_rows = expect_context::<TableRows>().0;
     let table_targets = expect_context::<TableTargets>().0;
@@ -240,6 +241,13 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
                     do_close();
                 }
             });
+            let files = (!is_bulk && is_pod).then(|| {
+                let target = m.target.clone();
+                move |_| {
+                    file_browser_open.set(Some(target.clone()));
+                    do_close();
+                }
+            });
 
             let ns_item = (!is_bulk).then(|| m.target.namespace.clone()).flatten();
             let node_item = (!is_bulk && is_pod).then(|| m.node.clone()).flatten();
@@ -255,6 +263,7 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
                     {(!is_bulk).then(|| view! { <button class="sheet-item" on:click=open_tree>"Relationships"</button> })}
                     {has_logs.then(|| view! { <button class="sheet-item" on:click=logs>"Logs"</button> })}
                     {shell.map(|s| view! { <button class="sheet-item" on:click=s>"Shell"</button> })}
+                    {files.map(|open| view! { <button class="sheet-item" on:click=open>"Files"</button> })}
                     {ns_item.map(|ns| view! { <button class="sheet-item" on:click=goto_ns>"Go to namespace "<span class="sheet-sub">{ns}</span></button> })}
                     {node_item.map(|node| view! { <button class="sheet-item" on:click=goto_node>"Go to node "<span class="sheet-sub">{node}</span></button> })}
                     <button class="sheet-item" on:click=copy>"Copy name"</button>

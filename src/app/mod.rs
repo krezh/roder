@@ -15,6 +15,7 @@ mod controllers;
 mod detail;
 mod events;
 mod failure_watch;
+mod files;
 mod hooks;
 mod jobs;
 mod keys;
@@ -45,6 +46,7 @@ use overlays::context_menu::ContextMenu;
 use overlays::delete::DeleteDialog;
 use overlays::drain::DrainOverlay;
 use overlays::exec::ExecWindow;
+use overlays::files::FileBrowserWindow;
 use overlays::ns_palette::NsPalette;
 use overlays::palette::CommandPalette;
 use overlays::shortcuts::ShortcutsHelp;
@@ -54,10 +56,10 @@ use overlays::AlertsPanel;
 use state::{
     AccessReviewOpen, AlertSilencesEnabled, AlertsData, AlertsLastRefresh, AlertsOpen, Catalog,
     ConnectionState, Connectivity, CtxMenu, DebugImage, DrainOpen, DrainTarget, ExecOpen,
-    ExecTarget, FilterFocus, LogPods, LogTarget, NavOpen, NavigationRestored, NsPaletteOpen,
-    OnlyProblems, PaletteOpen, PinnedKinds, PodModalTarget, ResourceFilter, ShortcutsOpen,
-    TableRows, TableSelected, TableTargets, TalosFeatures, Tick, TreeOpen, WorkspaceConf,
-    WorkspaceConfig,
+    ExecTarget, FileBrowserOpen, FilterFocus, LogPods, LogTarget, NavOpen, NavigationRestored,
+    NsPaletteOpen, OnlyProblems, PaletteOpen, PinnedKinds, PodModalTarget, ResourceFilter,
+    ShortcutsOpen, TableRows, TableSelected, TableTargets, TalosFeatures, Tick, TreeOpen,
+    WorkspaceConf, WorkspaceConfig,
 };
 use ui::{Confirm, DeleteRequest, Toast};
 use views::resource::ResourceView;
@@ -236,6 +238,8 @@ pub fn App() -> impl IntoView {
     provide_context(PodModalTarget(pod_modal));
     let exec_open = RwSignal::new(None::<ExecTarget>);
     provide_context(ExecOpen(exec_open));
+    let file_browser_open = RwSignal::new(None::<DetailTarget>);
+    provide_context(FileBrowserOpen(file_browser_open));
     let talos_features = RwSignal::new(roder_core::TalosCapabilities::default());
     provide_context(TalosFeatures(talos_features));
     let tree_open = RwSignal::new(None::<DetailTarget>);
@@ -309,6 +313,7 @@ pub fn App() -> impl IntoView {
             || alerts_open.get()
             || access_review_open.get()
             || exec_open.with(Option::is_some)
+            || file_browser_open.with(Option::is_some)
             || tree_open.with(Option::is_some)
             || drain_open.with(Option::is_some)
             || pod_modal.with(Option::is_some)
@@ -681,6 +686,7 @@ pub fn App() -> impl IntoView {
                         <DrainOverlay />
                         <PodModal />
                         <ExecWindow />
+                        <FileBrowserWindow />
                         <ResourceTreeWindow />
                         <ShortcutsHelp />
                         <AlertsPanel />

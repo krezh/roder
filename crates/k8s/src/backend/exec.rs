@@ -319,7 +319,7 @@ async fn cleanup_node_shell(api: &Api<Pod>, name: &str, message: String) -> K8sE
 /// EOF and exits immediately without loading interactive configs (avoids
 /// oh-my-zsh and similar frameworks breaking the probe). Whichever join()
 /// returns Ok first wins. Falls back to `/bin/sh` if all probes fail or time out.
-async fn detect_shell(api: &Api<Pod>, pod: &str, container: Option<&str>) -> String {
+pub(super) async fn detect_shell(api: &Api<Pod>, pod: &str, container: Option<&str>) -> String {
     for shell in ["/bin/bash", "/bin/ash", "/bin/zsh", "/bin/sh"] {
         let mut ap = AttachParams::default()
             .stdin(false)

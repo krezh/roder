@@ -5,6 +5,7 @@ pub(crate) mod context_menu;
 pub(crate) mod delete;
 pub(crate) mod drain;
 pub(crate) mod exec;
+pub(crate) mod files;
 pub(crate) mod ns_palette;
 pub(crate) mod palette;
 pub(crate) mod shortcuts;

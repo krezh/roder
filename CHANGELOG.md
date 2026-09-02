@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.1.47](https://github.com/krezh/roder/compare/0.1.46...0.1.47) (2026-09-02)
+
+
+### Features
+
+* **cronjobs:** show owned jobs in detail tabs ([24b71ad](https://github.com/krezh/roder/commit/24b71ad61df150c343b1d272ae70a5beca2a9ed0))
+* **files:** add container file browser ([739fdea](https://github.com/krezh/roder/commit/739fdeafc9ab41914390687a85e16637166137dd))
+
+
+### Bug Fixes
+
+* **app:** add keyboard navigation to dialogs ([67f05b6](https://github.com/krezh/roder/commit/67f05b691a8b083c50599283e61bdbd35198dd7e))
+* **cargo:** update rust crate tower-http (0.7.0 ➔ 0.7.1) ([#210](https://github.com/krezh/roder/issues/210)) ([5d038e2](https://github.com/krezh/roder/commit/5d038e2be7f3c2d0d253874ebbecaf652e468b5f))
+* **cargo:** update rustwright digest (769674b ➔ c8ff05d) ([#209](https://github.com/krezh/roder/issues/209)) ([55ad20e](https://github.com/krezh/roder/commit/55ad20e1af050ed93101c3598d6f8dbb7c7a326d))
+* **container:** update image ghcr.io/rust-lang/rust (271849e ➔ 620dbcd) ([#213](https://github.com/krezh/roder/issues/213)) ([ed2545c](https://github.com/krezh/roder/commit/ed2545c994ddd7e8eadb7352be22e05d0ee716e6))
+
+
+### Miscellaneous Chores
+
+* **cargo:** lock file maintenance cargo.lock ([#211](https://github.com/krezh/roder/issues/211)) ([50f5b90](https://github.com/krezh/roder/commit/50f5b90cca9c0c46fedc81a55577ae7cf336498a))
+* **cargo:** lock file maintenance cargo.lock ([#212](https://github.com/krezh/roder/issues/212)) ([50e8652](https://github.com/krezh/roder/commit/50e8652f5676e662724caf8de671d519b004ea30))
+* update devenv and nix dependency locks ([d58c2e3](https://github.com/krezh/roder/commit/d58c2e37d8ee3a8e26498a900272f2c014cd8a43))
+
 ## [0.1.46](https://github.com/krezh/roder/compare/0.1.45...0.1.46) (2026-08-29)
 
 

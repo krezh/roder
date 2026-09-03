@@ -718,6 +718,16 @@
   }
 }
 
+.sweep-modal .sweep-options {
+  margin-bottom: 1rem;
+}
+
+.sweep-preview {
+  margin-bottom: 1rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 /* ---- shared option row (checkbox + label + hint) — drain and delete dialogs ---- */
 // The checkbox itself reuses the table's `.check` swatch (`.check-static`
 // variant); this rule only owns the row's grid layout.

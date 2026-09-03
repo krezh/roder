@@ -167,6 +167,24 @@ pub(crate) fn ansi_to_html(raw: &str) -> String {
     out
 }
 
+pub(crate) fn strip_ansi(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '\x1b' || chars.peek() != Some(&'[') {
+            out.push(ch);
+            continue;
+        }
+        chars.next();
+        for ch in chars.by_ref() {
+            if ('\x40'..='\x7e').contains(&ch) {
+                break;
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -209,5 +227,10 @@ mod tests {
             out.contains("<span class=\"ansi-bold\">bold</span>"),
             "got: {out}"
         );
+    }
+
+    #[test]
+    fn strips_sgr_for_text_parsing() {
+        assert_eq!(strip_ansi("\x1b[32mINFO\x1b[0m ready"), "INFO ready");
     }
 }

@@ -2,7 +2,7 @@
 
 use leptos::prelude::*;
 
-pub(crate) use crate::app::ui::{ask_confirm, Confirm, ConfirmButton};
+pub(crate) use crate::app::ui::{ask_confirm, Confirm};
 
 #[component]
 pub(crate) fn ConfirmDialog() -> impl IntoView {

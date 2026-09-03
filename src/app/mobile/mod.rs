@@ -40,7 +40,7 @@ use action_sheet::MobileActionSheet;
 use alerts::MobileAlertsPanel;
 use bottom_nav::MobileBottomNav;
 use detail_view::MobileDetailView;
-use dialogs::{MobileConfirmDialog, MobileDeleteDialog};
+use dialogs::{MobileConfirmDialog, MobileDeleteDialog, MobileSweepDialog};
 use drain::MobileDrainOverlay;
 use exec::MobileExecWindow;
 use files::MobileFileBrowserWindow;
@@ -123,6 +123,7 @@ pub(crate) fn MobileShell() -> impl IntoView {
             <MobileRelationshipTree />
             <MobileConfirmDialog />
             <MobileDeleteDialog />
+            <MobileSweepDialog />
             <MobileDrainOverlay />
             <MobilePodModal />
             <MobileExecWindow />

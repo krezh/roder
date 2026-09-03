@@ -1,7 +1,10 @@
 use leptos::prelude::*;
 use roder_core::DeletePropagation;
 
-use crate::app::ui::{use_option_overlay, Confirm, DeleteRequest};
+use crate::app::ui::{
+    use_option_overlay, use_sweep_preview, Confirm, DeleteRequest, SweepOption, SweepPreview,
+    SweepRequest,
+};
 
 #[component]
 pub(crate) fn MobileConfirmDialog() -> impl IntoView {
@@ -20,6 +23,40 @@ pub(crate) fn MobileConfirmDialog() -> impl IntoView {
                 }).collect_view()}
             </div>
         </section>
+    })} }
+}
+
+#[component]
+pub(crate) fn MobileSweepDialog() -> impl IntoView {
+    let signal = expect_context::<RwSignal<Option<SweepRequest>>>();
+    let (snapshot, closing, close) = use_option_overlay(signal);
+    view! { {move || snapshot.get().map(|request| {
+        let options = RwSignal::new(roder_core::SweepOptions::default());
+        let preview = use_sweep_preview(request.namespace.clone(), options);
+        view! {
+            <div class="mobile-modal-scrim" class:closing=move || closing.get() on:click=move |_| close()></div>
+            <section class="mobile-dialog mobile-sweep-dialog" class:closing=move || closing.get() role="alertdialog" aria-modal="true">
+                <p class="mobile-dialog-message">"Choose which resources to delete."</p>
+                <SweepOption options field=|value| &mut value.terminal_pods label="Terminal pods" hint="Succeeded, failed, and evicted pods." />
+                <SweepOption options field=|value| &mut value.stuck_pods label="Stuck pods" hint="Crash loops, image pull failures, unknown containers, and OOM kills." />
+                <SweepOption options field=|value| &mut value.restarted_pods label="Pods with restarts" hint="Pods whose regular or init containers have restarted." />
+                <SweepOption options field=|value| &mut value.completed_jobs label="Completed jobs" hint="Jobs with a successful Complete condition." />
+                <SweepOption options field=|value| &mut value.failed_jobs label="Failed jobs" hint="Jobs with a Failed condition." />
+                <SweepPreview preview />
+                <div class="mobile-dialog-actions">
+                    <button type="button" on:click=move |_| close()>"Cancel"</button>
+                    <button type="button" class="danger"
+                        disabled=move || closing.get() || !preview.with(|result| matches!(result, Some(Ok(summary)) if summary.pods + summary.jobs > 0))
+                        on:click=move |_| {
+                            if closing.get_untracked() { return; }
+                            let action = request.on_confirm.clone();
+                            let selected = options.get_untracked();
+                            close();
+                            action(selected);
+                        }>"Sweep"</button>
+                </div>
+            </section>
+        }
     })} }
 }
 

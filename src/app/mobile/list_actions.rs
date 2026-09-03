@@ -1,7 +1,7 @@
 use leptos::prelude::*;
 
 use crate::app::state::OnlyProblems;
-use crate::app::ui::{show_toast, show_toast_detail, Confirm, ConfirmButton, Toast, ToastKind};
+use crate::app::ui::{ask_sweep, show_toast, show_toast_detail, SweepRequest, Toast, ToastKind};
 use crate::data;
 
 #[component]
@@ -16,12 +16,15 @@ pub(crate) fn MobileListActions() -> impl IntoView {
 
 #[component]
 fn MobileSanitizeButton() -> impl IntoView {
-    let confirm = expect_context::<RwSignal<Option<Confirm>>>();
+    let sweep = expect_context::<RwSignal<Option<SweepRequest>>>();
     let namespace = expect_context::<RwSignal<Option<String>>>();
     let toast = expect_context::<RwSignal<Option<Toast>>>();
-    let sanitize = move || {
-        let payload =
-            serde_json::json!({ "action": "sanitize", "namespace": namespace.get_untracked() });
+    let sanitize = move |options: roder_core::SweepOptions| {
+        let payload = serde_json::json!({
+            "action": "sanitize",
+            "namespace": namespace.get_untracked(),
+            "sweep_options": options,
+        });
         leptos::task::spawn_local(async move {
             match data::post_action(&payload).await {
                 Ok(body) => {
@@ -45,9 +48,7 @@ fn MobileSanitizeButton() -> impl IntoView {
             }
         });
     };
-    view! { <button type="button" class="mobile-sanitize-btn" on:click=move |_| confirm.set(Some(Confirm {
-        message: "Delete all dead pods and finished jobs?".into(), buttons: vec![ConfirmButton::new("Sweep", sanitize)],
-    }))>"Sweep"</button> }
+    view! { <button type="button" class="mobile-sanitize-btn" on:click=move |_| ask_sweep(sweep, namespace.get_untracked(), sanitize)>"Sweep"</button> }
 }
 
 #[component]

@@ -29,7 +29,7 @@ use crate::app::state::{
 };
 use crate::app::table_logic::{bulk_targets, move_cursor};
 use crate::app::ui::{
-    ask_delete, delete_extra, show_toast, Confirm, DeleteRequest, Toast, ToastKind,
+    ask_delete, delete_extra, show_toast, Confirm, DeleteRequest, SweepRequest, Toast, ToastKind,
 };
 use crate::app::util::clipboard::copy_to_clipboard;
 use crate::app::util::format::parse_key;
@@ -324,6 +324,7 @@ fn use_key_dispatch() {
     let ctx_menu = expect_context::<RwSignal<Option<CtxMenu>>>();
     let confirm = expect_context::<RwSignal<Option<Confirm>>>();
     let delete_confirm = expect_context::<RwSignal<Option<DeleteRequest>>>();
+    let sweep = expect_context::<RwSignal<Option<SweepRequest>>>();
     let toast = expect_context::<RwSignal<Option<Toast>>>();
 
     // The pending buffer self-clears, so a `g` or `5` abandoned mid-chord can't
@@ -397,7 +398,7 @@ fn use_key_dispatch() {
                     return;
                 }
                 if current_layer == Layer::Overlay {
-                    // The palettes and the confirm/delete dialogs have no Escape
+                    // The palettes and the confirm/delete/sweep dialogs have no Escape
                     // handler of their own; they rely entirely on this one. Every
                     // signal that makes `Layer::Overlay` true must be cleared
                     // here, or that overlay would swallow Escape and get stuck.
@@ -413,6 +414,7 @@ fn use_key_dispatch() {
                     pod_modal.set(None);
                     confirm.set(None);
                     delete_confirm.set(None);
+                    sweep.set(None);
                     return;
                 }
                 if current_layer == Layer::Menu {
@@ -439,6 +441,10 @@ fn use_key_dispatch() {
                     return;
                 }
                 detail.set(None);
+                return;
+            }
+
+            if ctrl && key.eq_ignore_ascii_case("c") && crate::data::has_text_selection() {
                 return;
             }
 
@@ -638,6 +644,7 @@ fn use_key_dispatch() {
                     let names: Vec<String> =
                         action_targets(&h).into_iter().map(|t| t.name).collect();
                     if !names.is_empty() {
+                        e.prevent_default();
                         copy_to_clipboard(&names.join("\n"));
                         show_toast(toast, "Copied to clipboard", ToastKind::Ok);
                     }

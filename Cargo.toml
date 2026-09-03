@@ -175,6 +175,7 @@ web-sys = { version = "0.3", features = [
   "DomRect",
   "MediaQueryList",
   "MediaQueryListEvent",
+  "Selection",
   "CssStyleDeclaration",
   "HtmlCanvasElement",
   "CanvasRenderingContext2d",

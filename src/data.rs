@@ -455,6 +455,18 @@ pub fn is_text_input_focused() -> bool {
         .unwrap_or(false)
 }
 
+#[cfg(target_arch = "wasm32")]
+pub fn has_text_selection() -> bool {
+    web_sys::window()
+        .and_then(|window| window.get_selection().ok().flatten())
+        .is_some_and(|selection| !selection.is_collapsed())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn has_text_selection() -> bool {
+    false
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn is_text_input_focused() -> bool {
     false

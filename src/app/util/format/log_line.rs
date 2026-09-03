@@ -4,6 +4,8 @@
 
 use serde_json::Value as JsonValue;
 
+use super::ansi::strip_ansi;
+
 /// Structured fields extracted from a log line.
 pub(crate) struct ParsedLog {
     /// The human-readable message (extracted `msg`/`message`/`event` field, or the raw line).
@@ -356,7 +358,8 @@ fn rfc5424_message(s: &str) -> &str {
 /// positives on messages that happen to contain words like "error" or "info".
 pub(crate) fn log_level(line: &str) -> &'static str {
     let line = line.split_once(" │ ").map(|(_, r)| r).unwrap_or(line);
-    let t = line.trim_start();
+    let plain = line.contains('\x1b').then(|| strip_ansi(line));
+    let t = plain.as_deref().unwrap_or(line).trim_start();
 
     // klog/glog: E0603, W0603, I0603, D0603, F0603
     {
@@ -766,6 +769,12 @@ mod tests {
     fn log_level_plain() {
         assert_eq!(log_level("hello world"), "plain");
         assert_eq!(log_level("Starting server on :8080"), "plain");
+    }
+
+    #[test]
+    fn log_level_ignores_ansi_formatting() {
+        assert_eq!(log_level("\x1b[32mINFO\x1b[0m ready"), "info");
+        assert_eq!(log_level("sidecar │ \x1b[31mERROR\x1b[0m failed"), "error");
     }
 
     // --- Python logging ---

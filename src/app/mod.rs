@@ -50,6 +50,7 @@ use overlays::files::FileBrowserWindow;
 use overlays::ns_palette::NsPalette;
 use overlays::palette::CommandPalette;
 use overlays::shortcuts::ShortcutsHelp;
+use overlays::sweep::SweepDialog;
 use overlays::toast::ToastView;
 use overlays::tree::ResourceTreeWindow;
 use overlays::AlertsPanel;
@@ -61,7 +62,7 @@ use state::{
     ShortcutsOpen, TableRows, TableSelected, TableTargets, TalosFeatures, Tick, TreeOpen,
     WorkspaceConf, WorkspaceConfig,
 };
-use ui::{Confirm, DeleteRequest, Toast};
+use ui::{Confirm, DeleteRequest, SweepRequest, Toast};
 use views::resource::ResourceView;
 use views::search::SearchResultsView;
 use views::workspace::WorkspaceView;
@@ -233,6 +234,7 @@ pub fn App() -> impl IntoView {
     let only_problems = RwSignal::new(false);
     let confirm = RwSignal::new(None::<Confirm>);
     let delete_confirm = RwSignal::new(None::<DeleteRequest>);
+    let sweep = RwSignal::new(None::<SweepRequest>);
     let toast = RwSignal::new(None::<Toast>);
     let pod_modal = RwSignal::new(None::<DetailTarget>);
     provide_context(PodModalTarget(pod_modal));
@@ -270,6 +272,7 @@ pub fn App() -> impl IntoView {
     provide_context(OnlyProblems(only_problems));
     provide_context(confirm);
     provide_context(delete_confirm);
+    provide_context(sweep);
     provide_context(toast);
     provide_context(selected_kind);
     provide_context(selected_ns);
@@ -319,6 +322,7 @@ pub fn App() -> impl IntoView {
             || pod_modal.with(Option::is_some)
             || confirm.with(Option::is_some)
             || delete_confirm.with(Option::is_some)
+            || sweep.with(Option::is_some)
         {
             keys::Layer::Overlay
         } else if ctx_menu.with(Option::is_some) {
@@ -683,6 +687,7 @@ pub fn App() -> impl IntoView {
                         <ContextMenu />
                         <ConfirmDialog />
                         <DeleteDialog />
+                        <SweepDialog />
                         <DrainOverlay />
                         <PodModal />
                         <ExecWindow />

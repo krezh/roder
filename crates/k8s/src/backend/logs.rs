@@ -49,26 +49,14 @@ impl Backend {
     /// haven't run at all yet (still waiting their turn) are omitted, and a
     /// container whose crash/attempt was already streamed before is omitted too —
     /// see [`Backend::already_reported`].
-    async fn pod_log_containers(&self, ns: &str, pod: &str) -> Vec<(String, bool)> {
+    async fn pod_log_containers(&self, ns: &str, pod: &str) -> (Vec<(String, bool)>, bool) {
         let Some(data) = self.pod_json(ns, pod).await else {
-            return Vec::new();
+            return (Vec::new(), false);
         };
-        let names = |field: &str| -> Vec<String> {
-            data.get("spec")
-                .and_then(|s| s.get(field))
-                .and_then(|c| c.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|c| c.get("name")?.as_str().map(str::to_string))
-                        .collect()
-                })
-                .unwrap_or_default()
-        };
+        let names = pod_container_names(&data);
+        let prefixed = names.len() > 1;
         let mut out = Vec::new();
-        for name in names("initContainers")
-            .into_iter()
-            .chain(names("containers"))
-        {
+        for name in names {
             match container_log_plan(&data, &name) {
                 LogPlan::Skip => {}
                 LogPlan::Live => out.push((name, false)),
@@ -83,7 +71,7 @@ impl Backend {
                 }
             }
         }
-        out
+        (out, prefixed)
     }
 
     /// Whether `signature` for `(namespace, pod, container)` was already reported
@@ -189,7 +177,7 @@ impl Backend {
             return Ok(Box::pin(lines));
         }
 
-        let containers = self.pod_log_containers(ns, pod).await;
+        let (containers, prefixed) = self.pod_log_containers(ns, pod).await;
         if containers.is_empty() {
             // Nothing to show right now — every container is either still waiting
             // its turn, or its last attempt was already streamed. An empty stream
@@ -198,9 +186,6 @@ impl Backend {
             return Ok(Box::pin(futures::stream::empty()));
         }
 
-        // Prefix lines only when merging more than one container, matching the
-        // pre-existing single-container (no pill) presentation.
-        let prefixed = containers.len() > 1;
         let mut streams: Vec<Pin<Box<dyn Stream<Item = String> + Send>>> = Vec::new();
         for (name, previous) in containers {
             let prefix = if prefixed {
@@ -273,6 +258,20 @@ impl Backend {
         }
         Ok(Box::pin(futures::stream::select_all(streams)))
     }
+}
+
+fn pod_container_names(data: &serde_json::Value) -> Vec<String> {
+    ["initContainers", "containers"]
+        .into_iter()
+        .flat_map(|field| {
+            data.get("spec")
+                .and_then(|spec| spec.get(field))
+                .and_then(|containers| containers.as_array())
+                .into_iter()
+                .flatten()
+                .filter_map(|container| container.get("name")?.as_str().map(str::to_string))
+        })
+        .collect()
 }
 
 pub(super) fn workload_label_selector(data: &serde_json::Value) -> Result<String, String> {
@@ -416,7 +415,7 @@ fn attempt_signature(terminated: &serde_json::Value) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::workload_label_selector;
+    use super::{pod_container_names, workload_label_selector};
     use serde_json::json;
 
     #[test]
@@ -457,5 +456,20 @@ mod tests {
             ]}}
         }))
         .is_err());
+    }
+
+    #[test]
+    fn container_prefix_count_uses_the_full_pod_spec() {
+        let data = json!({
+            "spec": {
+                "initContainers": [{"name": "init"}],
+                "containers": [{"name": "app"}]
+            },
+            "status": {
+                "initContainerStatuses": [{"name": "init", "state": {"terminated": {}}}],
+                "containerStatuses": [{"name": "app", "state": {"running": {}}}]
+            }
+        });
+        assert_eq!(pod_container_names(&data), ["init", "app"]);
     }
 }

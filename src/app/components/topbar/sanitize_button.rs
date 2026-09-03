@@ -1,20 +1,24 @@
-//! One-click sweep of dead pods + finished jobs.
+//! Configurable pod and job sweep.
 
 use leptos::prelude::*;
 
-use crate::app::overlays::confirm::{Confirm, ConfirmButton};
 use crate::app::overlays::toast::{show_toast, show_toast_detail, Toast, ToastKind};
+use crate::app::ui::{ask_sweep, SweepRequest};
 use crate::data;
 
 #[component]
 pub(crate) fn SanitizeButton() -> impl IntoView {
-    let confirm = expect_context::<RwSignal<Option<Confirm>>>();
+    let sweep = expect_context::<RwSignal<Option<SweepRequest>>>();
     let selected_ns = expect_context::<RwSignal<Option<String>>>();
     let toast = expect_context::<RwSignal<Option<Toast>>>();
 
-    let do_sanitize = move || {
+    let do_sanitize = move |options: roder_core::SweepOptions| {
         let ns = selected_ns.get_untracked();
-        let payload = serde_json::json!({ "action": "sanitize", "namespace": ns });
+        let payload = serde_json::json!({
+            "action": "sanitize",
+            "namespace": ns,
+            "sweep_options": options,
+        });
         leptos::task::spawn_local(async move {
             match data::post_action(&payload).await {
                 Ok(body) => {
@@ -40,12 +44,9 @@ pub(crate) fn SanitizeButton() -> impl IntoView {
     };
 
     view! {
-        <button class="sweep-btn" data-tip="Delete dead pods and finished jobs"
+        <button class="sweep-btn" data-tip="Choose pods and jobs to delete"
             on:click=move |_| {
-                confirm.set(Some(Confirm {
-                    message: "Delete all dead pods and finished jobs?".into(),
-                    buttons: vec![ConfirmButton::new("Sweep", do_sanitize)],
-                }));
+                ask_sweep(sweep, selected_ns.get_untracked(), do_sanitize);
             }>
             "Sweep"
         </button>

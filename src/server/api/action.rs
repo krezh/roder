@@ -30,6 +30,7 @@ pub struct ActionRequest {
     pub(crate) service: Option<String>,
     pub(crate) drain: Option<bool>,
     pub(crate) options: Option<roder_core::DrainOptions>,
+    sweep_options: Option<roder_core::SweepOptions>,
     pub(crate) job: Option<u64>,
     pub(crate) executor: Option<String>,
 }
@@ -97,14 +98,27 @@ pub async fn action(
         return response;
     }
 
-    // `apply` and `sanitize` don't operate on a named resource.
+    // `apply` and sanitize actions don't operate on a named resource.
     let res = if req.action == "apply" {
         match req.yaml.as_deref() {
             Some(y) => b.apply_yaml(y).await,
             None => return (StatusCode::BAD_REQUEST, "missing yaml").into_response(),
         }
+    } else if req.action == "sanitize-preview" {
+        return match b
+            .sanitize_preview(req.namespace.clone(), req.sweep_options.unwrap_or_default())
+            .await
+        {
+            Ok(summary) => {
+                (StatusCode::OK, serde_json::to_string(&summary).unwrap()).into_response()
+            }
+            Err(e) => bad_gateway(e),
+        };
     } else if req.action == "sanitize" {
-        return match b.sanitize(req.namespace.clone()).await {
+        return match b
+            .sanitize(req.namespace.clone(), req.sweep_options.unwrap_or_default())
+            .await
+        {
             Ok(summary) => {
                 (StatusCode::OK, serde_json::to_string(&summary).unwrap()).into_response()
             }
@@ -250,6 +264,7 @@ mod tests {
             service: None,
             drain: None,
             options: None,
+            sweep_options: None,
             job: None,
             executor: None,
         }

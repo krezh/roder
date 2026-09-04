@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.1.48](https://github.com/krezh/roder/compare/0.1.47...0.1.48) (2026-09-04)
+
+
+### Features
+
+* **alerts:** support permanent silences ([b7ae440](https://github.com/krezh/roder/commit/b7ae4408a1459d29af46793c99b3e82c82966fe8))
+* **integrations:** add Rook and CloudNativePG resource views ([41ae734](https://github.com/krezh/roder/commit/41ae7344f073ebe3a589a3d906214442a8142ed5))
+* **talos:** add etcd defrag node action ([8f31532](https://github.com/krezh/roder/commit/8f3153220d268eb7168a797e3c2699cf59d8f2e1))
+* **ui:** improve context menu organization ([36f9d99](https://github.com/krezh/roder/commit/36f9d99b55ea2a7fad408bab6fd8b4f8732dbd66))
+* **ui:** improve logs, copying, and sweep controls ([3ac6b4c](https://github.com/krezh/roder/commit/3ac6b4c634cd4c5cbbc3588e7237e50689ebcafd))
+
+
+### Bug Fixes
+
+* **cargo:** update rust crate tokio-rustls (0.26.4 ➔ 0.26.5) ([#220](https://github.com/krezh/roder/issues/220)) ([0d73e74](https://github.com/krezh/roder/commit/0d73e74e09f33ac859d3b6c074982cb75fb85ddb))
+* **cargo:** update rustwright digest (82c82a9 ➔ 3bf0f19) ([#219](https://github.com/krezh/roder/issues/219)) ([78e5325](https://github.com/krezh/roder/commit/78e532532ac34a26636d96a0a79c2b6f35de26bf))
+* **cargo:** update rustwright digest (c8ff05d ➔ 82c82a9) ([#217](https://github.com/krezh/roder/issues/217)) ([850c0fd](https://github.com/krezh/roder/commit/850c0fdc7810d2766fa390f522e760fde643d66c))
+
+
+### Miscellaneous Chores
+
+* **cargo:** lock file maintenance cargo.lock ([#215](https://github.com/krezh/roder/issues/215)) ([79b4a02](https://github.com/krezh/roder/commit/79b4a02454dfd48b24ec375035f36feb6f70e3f7))
+* **cargo:** lock file maintenance cargo.lock ([#218](https://github.com/krezh/roder/issues/218)) ([6565e85](https://github.com/krezh/roder/commit/6565e85be2c030fc2609ec16da99e572511d8ec9))
+
 ## [0.1.47](https://github.com/krezh/roder/compare/0.1.46...0.1.47) (2026-09-02)
 
 

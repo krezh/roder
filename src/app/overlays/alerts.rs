@@ -144,19 +144,25 @@ fn AlertRow(
 ) -> impl IntoView {
     let tick = use_context::<crate::app::state::Tick>().map(|t| t.0);
     let duration_amount = RwSignal::new(1u64);
-    let duration_unit = RwSignal::new(3_600u64);
-    let duration_secs =
-        Memo::new(move |_| duration_amount.get().saturating_mul(duration_unit.get()));
+    let duration_unit = RwSignal::new(Some(3_600u64));
+    let duration_secs = Memo::new(move |_| {
+        duration_unit
+            .get()
+            .map(|unit| duration_amount.get().saturating_mul(unit))
+    });
     let duration_valid = Memo::new(move |_| {
-        (roder_core::MIN_ALERT_SILENCE_SECS..=roder_core::MAX_ALERT_SILENCE_SECS)
-            .contains(&duration_secs.get())
+        duration_secs.get().is_none_or(|seconds| {
+            (roder_core::MIN_ALERT_SILENCE_SECS..=roder_core::MAX_ALERT_SILENCE_SECS)
+                .contains(&seconds)
+        })
     });
     let duration_unit_label = move || {
         match duration_unit.get() {
-            60 => "minutes",
-            86_400 => "days",
-            604_800 => "weeks",
-            _ => "hours",
+            Some(60) => "minutes",
+            Some(86_400) => "days",
+            Some(604_800) => "weeks",
+            Some(_) => "hours",
+            None => "forever",
         }
         .to_string()
     };
@@ -184,7 +190,10 @@ fn AlertRow(
             leptos::task::spawn_local(async move {
                 let request = roder_core::SilenceAlertRequest {
                     fingerprint: fingerprint.clone(),
-                    duration_secs: duration_secs.get_untracked(),
+                    duration: duration_secs.get_untracked().map_or(
+                        roder_core::AlertSilenceDuration::Forever,
+                        |seconds| roder_core::AlertSilenceDuration::Finite { seconds },
+                    ),
                 };
                 let body = serde_json::to_value(request).unwrap_or_default();
                 match crate::data::post_json::<serde_json::Value>("/api/alerts/silences", &body)
@@ -253,16 +262,17 @@ fn AlertRow(
                         step="1"
                         aria-label="Silence duration"
                         prop:value=move || duration_amount.get().to_string()
-                        disabled=move || silencing.get()
+                        disabled=move || silencing.get() || duration_unit.get().is_none()
                         on:input=move |event| {
                             duration_amount.set(event_target_value(&event).parse().unwrap_or(0));
                         }
                     />
                     <Dropdown label=duration_unit_label>
-                        <DurationUnitItem duration_unit value=60 label="minutes" />
-                        <DurationUnitItem duration_unit value=3_600 label="hours" />
-                        <DurationUnitItem duration_unit value=86_400 label="days" />
-                        <DurationUnitItem duration_unit value=604_800 label="weeks" />
+                        <DurationUnitItem duration_unit value=Some(60) label="minutes" />
+                        <DurationUnitItem duration_unit value=Some(3_600) label="hours" />
+                        <DurationUnitItem duration_unit value=Some(86_400) label="days" />
+                        <DurationUnitItem duration_unit value=Some(604_800) label="weeks" />
+                        <DurationUnitItem duration_unit value=None label="forever" />
                     </Dropdown>
                     <button
                         class="alert-silence-submit"
@@ -285,8 +295,8 @@ fn AlertRow(
 
 #[component]
 fn DurationUnitItem(
-    duration_unit: RwSignal<u64>,
-    value: u64,
+    duration_unit: RwSignal<Option<u64>>,
+    value: Option<u64>,
     label: &'static str,
 ) -> impl IntoView {
     let close = expect_context::<DropdownClose>().0;

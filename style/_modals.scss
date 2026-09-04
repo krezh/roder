@@ -418,7 +418,7 @@
     &:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
   }
 
-  .alert-duration-input:disabled,
+  .alert-duration-input:disabled { color: var(--muted); cursor: not-allowed; }
   .alert-silence-submit:disabled { color: var(--muted); cursor: wait; }
 }
 

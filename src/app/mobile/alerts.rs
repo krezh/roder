@@ -120,11 +120,13 @@ fn MobileAlertRow(
 ) -> impl IntoView {
     let tick = expect_context::<Tick>().0;
     let amount = RwSignal::new(1u64);
-    let unit = RwSignal::new(3_600u64);
-    let duration = Memo::new(move |_| amount.get().saturating_mul(unit.get()));
+    let unit = RwSignal::new(Some(3_600u64));
+    let duration = Memo::new(move |_| unit.get().map(|unit| amount.get().saturating_mul(unit)));
     let valid = Memo::new(move |_| {
-        (roder_core::MIN_ALERT_SILENCE_SECS..=roder_core::MAX_ALERT_SILENCE_SECS)
-            .contains(&duration.get())
+        duration.get().is_none_or(|seconds| {
+            (roder_core::MIN_ALERT_SILENCE_SECS..=roder_core::MAX_ALERT_SILENCE_SECS)
+                .contains(&seconds)
+        })
     });
     let silencing = RwSignal::new(false);
     let silence_error = RwSignal::new(None::<String>);
@@ -140,7 +142,11 @@ fn MobileAlertRow(
             leptos::task::spawn_local(async move {
                 let request = roder_core::SilenceAlertRequest {
                     fingerprint: fingerprint.clone(),
-                    duration_secs: duration.get_untracked(),
+                    duration: duration
+                        .get_untracked()
+                        .map_or(roder_core::AlertSilenceDuration::Forever, |seconds| {
+                            roder_core::AlertSilenceDuration::Finite { seconds }
+                        }),
                 };
                 match crate::data::post_json::<serde_json::Value>(
                     "/api/alerts/silences",
@@ -182,10 +188,10 @@ fn MobileAlertRow(
         {(!alert.description.is_empty()).then(|| view! { <p>{alert.description}</p> })}
         <div class="mobile-alert-labels">{alert.labels.into_iter().filter(|(key, _)| key != "alertname" && key != "severity").map(|(key, value)| view! { <span><b>{key}</b>"="{value}</span> }).collect_view()}</div>
         <Show when=move || silences_enabled.get() && !silenced><div class="mobile-silence-actions">
-            <input type="number" min="1" step="1" aria-label="Silence duration" prop:value=move || amount.get().to_string() disabled=move || silencing.get()
+            <input type="number" min="1" step="1" aria-label="Silence duration" prop:value=move || amount.get().to_string() disabled=move || silencing.get() || unit.get().is_none()
                 on:input=move |event| amount.set(event_target_value(&event).parse().unwrap_or(0)) />
-            <select aria-label="Silence duration unit" prop:value=move || unit.get().to_string() on:change=move |event| unit.set(event_target_value(&event).parse().unwrap_or(3_600))>
-                <option value="60">"minutes"</option><option value="3600">"hours"</option><option value="86400">"days"</option><option value="604800">"weeks"</option>
+            <select aria-label="Silence duration unit" prop:value=move || unit.get().map_or_else(|| "forever".to_string(), |unit| unit.to_string()) on:change=move |event| unit.set(event_target_value(&event).parse().ok())>
+                <option value="60">"minutes"</option><option value="3600">"hours"</option><option value="86400">"days"</option><option value="604800">"weeks"</option><option value="forever">"forever"</option>
             </select>
             <button disabled=move || silencing.get() || !valid.get() on:click=silence>{move || if silencing.get() { "Silencing…" } else { "Silence" }}</button>
             {move || (!valid.get()).then(|| view! { <small>"Choose 1 minute to 1 year"</small> })}<small>{move || silence_error.get()}</small>

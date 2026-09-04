@@ -755,7 +755,14 @@ pub struct FiringAlert {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SilenceAlertRequest {
     pub fingerprint: String,
-    pub duration_secs: u64,
+    pub duration: AlertSilenceDuration,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AlertSilenceDuration {
+    Finite { seconds: u64 },
+    Forever,
 }
 
 pub const MIN_ALERT_SILENCE_SECS: u64 = 60;
@@ -856,5 +863,22 @@ mod tests {
         let json = serde_json::to_string(&ev).unwrap();
         assert!(json.contains("\"kind\":\"blocked\""));
         assert_eq!(serde_json::from_str::<DrainEvent>(&json).unwrap(), ev);
+    }
+
+    #[test]
+    fn alert_silence_duration_requires_an_explicit_kind() {
+        let forever: SilenceAlertRequest = serde_json::from_value(serde_json::json!({
+            "fingerprint": "abc",
+            "duration": { "kind": "forever" }
+        }))
+        .unwrap();
+        assert_eq!(forever.duration, AlertSilenceDuration::Forever);
+
+        assert!(
+            serde_json::from_value::<SilenceAlertRequest>(serde_json::json!({
+                "fingerprint": "abc"
+            }))
+            .is_err()
+        );
     }
 }

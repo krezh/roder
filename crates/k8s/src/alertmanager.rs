@@ -95,16 +95,24 @@ pub enum SilenceError {
 
 fn silence_request<'a>(
     labels: &'a HashMap<String, String>,
-    duration: Duration,
+    duration: Option<Duration>,
     created_by: &'a str,
     now: time::OffsetDateTime,
 ) -> Result<SilenceRequest<'a>, String> {
     if labels.is_empty() {
         return Err("alert has no labels".to_string());
     }
-    let duration_seconds = i64::try_from(duration.as_secs())
-        .map_err(|_| "silence duration is too large".to_string())?;
     let format = &time::format_description::well_known::Rfc3339;
+    let ends_at = match duration {
+        Some(duration) => {
+            let duration_seconds = i64::try_from(duration.as_secs())
+                .map_err(|_| "silence duration is too large".to_string())?;
+            (now + time::Duration::seconds(duration_seconds))
+                .format(format)
+                .map_err(|error| format!("format silence end: {error}"))?
+        }
+        None => "9999-12-31T23:59:59Z".to_string(),
+    };
     Ok(SilenceRequest {
         matchers: labels
             .iter()
@@ -118,9 +126,7 @@ fn silence_request<'a>(
         starts_at: now
             .format(format)
             .map_err(|error| format!("format silence start: {error}"))?,
-        ends_at: (now + time::Duration::seconds(duration_seconds))
-            .format(format)
-            .map_err(|error| format!("format silence end: {error}"))?,
+        ends_at,
         created_by,
         comment: "Silenced from Roder",
     })
@@ -185,7 +191,7 @@ impl AlertsCache {
     pub async fn silence_alert(
         &self,
         fingerprint: &str,
-        duration: Duration,
+        duration: Option<Duration>,
         created_by: &str,
     ) -> Result<String, SilenceError> {
         let _silence = self.silence_lock.lock().await;
@@ -205,7 +211,7 @@ impl AlertsCache {
     async fn create_silence(
         &self,
         labels: &HashMap<String, String>,
-        duration: Duration,
+        duration: Option<Duration>,
         created_by: &str,
     ) -> Result<String, String> {
         let payload = silence_request(
@@ -366,7 +372,7 @@ mod tests {
             ("namespace".to_string(), "production".to_string()),
         ]);
         let now = time::OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
-        let request = silence_request(&labels, Duration::from_secs(3_600), "operator", now)
+        let request = silence_request(&labels, Some(Duration::from_secs(3_600)), "operator", now)
             .expect("valid silence request");
         let value = serde_json::to_value(request).unwrap();
         let matchers = value["matchers"].as_array().unwrap();
@@ -382,6 +388,15 @@ mod tests {
         }));
         assert_eq!(value["createdBy"], "operator");
         assert_eq!(value["comment"], "Silenced from Roder");
+    }
+
+    #[test]
+    fn forever_silence_uses_alertmanager_maximum_timestamp() {
+        let labels = HashMap::from([("alertname".to_string(), "PodDown".to_string())]);
+        let now = time::OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
+        let request = silence_request(&labels, None, "operator", now).unwrap();
+
+        assert_eq!(request.ends_at, "9999-12-31T23:59:59Z");
     }
 
     #[test]

@@ -37,10 +37,19 @@ pub struct AlertsQuery {
     refresh: bool,
 }
 
-fn silence_duration(seconds: u64) -> Option<std::time::Duration> {
-    (roder_core::MIN_ALERT_SILENCE_SECS..=roder_core::MAX_ALERT_SILENCE_SECS)
-        .contains(&seconds)
-        .then(|| std::time::Duration::from_secs(seconds))
+fn silence_duration(
+    duration: roder_core::AlertSilenceDuration,
+) -> Result<Option<std::time::Duration>, ()> {
+    match duration {
+        roder_core::AlertSilenceDuration::Forever => Ok(None),
+        roder_core::AlertSilenceDuration::Finite { seconds }
+            if (roder_core::MIN_ALERT_SILENCE_SECS..=roder_core::MAX_ALERT_SILENCE_SECS)
+                .contains(&seconds) =>
+        {
+            Ok(Some(std::time::Duration::from_secs(seconds)))
+        }
+        roder_core::AlertSilenceDuration::Finite { .. } => Err(()),
+    }
 }
 
 pub async fn alerts(
@@ -82,7 +91,7 @@ pub async fn silence_alert(
     let Some(caller) = request_caller(&identity) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    let Some(duration) = silence_duration(request.duration_secs) else {
+    let Ok(duration) = silence_duration(request.duration) else {
         return (StatusCode::BAD_REQUEST, "unsupported silence duration").into_response();
     };
     let cache = state.alerts.read().await.as_ref().map(Arc::clone);
@@ -92,7 +101,8 @@ pub async fn silence_alert(
     tracing::info!(
         actor = %caller.audit,
         fingerprint = %request.fingerprint,
-        duration_secs = request.duration_secs,
+        duration_secs = duration.map(|value| value.as_secs()).unwrap_or_default(),
+        forever = duration.is_none(),
         "Alertmanager silence requested"
     );
     match cache
@@ -156,14 +166,19 @@ mod tests {
 
     #[test]
     fn silence_duration_accepts_bounded_custom_values() {
+        use roder_core::AlertSilenceDuration::{Finite, Forever};
+
         for seconds in [60, 900, 3_600, 43_200, 604_800, 31_536_000] {
             assert_eq!(
-                silence_duration(seconds).map(|value| value.as_secs()),
-                Some(seconds)
+                silence_duration(Finite { seconds })
+                    .unwrap()
+                    .map(|value| value.as_secs()),
+                Some(seconds),
             );
         }
         for seconds in [0, 59, 31_536_001, u64::MAX] {
-            assert!(silence_duration(seconds).is_none());
+            assert!(silence_duration(Finite { seconds }).is_err());
         }
+        assert_eq!(silence_duration(Forever), Ok(None));
     }
 }

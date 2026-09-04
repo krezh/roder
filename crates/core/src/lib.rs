@@ -46,6 +46,7 @@ pub enum Category {
     ExternalSecrets,
     CertManager,
     Rook,
+    CloudNativePg,
     Cluster,
     Custom(String),
 }
@@ -62,6 +63,7 @@ impl Category {
             Category::ExternalSecrets => "External Secrets".into(),
             Category::CertManager => "cert-manager".into(),
             Category::Rook => "Rook Ceph".into(),
+            Category::CloudNativePg => "CloudNativePG".into(),
             Category::Cluster => "Cluster".into(),
             Category::Custom(name) => name.clone(),
         }
@@ -80,7 +82,8 @@ impl Category {
             Category::ExternalSecrets => 7,
             Category::CertManager => 8,
             Category::Rook => 9,
-            Category::Custom(_) => 10,
+            Category::CloudNativePg => 10,
+            Category::Custom(_) => 11,
         }
     }
 

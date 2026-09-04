@@ -12,6 +12,7 @@ use crate::table::{TableColumnDefinition, TableRow};
 
 mod accessors;
 mod certmanager;
+mod cnpg;
 mod core;
 mod eso;
 mod flux;
@@ -19,11 +20,13 @@ mod format;
 mod gateway;
 mod pods;
 mod rbac;
+mod rook;
 mod status;
 mod workloads;
 
 pub(crate) use self::accessors::ts_string;
 use self::certmanager::{acme_state_cells, certificate_cells, certrequest_cells, issuer_cells};
+use self::cnpg::{backup_cells, cluster_cells, pooler_cells, scheduled_backup_cells};
 use self::core::{
     configmap_cells, endpoints_cells, endpointslice_cells, hpa_cells, ingress_cells,
     namespace_cells, node_cells, pdb_cells, pv_cells, pvc_cells, secret_cells, service_cells,
@@ -34,6 +37,7 @@ pub(crate) use self::flux::ready_message_cells;
 use self::gateway::{gateway_cells, gatewayclass_cells, httproute_cells, parent_route_cells};
 use self::pods::pod_cells;
 use self::rbac::rolebinding_cells;
+use self::rook::{ceph_cluster_cells, ceph_resource_cells, object_bucket_claim_cells};
 use self::status::generic_status;
 use self::workloads::{
     cronjob_cells, daemonset_cells, job_cells, replicaset_cells, workload_cells,
@@ -131,6 +135,43 @@ fn explicit_view(group: &str, kind: &str) -> Option<KindView> {
         ("acme.cert-manager.io", "Order") | ("acme.cert-manager.io", "Challenge") => {
             view!(&["State", "Reason"], Plain(acme_state_cells))
         }
+        ("ceph.rook.io", "CephCluster") => view!(
+            &["Phase", "Health", "Version", "Message"],
+            Plain(ceph_cluster_cells)
+        ),
+        ("ceph.rook.io", "CephBlockPool")
+        | ("ceph.rook.io", "CephFilesystem")
+        | ("ceph.rook.io", "CephNFS")
+        | ("ceph.rook.io", "CephObjectStore") => {
+            view!(&["Phase", "Message"], Plain(ceph_resource_cells))
+        }
+        ("objectbucket.io", "ObjectBucketClaim") => view!(
+            &["Phase", "Storage Class", "Bucket"],
+            Plain(object_bucket_claim_cells)
+        ),
+        ("postgresql.cnpg.io", "Cluster") => view!(
+            &["Instances", "Ready", "Primary", "Phase", "Image"],
+            Plain(cluster_cells)
+        ),
+        ("postgresql.cnpg.io", "Backup") => view!(
+            &["Cluster", "Method", "Phase", "Started", "Completed"],
+            Plain(backup_cells)
+        ),
+        ("postgresql.cnpg.io", "ScheduledBackup") => view!(
+            &[
+                "Cluster",
+                "Schedule",
+                "Suspended",
+                "Last Schedule",
+                "Next Schedule",
+                "Error"
+            ],
+            Plain(scheduled_backup_cells)
+        ),
+        ("postgresql.cnpg.io", "Pooler") => view!(
+            &["Cluster", "Type", "Instances", "Phase", "Reason"],
+            Plain(pooler_cells)
+        ),
         // Gateway API: HTTPRoute plus its Gateway/GatewayClass and sibling route kinds.
         ("gateway.networking.k8s.io", "HTTPRoute")
         | ("gateway.networking.k8s.io", "GRPCRoute")
@@ -495,6 +536,9 @@ fn enhancement_values(
 
 fn is_augmented_crd(group: &str) -> bool {
     group.ends_with("fluxcd.io")
+        || group == "ceph.rook.io"
+        || group == "objectbucket.io"
+        || group == "postgresql.cnpg.io"
         || matches!(
             group,
             "external-secrets.io"

@@ -89,6 +89,9 @@ fn classify(group: &str, kind: &str) -> Category {
     {
         return Category::Rook;
     }
+    if group == "cnpg.io" || group.ends_with(".cnpg.io") {
+        return Category::CloudNativePg;
+    }
     if group == "rbac.authorization.k8s.io" {
         return Category::Rbac;
     }
@@ -128,4 +131,30 @@ fn group_base_domain(group: &str) -> String {
         }
     }
     group.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classifies_rook_api_groups_together() {
+        assert_eq!(classify("ceph.rook.io", "CephCluster"), Category::Rook);
+        assert_eq!(
+            classify("objectbucket.io", "ObjectBucketClaim"),
+            Category::Rook
+        );
+    }
+
+    #[test]
+    fn classifies_cnpg_api_groups_together() {
+        assert_eq!(
+            classify("postgresql.cnpg.io", "Cluster"),
+            Category::CloudNativePg
+        );
+        assert_eq!(
+            classify("barmancloud.cnpg.io", "ObjectStore"),
+            Category::CloudNativePg
+        );
+    }
 }

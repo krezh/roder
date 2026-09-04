@@ -40,6 +40,7 @@ pub(crate) fn tree_icon_class(category: Option<&Category>) -> &'static str {
         Some(Category::ExternalSecrets) => "cat-externalsecrets",
         Some(Category::CertManager) => "cat-certmanager",
         Some(Category::Rook) => "cat-rook",
+        Some(Category::CloudNativePg) => "cat-cnpg",
         Some(Category::Cluster) => "cat-cluster",
         Some(Category::Custom(_)) | None => "cat-fallback",
     }
@@ -66,7 +67,8 @@ pub(crate) fn tree_icon_glyph(category: Option<&Category>, kind: &str) -> &'stat
         (Some(Category::ExternalSecrets), _) => "\u{1F512}", // 🔒
         (Some(Category::Cluster), _) => "\u{2B21}",          // ⬡
         (Some(Category::Rook), _) => "\u{2B22}",             // ⬢
-        _ => "\u{25CF}",                                     // ●
+        (Some(Category::CloudNativePg), _) => "PG",
+        _ => "\u{25CF}", // ●
     }
 }
 

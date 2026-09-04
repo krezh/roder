@@ -11,6 +11,21 @@ use crate::request::{ensure_metadata, targeted};
 use crate::Backend;
 
 impl Backend {
+    pub async fn etcd_defragment(&self, node: &str) -> Result<(), TalosError> {
+        let channel = self.current_channel().await?;
+        let mut client = MachineServiceClient::new(channel);
+        let response = client
+            .etcd_defragment(targeted(node, ())?)
+            .await?
+            .into_inner();
+        ensure_metadata(
+            response
+                .messages
+                .iter()
+                .map(|message| message.metadata.as_ref()),
+        )
+    }
+
     pub async fn service_action(
         &self,
         node: &str,

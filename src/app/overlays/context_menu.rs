@@ -412,6 +412,20 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                     do_close();
                 }
             };
+            let talos_etcd_defrag = {
+                let target = m.target.clone();
+                move |_| {
+                    let target = target.clone();
+                    let node = target.name.clone();
+                    ask_confirm(
+                        confirm,
+                        format!("Defragment etcd on {node}? This is a resource-intensive operation."),
+                        "Defrag",
+                        move || fire_action(toast, "talos-etcd-defrag", std::slice::from_ref(&target)),
+                    );
+                    do_close();
+                }
+            };
             let delete = {
                 let ts = targets.clone();
                 move |_| {
@@ -662,6 +676,9 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                     {(is_node && show_uncordon).then(|| view! { <button class="ctx-item" on:click=uncordon>"Uncordon"</button> })}
                     {(!is_bulk && is_node).then(|| view! { <button class="ctx-item danger" on:click=drain>"Drain"</button> })}
                     {(!is_bulk && is_node && talos_actions).then(|| view! {
+                        {control_plane.then(|| view! {
+                            <button class="ctx-item" on:click=talos_etcd_defrag>"Defrag etcd"</button>
+                        })}
                         <button class="ctx-item danger" on:click=talos_reboot>"Reboot"</button>
                         <button class="ctx-item danger" on:click=talos_shutdown>"Shutdown"</button>
                     })}

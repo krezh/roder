@@ -268,7 +268,7 @@ fn talos_lock_conflict() -> Response {
 }
 
 /// The Talos-specific branch of `POST /api/action` (service start/stop/
-/// restart, reboot, shutdown). Returns `None` when `req.action` isn't a Talos
+/// restart, etcd defragmentation, reboot, shutdown). Returns `None` when `req.action` isn't a Talos
 /// action, so the generic dispatcher in `action.rs` can fall through to it.
 pub(crate) async fn talos_mutation(
     state: &AppState,
@@ -283,6 +283,7 @@ pub(crate) async fn talos_mutation(
         "talos-service-start"
             | "talos-service-stop"
             | "talos-service-restart"
+            | "talos-etcd-defrag"
             | "talos-reboot"
             | "talos-shutdown"
     ) {
@@ -311,6 +312,15 @@ pub(crate) async fn talos_mutation(
         Ok(node) => node,
         Err(response) => return Some(*response),
     };
+    if req.action == "talos-etcd-defrag" && !is_control_plane(&detail) {
+        return Some(
+            (
+                StatusCode::BAD_REQUEST,
+                "etcd defrag requires a control-plane node",
+            )
+                .into_response(),
+        );
+    }
     if power_action {
         if let Some(response) =
             crate::server::ha::forward_action_from_target(state, headers, identity, node, req).await
@@ -435,6 +445,7 @@ pub(crate) async fn talos_mutation(
         }
         "talos-reboot" => talos.power_action(node, "reboot").await,
         "talos-shutdown" => talos.power_action(node, "shutdown").await,
+        "talos-etcd-defrag" => talos.etcd_defragment(node).await,
         _ => unreachable!(),
     };
     if let Err(error) = result {

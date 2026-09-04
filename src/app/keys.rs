@@ -731,6 +731,8 @@ fn open_menu_at_cursor(h: &TableKeyHandle, ctx_menu: RwSignal<Option<CtxMenu>>) 
         y,
         target,
         node: h.node_for.run(uid.clone()),
+        #[cfg(target_arch = "wasm32")]
+        focus_first: true,
         uid,
     }));
 }

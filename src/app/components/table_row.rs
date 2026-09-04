@@ -119,6 +119,8 @@ where
                     y: e.client_y(),
                     target: t_ctx.clone(),
                     node: node_for_ctx(),
+                    #[cfg(target_arch = "wasm32")]
+                    focus_first: false,
                     uid: uid_ctx.clone(),
                 }));
             }

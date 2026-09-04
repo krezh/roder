@@ -23,6 +23,8 @@ pub(crate) struct CtxMenu {
     pub(crate) y: i32,
     pub(crate) target: DetailTarget,
     pub(crate) node: Option<String>,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) focus_first: bool,
     /// uid of the right-clicked row — used to detect multi-select context.
     pub(crate) uid: String,
 }

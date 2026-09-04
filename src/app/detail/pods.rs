@@ -68,6 +68,8 @@ pub(crate) fn PodsTab(namespace: String, selector: String) -> impl IntoView {
                                     y: e.client_y(),
                                     target: DetailTarget { key: pk.key, namespace: r.namespace.clone(), name: r.name.clone() },
                                     node: None,
+                                    #[cfg(target_arch = "wasm32")]
+                                    focus_first: false,
                                     uid: r.uid.clone(),
                                 }));
                             }

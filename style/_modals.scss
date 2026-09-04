@@ -556,7 +556,7 @@
   border-radius: 0;
   box-shadow: 0 14px 34px -8px rgba(0, 0, 0, 0.85);
   padding: 0.25rem;
-  min-width: 190px;
+  min-width: 220px;
   max-width: calc(100dvw - 1rem);
   max-height: calc(100dvh - 1rem);
   overflow-y: auto;
@@ -564,6 +564,29 @@
   display: flex;
   flex-direction: column;
   animation: popup-in 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.ctx-header {
+  color: var(--fg);
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin: 0 0.35rem 0.2rem;
+  padding: 0.35rem 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ctx-section-label {
+  color: var(--muted);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  padding: 0.65rem 0.6rem 0.25rem;
+  text-transform: uppercase;
+  user-select: none;
+
+  &.danger { color: color-mix(in srgb, var(--error) 72%, var(--muted)); }
 }
 .ctx-item {
   background: none;
@@ -593,6 +616,13 @@
   }
   &.danger:focus {
     background: color-mix(in srgb, var(--error) 14%, transparent);
+  }
+  &.caution:hover,
+  &.caution:focus {
+    color: var(--warn);
+  }
+  &.caution:focus {
+    background: color-mix(in srgb, var(--warn) 12%, transparent);
   }
   &.ctx-bulk-header {
     color: var(--muted);

@@ -45,7 +45,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
 
     // Keyboard nav for the menu. The item list is built from ~40 kind-specific
     // conditionals below, so rather than mirror that into an index, this walks
-    // the rendered `.ctx-item` buttons and uses native focus — `Enter` then
+    // the rendered buttons and uses native focus — `Enter` then
     // activates the focused button with no extra wiring, and the same code
     // works whichever items a given resource kind ends up showing.
     #[cfg(target_arch = "wasm32")]
@@ -55,7 +55,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             let Some(menu) = menu_ref.get_untracked() else {
                 return;
             };
-            let Ok(items) = menu.query_selector_all("button.ctx-item") else {
+            let Ok(items) = menu.query_selector_all("button") else {
                 return;
             };
             let n = items.length() as i32;
@@ -118,13 +118,11 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             return;
         };
 
-        // Put focus on the first item as soon as the menu exists, so a menu
-        // opened with `a` responds to `Enter` immediately instead of needing a
-        // `j` first. Harmless for right-click users — it reads as the usual
-        // "first item highlighted" that native menus already do.
-        {
+        // A keyboard-opened menu responds to Enter immediately. Pointer-opened
+        // menus stay unfocused until the user starts keyboard navigation.
+        if menu.focus_first {
             use wasm_bindgen::JsCast;
-            if let Ok(Some(first)) = el.query_selector("button.ctx-item") {
+            if let Ok(Some(first)) = el.query_selector("button") {
                 if let Ok(first) = first.dyn_into::<web_sys::HtmlElement>() {
                     let _ = first.focus();
                 }
@@ -483,23 +481,40 @@ pub(crate) fn ContextMenu() -> impl IntoView {
 
             let ns_item = (!is_bulk).then(|| m.target.namespace.clone()).flatten();
             let node_item = (!is_bulk && is_pod).then(|| m.node.clone()).flatten();
+            let has_operate = is_workload
+                || (!is_bulk && is_scalable)
+                || is_cronjob
+                || jobs_terminal
+                || is_kopiur_snapshot_policy
+                || is_flux
+                || is_eso
+                || is_certificate
+                || is_node;
+            let header_label = if is_bulk {
+                format!("{} selected", targets.len())
+            } else {
+                m.target.name.clone()
+            };
+            let header_title = header_label.clone();
 
             view! {
                 <div class="ctx-scrim"
                     on:click=move |_| do_close()
                     on:contextmenu=move |e: leptos::ev::MouseEvent| { e.prevent_default(); do_close(); }></div>
-                <div class="ctx-menu" node_ref=menu_ref class:closing=move || closing.get()
+                <div class="ctx-menu" role="menu" node_ref=menu_ref class:closing=move || closing.get()
                     style=move || { let (x, y) = pos.get(); format!("left:{x}px;top:{y}px") }>
-                    {is_bulk.then(|| view! {
-                        <div class="ctx-item ctx-bulk-header">{targets.len()}" resources"</div>
-                    })}
-                    {(!is_bulk).then(|| view! { <button class="ctx-item" on:click=open>"Open details"</button> })}
+                    <div class="ctx-header" title=header_title>
+                        {header_label}
+                    </div>
+
+                    {(!is_bulk || has_logs).then(|| view! { <div class="ctx-section-label">"Inspect"</div> })}
+                    {(!is_bulk).then(|| view! { <button class="ctx-item" role="menuitem" on:click=open>"Open details"</button> })}
                     {(!is_bulk).then(|| view! {
-                        <button class="ctx-item" on:click=open_tree>"Relationships"</button>
+                        <button class="ctx-item" role="menuitem" on:click=open_tree>"View relationships"</button>
                     })}
-                    {has_logs.then(|| view! { <button class="ctx-item" on:click=logs>"Logs"</button> })}
-                    {shell.map(|s| view! { <button class="ctx-item" on:click=s>"Shell"</button> })}
-                    {files.map(|open| view! { <button class="ctx-item" on:click=open>"Files"</button> })}
+                    {has_logs.then(|| view! { <button class="ctx-item" role="menuitem" on:click=logs>"View logs"</button> })}
+                    {shell.map(|s| view! { <button class="ctx-item" role="menuitem" on:click=s>"Open shell"</button> })}
+                    {files.map(|open| view! { <button class="ctx-item" role="menuitem" on:click=open>"Browse files"</button> })}
                     {(!is_bulk && is_pod).then(|| {
                         let ns  = m.target.namespace.clone().unwrap_or_default();
                         let pod = m.target.name.clone();
@@ -563,7 +578,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                                 }
                             });
                         }
-                    }).map(|h| view! { <button class="ctx-item" on:click=h>"Debug shell"</button> })}
+                    }).map(|h| view! { <button class="ctx-item" role="menuitem" on:click=h>"Open debug shell"</button> })}
                     {(!is_bulk && is_node).then(|| {
                         let node = m.target.name.clone();
                         move |_: leptos::ev::MouseEvent| {
@@ -623,11 +638,15 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                                 }
                             });
                         }
-                    }).map(|h| view! { <button class="ctx-item" on:click=h>"Node shell"</button> })}
-                    {ns_item.map(|ns| view! { <button class="ctx-item" on:click=goto_ns>"Go to namespace " <span class="ctx-sub">{ns}</span></button> })}
-                    {node_item.map(|node| view! { <button class="ctx-item" on:click=goto_node>"Go to node " <span class="ctx-sub">{node}</span></button> })}
-                    <button class="ctx-item" on:click=copy>"Copy name"</button>
-                    {is_workload.then(|| view! { <button class="ctx-item" on:click=restart>"Restart"</button> })}
+                    }).map(|h| view! { <button class="ctx-item" role="menuitem" on:click=h>"Open node shell"</button> })}
+
+                    <div class="ctx-section-label">"Navigate"</div>
+                    {ns_item.map(|ns| view! { <button class="ctx-item" role="menuitem" on:click=goto_ns>"Go to namespace" <span class="ctx-sub">{ns}</span></button> })}
+                    {node_item.map(|node| view! { <button class="ctx-item" role="menuitem" on:click=goto_node>"Go to node" <span class="ctx-sub">{node}</span></button> })}
+                    <button class="ctx-item" role="menuitem" on:click=copy>{if is_bulk { "Copy resource names" } else { "Copy resource name" }}</button>
+
+                    {has_operate.then(|| view! { <div class="ctx-section-label">"Operate"</div> })}
+                    {is_workload.then(|| view! { <button class="ctx-item" role="menuitem" on:click=restart>"Restart workload"</button> })}
                     {(!is_bulk && is_scalable).then(|| {
                         let t = m.target.clone();
                         view! {
@@ -648,9 +667,9 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                             </div>
                         }
                     })}
-                    {is_cronjob.then(|| view! { <button class="ctx-item" on:click=trigger>"Trigger"</button> })}
-                    {jobs_terminal.then(|| view! { <button class="ctx-item" on:click=rerun>"Re-run"</button> })}
-                    {is_kopiur_snapshot_policy.then(|| view! { <button class="ctx-item" on:click=snapshot_now>"Snapshot Now"</button> })}
+                    {is_cronjob.then(|| view! { <button class="ctx-item" role="menuitem" on:click=trigger>"Trigger job"</button> })}
+                    {jobs_terminal.then(|| view! { <button class="ctx-item" role="menuitem" on:click=rerun>"Re-run job"</button> })}
+                    {is_kopiur_snapshot_policy.then(|| view! { <button class="ctx-item" role="menuitem" on:click=snapshot_now>"Snapshot now"</button> })}
                     {is_flux.then(|| view! {
                         <div class="ctx-item ctx-reconcile">
                             <button class="ctx-reconcile-btn" on:click=reconcile>"Reconcile"</button>
@@ -667,23 +686,27 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                                 })}
                             </span>
                         </div>
-                        {show_suspend.then(|| view! { <button class="ctx-item" on:click=suspend>"Suspend"</button> })}
-                        {show_resume.then(|| view! { <button class="ctx-item" on:click=resume>"Resume"</button> })}
+                        {show_suspend.then(|| view! { <button class="ctx-item" role="menuitem" on:click=suspend>"Suspend"</button> })}
+                        {show_resume.then(|| view! { <button class="ctx-item" role="menuitem" on:click=resume>"Resume"</button> })}
                     })}
-                    {is_eso.then(|| view! { <button class="ctx-item" on:click=refresh>"Refresh"</button> })}
-                    {is_certificate.then(|| view! { <button class="ctx-item" on:click=renew_certificate>"Force renew"</button> })}
-                    {(is_node && show_cordon).then(|| view! { <button class="ctx-item" on:click=cordon>"Cordon"</button> })}
-                    {(is_node && show_uncordon).then(|| view! { <button class="ctx-item" on:click=uncordon>"Uncordon"</button> })}
-                    {(!is_bulk && is_node).then(|| view! { <button class="ctx-item danger" on:click=drain>"Drain"</button> })}
+                    {is_eso.then(|| view! { <button class="ctx-item" role="menuitem" on:click=refresh>"Refresh secret"</button> })}
+                    {is_certificate.then(|| view! { <button class="ctx-item" role="menuitem" on:click=renew_certificate>"Force renewal"</button> })}
+                    {(is_node && show_cordon).then(|| view! { <button class="ctx-item" role="menuitem" on:click=cordon>"Cordon node"</button> })}
+                    {(is_node && show_uncordon).then(|| view! { <button class="ctx-item" role="menuitem" on:click=uncordon>"Uncordon node"</button> })}
+                    {(!is_bulk && is_node).then(|| view! { <button class="ctx-item caution" role="menuitem" on:click=drain>"Drain node…"</button> })}
+
                     {(!is_bulk && is_node && talos_actions).then(|| view! {
+                        <div class="ctx-section-label">"Talos"</div>
                         {control_plane.then(|| view! {
-                            <button class="ctx-item" on:click=talos_etcd_defrag>"Defrag etcd"</button>
+                            <button class="ctx-item caution" role="menuitem" on:click=talos_etcd_defrag>"Defragment etcd…"</button>
                         })}
-                        <button class="ctx-item danger" on:click=talos_reboot>"Reboot"</button>
-                        <button class="ctx-item danger" on:click=talos_shutdown>"Shutdown"</button>
+                        <button class="ctx-item caution" role="menuitem" on:click=talos_reboot>"Reboot node…"</button>
+                        <button class="ctx-item danger" role="menuitem" on:click=talos_shutdown>"Shut down node…"</button>
                     })}
-                    {is_pod.then(|| view! { <button class="ctx-item danger" on:click=evict>"Evict"</button> })}
-                    <button class="ctx-item danger" on:click=delete>"Delete"</button>
+
+                    <div class="ctx-section-label danger">"Danger"</div>
+                    {is_pod.then(|| view! { <button class="ctx-item caution" role="menuitem" on:click=evict>"Evict pod…"</button> })}
+                    <button class="ctx-item danger" role="menuitem" on:click=delete>"Delete resource…"</button>
                 </div>
             }
         })}

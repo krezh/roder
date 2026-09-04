@@ -170,6 +170,8 @@ pub(crate) fn MobileRowCard(
                                     y: 0,
                                     target: menu_target.clone(),
                                     node: node_for_ctx(),
+                                    #[cfg(target_arch = "wasm32")]
+                                    focus_first: false,
                                     uid: menu_uid.clone(),
                                 }));
                             }>

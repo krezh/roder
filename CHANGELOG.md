@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.49](https://github.com/krezh/roder/compare/0.1.48...0.1.49) (2026-09-05)
+
+
+### Bug Fixes
+
+* **cargo:** update rustwright digest (3bf0f19 ➔ 9347986) ([#223](https://github.com/krezh/roder/issues/223)) ([761f545](https://github.com/krezh/roder/commit/761f54532a7b52501ceabb0a432513da15ba97c1))
+* **cargo:** update rustwright digest (9347986 ➔ a5edad0) ([#224](https://github.com/krezh/roder/issues/224)) ([ddb1eb6](https://github.com/krezh/roder/commit/ddb1eb6c95948c8aa9a1f6e8d934a1e03f180d23))
+
+
+### Miscellaneous Chores
+
+* **cargo:** lock file maintenance cargo.lock ([#221](https://github.com/krezh/roder/issues/221)) ([c1fcd19](https://github.com/krezh/roder/commit/c1fcd19d89a8945d3f4ac6f2a73b790aab965e78))
+
 ## [0.1.48](https://github.com/krezh/roder/compare/0.1.47...0.1.48) (2026-09-04)
 
 

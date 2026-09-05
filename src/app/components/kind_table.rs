@@ -1,6 +1,7 @@
 use leptos::prelude::*;
 use roder_core::{ResourceKind, RowStatus, Trend};
 
+use crate::app::components::dropdown::{Dropdown, DropdownItem};
 use crate::app::components::table::{cell_value_changed, sortable_th, FlashTd};
 use crate::app::components::table_row::{NameCell, ResourceRow as ResourceRowView};
 use crate::app::events::{make_bulk_open_logs, make_do_bulk, make_do_delete, RowMap};
@@ -37,7 +38,7 @@ pub(crate) fn KindTable(
     namespace: Option<String>,
     selector: Option<String>,
     #[prop(optional)] text_filter: Option<RwSignal<String>>,
-    /// Per-pane namespace signal. When present the view-head shows a live `<select>`
+    /// Per-pane namespace signal. When present the view-head shows a live selector
     /// instead of the static badge, and the signal is updated on change.
     #[prop(optional)]
     ns_filter: Option<RwSignal<Option<String>>>,
@@ -371,32 +372,26 @@ pub(crate) fn KindTable(
                 <h2 class="view-title">{title.clone()}</h2>
                 {if let Some(nf) = ns_filter.filter(|_| namespaced) {
                     let nl = ns_list.unwrap();
+                    let select_namespace = Callback::new(move |value: String| {
+                        nf.set(if value.is_empty() { None } else { Some(value) });
+                    });
                     view! {
-                        <select class="pane-ns-select"
-                            on:change=move |e| {
-                                let v = event_target_value(&e);
-                                nf.set(if v.is_empty() { None } else { Some(v) });
-                            }
-                        >
-                            <option value="" prop:selected=move || nf.get().is_none()>"All"</option>
+                        <div class="pane-ns-select">
+                            <Dropdown label=move || nf.get().unwrap_or_else(|| "All".to_string())>
+                            <DropdownItem label="All".to_string() value=String::new() on_select=select_namespace />
                             <Suspense>
                                 {move || nl.get().map(|res| {
                                     if let Ok(list) = res {
                                         list.into_iter().map(|ns| {
-                                            let ns2 = ns.clone();
-                                            view! {
-                                                <option
-                                                    value=ns
-                                                    prop:selected=move || nf.get().as_deref() == Some(&ns2)
-                                                >{ns2.clone()}</option>
-                                            }
+                                            view! { <DropdownItem label=ns.clone() value=ns on_select=select_namespace /> }
                                         }).collect_view().into_any()
                                     } else {
                                         ().into_any()
                                     }
                                 })}
                             </Suspense>
-                        </select>
+                            </Dropdown>
+                        </div>
                     }.into_any()
                 } else {
                     ns_sv.get_value().map(|ns| view! { <span class="pane-badge pane-badge-ns">{ns}</span> }).into_any()

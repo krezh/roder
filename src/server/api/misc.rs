@@ -106,13 +106,21 @@ pub async fn silence_alert(
         "Alertmanager silence requested"
     );
     match cache
-        .silence_alert(&request.fingerprint, duration, &caller.audit)
+        .silence_alert(
+            &request.fingerprint,
+            duration,
+            &caller.audit,
+            &request.matcher_labels,
+        )
         .await
     {
         Ok(silence_id) => Json(serde_json::json!({ "silence_id": silence_id })).into_response(),
         Err(roder_k8s::SilenceError::NotFound) => StatusCode::NOT_FOUND.into_response(),
         Err(roder_k8s::SilenceError::AlreadySilenced) => {
             (StatusCode::CONFLICT, "alert is already silenced").into_response()
+        }
+        Err(roder_k8s::SilenceError::InvalidMatchers(error)) => {
+            (StatusCode::BAD_REQUEST, error).into_response()
         }
         Err(roder_k8s::SilenceError::Upstream(error)) => {
             tracing::warn!("Alertmanager silence: {error}");

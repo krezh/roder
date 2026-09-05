@@ -51,19 +51,6 @@
   }
 }
 
-.ns-palette-btn {
-  @extend %chip-btn;
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  &.scoped {
-    color: var(--accent);
-    border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
-    background: color-mix(in srgb, var(--accent) 8%, var(--panel-2));
-  }
-}
-
 // Bare button reset: no chrome, just a clickable label/icon.
 %reset-btn {
   background: none;

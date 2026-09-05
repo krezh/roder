@@ -119,19 +119,39 @@ fn MobileAlertRow(
     silences_enabled: RwSignal<bool>,
 ) -> impl IntoView {
     let tick = expect_context::<Tick>().0;
-    let amount = RwSignal::new(1u64);
-    let unit = RwSignal::new(Some(3_600u64));
-    let duration = Memo::new(move |_| unit.get().map(|unit| amount.get().saturating_mul(unit)));
-    let valid = Memo::new(move |_| {
-        duration.get().is_none_or(|seconds| {
-            (roder_core::MIN_ALERT_SILENCE_SECS..=roder_core::MAX_ALERT_SILENCE_SECS)
-                .contains(&seconds)
-        })
+    let duration = RwSignal::new("3600".to_string());
+    let mut available_matchers: Vec<_> = alert
+        .labels
+        .iter()
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect();
+    available_matchers.sort_by(|left, right| left.0.cmp(&right.0));
+    let all_matchers = StoredValue::new(
+        available_matchers
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>(),
+    );
+    let mut initial_matchers: std::collections::HashSet<_> = available_matchers
+        .iter()
+        .filter(|(name, _)| matches!(name.as_str(), "alertname" | "namespace"))
+        .map(|(name, _)| name.clone())
+        .collect();
+    if initial_matchers.is_empty() {
+        initial_matchers.extend(available_matchers.iter().map(|(name, _)| name.clone()));
+    }
+    let selected_matchers = RwSignal::new(initial_matchers);
+    let matchers_valid = Memo::new(move |_| {
+        !crate::app::alert_silence_matchers(&all_matchers.read_value(), &selected_matchers.read())
+            .is_empty()
     });
     let silencing = RwSignal::new(false);
     let silence_error = RwSignal::new(None::<String>);
+    let silence_dialog_open = RwSignal::new(false);
     let fingerprint = StoredValue::new(alert.fingerprint.clone());
     let starts_at = alert.starts_at.clone();
+    let alert_name = alert.name.clone();
+    let dialog_matchers = StoredValue::new(available_matchers.clone());
     let silenced = alert.silenced;
     let silence = move |_| {
         #[cfg(target_arch = "wasm32")]
@@ -144,9 +164,14 @@ fn MobileAlertRow(
                     fingerprint: fingerprint.clone(),
                     duration: duration
                         .get_untracked()
+                        .parse()
                         .map_or(roder_core::AlertSilenceDuration::Forever, |seconds| {
                             roder_core::AlertSilenceDuration::Finite { seconds }
                         }),
+                    matcher_labels: crate::app::alert_silence_matchers(
+                        &all_matchers.read_value(),
+                        &selected_matchers.read(),
+                    ),
                 };
                 match crate::data::post_json::<serde_json::Value>(
                     "/api/alerts/silences",
@@ -155,6 +180,7 @@ fn MobileAlertRow(
                 .await
                 {
                     Ok(_) => {
+                        silence_dialog_open.set(false);
                         data.update(|alerts| {
                             if let Some(alert) = alerts.as_mut().and_then(|alerts| {
                                 alerts
@@ -186,15 +212,30 @@ fn MobileAlertRow(
         </header>
         {(!alert.summary.is_empty()).then(|| view! { <p class="summary">{alert.summary}</p> })}
         {(!alert.description.is_empty()).then(|| view! { <p>{alert.description}</p> })}
-        <div class="mobile-alert-labels">{alert.labels.into_iter().filter(|(key, _)| key != "alertname" && key != "severity").map(|(key, value)| view! { <span><b>{key}</b>"="{value}</span> }).collect_view()}</div>
+        <div class="mobile-alert-labels">{available_matchers.clone().into_iter().filter(|(key, _)| key != "alertname" && key != "severity").map(|(key, value)| view! { <span><b>{key}</b>"="{value}</span> }).collect_view()}</div>
         <Show when=move || silences_enabled.get() && !silenced><div class="mobile-silence-actions">
-            <input type="number" min="1" step="1" aria-label="Silence duration" prop:value=move || amount.get().to_string() disabled=move || silencing.get() || unit.get().is_none()
-                on:input=move |event| amount.set(event_target_value(&event).parse().unwrap_or(0)) />
-            <select aria-label="Silence duration unit" prop:value=move || unit.get().map_or_else(|| "forever".to_string(), |unit| unit.to_string()) on:change=move |event| unit.set(event_target_value(&event).parse().ok())>
-                <option value="60">"minutes"</option><option value="3600">"hours"</option><option value="86400">"days"</option><option value="604800">"weeks"</option><option value="forever">"forever"</option>
-            </select>
-            <button disabled=move || silencing.get() || !valid.get() on:click=silence>{move || if silencing.get() { "Silencing…" } else { "Silence" }}</button>
-            {move || (!valid.get()).then(|| view! { <small>"Choose 1 minute to 1 year"</small> })}<small>{move || silence_error.get()}</small>
+            <button on:click=move |_| silence_dialog_open.set(true)>"Silence"</button>
         </div></Show>
-    </article> }
+    </article>
+    <Show when=move || silence_dialog_open.get()>
+        <div class="mobile-modal-scrim mobile-silence-scrim" on:click=move |_| { if !silencing.get_untracked() { silence_dialog_open.set(false); } }></div>
+        <section class="mobile-dialog mobile-silence-dialog" role="dialog" aria-modal="true">
+            <p class="mobile-dialog-message">"Silence "<strong>{alert_name.clone()}</strong></p>
+            <div class="mobile-silence-matchers">
+                <span>"Match labels"</span>
+                {dialog_matchers.get_value().into_iter().map(|(name, value)| {
+                    let checked_name = name.clone(); let changed_name = name.clone();
+                    view! { <label class="mobile-dialog-check"><input type="checkbox" prop:checked=move || selected_matchers.read().contains(&checked_name)
+                        on:change=move |event| selected_matchers.update(|selected| { if event_target_checked(&event) { selected.insert(changed_name.clone()); } else { selected.remove(&changed_name); } }) />
+                        <span><strong>{name}</strong><small>{value}</small></span></label> }
+                }).collect_view()}
+            </div>
+            <label class="mobile-dialog-field"><span>"Duration"</span><select prop:value=move || duration.get() on:change=move |event| duration.set(event_target_value(&event))>
+                <option value="3600">"1 hour"</option><option value="21600">"6 hours"</option><option value="86400">"1 day"</option><option value="604800">"1 week"</option><option value="forever">"Forever"</option>
+            </select></label>
+            <small class="mobile-dialog-error">{move || if !matchers_valid.get() { Some("Select at least one label".to_string()) } else { silence_error.get() }}</small>
+            <div class="mobile-dialog-actions"><button disabled=move || silencing.get() on:click=move |_| silence_dialog_open.set(false)>"Cancel"</button>
+                <button disabled=move || silencing.get() || !matchers_valid.get() on:click=silence>{move || if silencing.get() { "Silencing…" } else { "Create silence" }}</button></div>
+        </section>
+    </Show> }
 }

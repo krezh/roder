@@ -467,7 +467,6 @@
   color: var(--muted);
   font-size: 0.75rem;
 }
-.file-container select,
 .file-path input,
 .file-path button {
   height: 34px;
@@ -477,7 +476,6 @@
   background: var(--panel-2);
   color: var(--fg);
 }
-.file-container select { padding: 0 0.45rem; }
 .file-path {
   display: flex;
   align-items: center;

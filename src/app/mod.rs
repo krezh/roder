@@ -121,6 +121,16 @@ fn update_alerts(
     last_refresh.set(Some(js_sys::Date::now()));
 }
 
+fn alert_silence_matchers(
+    all: &[String],
+    selected: &std::collections::HashSet<String>,
+) -> Vec<String> {
+    all.iter()
+        .filter(|name| selected.contains(*name))
+        .cloned()
+        .collect()
+}
+
 /// The HTML document shell rendered on the server.
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     let asset_version = asset_version();

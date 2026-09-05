@@ -48,7 +48,7 @@ pub(crate) fn Dropdown(
             return;
         }
         #[cfg(target_arch = "wasm32")]
-        close_menu(shell_ref, btn_ref);
+        close_menu(shell_ref, anchor_ref, btn_ref);
         open.set(false);
         closing.set(true);
         #[cfg(target_arch = "wasm32")]
@@ -158,6 +158,21 @@ pub(crate) fn Dropdown(
     }
 }
 
+#[component]
+pub(crate) fn DropdownItem(
+    label: String,
+    value: String,
+    on_select: Callback<String>,
+) -> impl IntoView {
+    let close = expect_context::<DropdownClose>().0;
+    view! {
+        <button type="button" class="dropdown-item" role="menuitem" on:click=move |_| {
+            on_select.run(value.clone());
+            close.run(());
+        }>{label}</button>
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 fn dropdown_items(shell: &web_sys::HtmlDivElement) -> Vec<web_sys::HtmlElement> {
     use wasm_bindgen::JsCast;
@@ -251,7 +266,7 @@ fn reserve_width(anchor_ref: NodeRef<leptos::html::Div>, shell_ref: NodeRef<lept
     else {
         return;
     };
-    let width = f64::from(shell.offset_width()).max(measure(&shell).0);
+    let width = f64::from(shell.offset_width());
     let width = format!("{width}px");
     let _ = web_sys::HtmlElement::style(&anchor).set_property("width", &width);
     let _ = web_sys::HtmlElement::style(&shell).set_property("min-width", &width);
@@ -283,21 +298,21 @@ fn open_menu(shell_ref: NodeRef<leptos::html::Div>) {
     let _ = style.set_property("height", &format!("{}px", to.1));
 }
 
-/// Shrink the shell back to the button face's own natural size (the button
-/// face stays laid out — just absolutely positioned and invisible — while
-/// open, so its `offset_width`/`offset_height` are readable without a measure
-/// pass). The `+2` accounts for the shell's 1px border on each side, which
-/// the button face itself (`all: unset`) doesn't include.
+/// Shrink to the anchor's closed width; the shell border adds 2px to the button height.
 #[cfg(target_arch = "wasm32")]
-fn close_menu(shell_ref: NodeRef<leptos::html::Div>, btn_ref: NodeRef<leptos::html::Button>) {
+fn close_menu(
+    shell_ref: NodeRef<leptos::html::Div>,
+    anchor_ref: NodeRef<leptos::html::Div>,
+    btn_ref: NodeRef<leptos::html::Button>,
+) {
     let Some(shell) = shell_ref.get_untracked() else {
         return;
     };
     let class_list = shell.class_list();
     let _ = class_list.add_1("closing");
     let _ = class_list.remove_1("open");
-    if let Some(btn) = btn_ref.get_untracked() {
-        let w = f64::from(btn.offset_width()) + 2.0;
+    if let (Some(anchor), Some(btn)) = (anchor_ref.get_untracked(), btn_ref.get_untracked()) {
+        let w = f64::from(anchor.offset_width());
         let h = f64::from(btn.offset_height()) + 2.0;
         let style = web_sys::HtmlElement::style(&shell);
         let _ = style.set_property("width", &format!("{w}px"));

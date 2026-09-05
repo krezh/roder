@@ -24,16 +24,24 @@ use brand::Brand;
 use identity::Identity;
 use leptos::prelude::*;
 
+use crate::app::components::dropdown::{Dropdown, DropdownItem};
 use crate::app::components::icons::ShiftIcon;
-use crate::app::state::{NavOpen, NsPaletteOpen, OnlyProblems, PaletteOpen};
+use crate::app::state::{NavOpen, OnlyProblems, PaletteOpen};
 
 #[component]
 pub(crate) fn Topbar() -> impl IntoView {
     let selected_ns = expect_context::<RwSignal<Option<String>>>();
+    let namespaces = expect_context::<LocalResource<Result<Vec<String>, String>>>();
     let nav_open = expect_context::<NavOpen>().0;
     let palette_open = expect_context::<PaletteOpen>().0;
-    let ns_palette_open = expect_context::<NsPaletteOpen>().0;
     let only_problems = expect_context::<OnlyProblems>().0;
+    let select_namespace = Callback::new(move |namespace: String| {
+        selected_ns.set(if namespace.is_empty() {
+            None
+        } else {
+            Some(namespace)
+        });
+    });
 
     view! {
         <header class="topbar">
@@ -48,11 +56,20 @@ pub(crate) fn Topbar() -> impl IntoView {
                     on:click=move |_| only_problems.update(|o| *o = !*o)>
                     "Errors " <kbd><ShiftIcon />"E"</kbd>
                 </button>
-                <button class="ns-palette-btn" class:scoped=move || selected_ns.get().is_some()
-                    on:click=move |_| ns_palette_open.set(true)>
-                    {move || selected_ns.get().unwrap_or_else(|| "All namespaces".to_string())}
-                    " " <kbd><ShiftIcon />"N"</kbd>
-                </button>
+                <div class="topbar-namespace" class:scoped=move || selected_ns.get().is_some()>
+                    <Dropdown label=move || selected_ns.get().unwrap_or_else(|| "All namespaces".to_string())>
+                        <DropdownItem label="All namespaces".to_string() value=String::new() on_select=select_namespace />
+                        <Suspense>
+                            {move || namespaces.get().map(|result| match result {
+                                Ok(items) => items.into_iter().map(|namespace| view! {
+                                    <DropdownItem label=namespace.clone() value=namespace on_select=select_namespace />
+                                }).collect_view().into_any(),
+                                Err(_) => ().into_any(),
+                            })}
+                        </Suspense>
+                    </Dropdown>
+                    <kbd class="ns-dropdown-shortcut"><ShiftIcon />"N"</kbd>
+                </div>
             </div>
             <div class="topbar-group topbar-actions">
                 <SanitizeButton />

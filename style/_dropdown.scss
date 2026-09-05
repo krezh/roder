@@ -70,7 +70,7 @@
   color: var(--fg);
   cursor: pointer;
   white-space: nowrap;
-  width: max-content;
+  width: 100%;
   &:hover,
   &:focus-visible {
     color: var(--accent);
@@ -109,51 +109,38 @@
   color: var(--accent);
 }
 
-.topbar-account .dropdown-head {
-  padding: 0 0.385rem 0.4rem 0.35rem;
-  font-weight: 400;
+.topbar-namespace {
   position: relative;
+  max-width: 160px;
+
+  .dropdown-anchor { max-width: 160px; }
+  .dropdown-spacer,
+  .dropdown-face-btn { padding-right: 2.1rem; }
+  .dropdown-face-btn span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .dropdown-face-menu {
+    max-height: min(24rem, 70vh);
+    overflow-y: auto;
+  }
+  &.scoped .dropdown-shell { border-color: color-mix(in srgb, var(--accent) 58%, var(--border)); }
+  &:has(.dropdown-shell.open) .ns-dropdown-shortcut { opacity: 0; }
 }
-.topbar-account .dropdown-head::after {
-  content: "";
+.ns-dropdown-shortcut {
   position: absolute;
-  left: 0.35rem;
-  bottom: -1px;
-  width: 1.4rem;
-  height: 1px;
-  background: var(--accent);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 65%, transparent);
-}
-.topbar-account .dropdown-shell::before {
-  content: "";
-  position: absolute;
-  z-index: 1;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: 2px;
-  background: var(--accent);
-  scale: 1 0;
-  transform-origin: top;
-  transition: scale 0.24s var(--spring);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 55%, transparent);
+  z-index: 72;
+  top: 50%;
+  right: 0.45rem;
+  translate: 0 -50%;
+  padding: 0 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--bg);
+  font-size: 0.72rem;
+  font-weight: 700;
   pointer-events: none;
-}
-.topbar-account .dropdown-shell.open {
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
-  background: linear-gradient(135deg,
-    color-mix(in srgb, var(--accent) 7%, var(--panel)) 0,
-    var(--panel) 55%);
-}
-.topbar-account .dropdown-shell.open::before {
-  scale: 1;
-}
-.topbar-account .dropdown-item {
-  position: relative;
-  transition: color 0.12s ease, background-color 0.12s ease;
-}
-.topbar-account .dropdown-item:hover {
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  transition: opacity 0.12s ease;
 }
 
 .dropdown-item {
@@ -168,10 +155,10 @@
   white-space: nowrap;
   display: block;
   &:hover,
-  &:focus {
+  &:focus-visible {
     color: var(--accent);
   }
-  &:focus {
+  &:focus-visible {
     outline: none;
     background: color-mix(in srgb, var(--accent) 14%, transparent);
   }

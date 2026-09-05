@@ -759,6 +759,7 @@ pub struct FiringAlert {
 pub struct SilenceAlertRequest {
     pub fingerprint: String,
     pub duration: AlertSilenceDuration,
+    pub matcher_labels: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -872,7 +873,8 @@ mod tests {
     fn alert_silence_duration_requires_an_explicit_kind() {
         let forever: SilenceAlertRequest = serde_json::from_value(serde_json::json!({
             "fingerprint": "abc",
-            "duration": { "kind": "forever" }
+            "duration": { "kind": "forever" },
+            "matcher_labels": ["alertname"]
         }))
         .unwrap();
         assert_eq!(forever.duration, AlertSilenceDuration::Forever);

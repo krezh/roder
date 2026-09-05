@@ -1,6 +1,7 @@
 use leptos::prelude::*;
 use roder_core::{ContainerDirectory, ContainerFileContent, ContainerFileEntry, ContainerFileKind};
 
+use crate::app::components::dropdown::{Dropdown, DropdownItem};
 use crate::app::controllers::detail::format_bytes;
 use crate::app::state::DetailTarget;
 use crate::data;
@@ -200,23 +201,23 @@ pub(crate) fn FileBrowser(
         delete_target.set(None);
         item_menu.set(None);
     };
+    let select_container = Callback::new(move |container: String| {
+        selected_container.set(container);
+        navigate("/".to_string());
+    });
 
     view! {
         <section class="file-browser">
             <div class="file-toolbar">
                 {(containers.len() > 1).then(|| view! {
-                    <label class="file-container">
+                    <div class="file-container">
                         <span>"Container"</span>
-                        <select prop:value=move || selected_container.get() on:change=move |event| {
-                            selected_container.set(event_target_value(&event));
-                            navigate("/".to_string());
-                        }>
+                        <Dropdown label=move || selected_container.get()>
                             {containers.into_iter().map(|container| {
-                                let option_value = container.clone();
-                                view! { <option value=option_value>{container}</option> }
+                                view! { <DropdownItem label=container.clone() value=container on_select=select_container /> }
                             }).collect_view()}
-                        </select>
-                    </label>
+                        </Dropdown>
+                    </div>
                 })}
                 <form class="file-path" on:submit=move |event| {
                     event.prevent_default();

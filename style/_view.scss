@@ -140,13 +140,3 @@
 }
 .pane-badge-ns  { background: #1f3a5f; color: #79c0ff; }
 .pane-badge-sel { background: #1f3b2b; color: #3fb950; }
-// Per-pane namespace dropdown in the view-head — same appearance as the topbar selector.
-.pane-ns-select {
-  background: var(--panel-2);
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: 0;
-  padding: 0.25rem 0.5rem;
-  cursor: pointer;
-  &:focus { outline: none; border-color: var(--accent); }
-}

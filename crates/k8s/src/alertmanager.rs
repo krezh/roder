@@ -90,17 +90,20 @@ pub enum SilenceError {
     #[error("alert is already silenced")]
     AlreadySilenced,
     #[error("{0}")]
+    InvalidMatchers(String),
+    #[error("{0}")]
     Upstream(String),
 }
 
 fn silence_request<'a>(
     labels: &'a HashMap<String, String>,
+    matcher_labels: &'a [String],
     duration: Option<Duration>,
     created_by: &'a str,
     now: time::OffsetDateTime,
 ) -> Result<SilenceRequest<'a>, String> {
-    if labels.is_empty() {
-        return Err("alert has no labels".to_string());
+    if matcher_labels.is_empty() {
+        return Err("silence requires at least one matcher".to_string());
     }
     let format = &time::format_description::well_known::Rfc3339;
     let ends_at = match duration {
@@ -114,15 +117,20 @@ fn silence_request<'a>(
         None => "9999-12-31T23:59:59Z".to_string(),
     };
     Ok(SilenceRequest {
-        matchers: labels
+        matchers: matcher_labels
             .iter()
-            .map(|(name, value)| SilenceMatcher {
-                name,
-                value,
-                is_regex: false,
-                is_equal: true,
+            .map(|name| {
+                labels
+                    .get(name)
+                    .map(|value| SilenceMatcher {
+                        name,
+                        value,
+                        is_regex: false,
+                        is_equal: true,
+                    })
+                    .ok_or_else(|| format!("alert has no {name:?} label"))
             })
-            .collect(),
+            .collect::<Result<Vec<_>, _>>()?,
         starts_at: now
             .format(format)
             .map_err(|error| format!("format silence start: {error}"))?,
@@ -193,6 +201,7 @@ impl AlertsCache {
         fingerprint: &str,
         duration: Option<Duration>,
         created_by: &str,
+        matcher_labels: &[String],
     ) -> Result<String, SilenceError> {
         let _silence = self.silence_lock.lock().await;
         let alerts = self.get().await.map_err(SilenceError::Upstream)?;
@@ -203,7 +212,16 @@ impl AlertsCache {
         if alert.silenced {
             return Err(SilenceError::AlreadySilenced);
         }
-        self.create_silence(&alert.labels, duration, created_by)
+        if matcher_labels.is_empty()
+            || matcher_labels
+                .iter()
+                .any(|name| !alert.labels.contains_key(name))
+        {
+            return Err(SilenceError::InvalidMatchers(
+                "select at least one valid alert label".to_string(),
+            ));
+        }
+        self.create_silence(&alert.labels, matcher_labels, duration, created_by)
             .await
             .map_err(SilenceError::Upstream)
     }
@@ -211,11 +229,13 @@ impl AlertsCache {
     async fn create_silence(
         &self,
         labels: &HashMap<String, String>,
+        matcher_labels: &[String],
         duration: Option<Duration>,
         created_by: &str,
     ) -> Result<String, String> {
         let payload = silence_request(
             labels,
+            matcher_labels,
             duration,
             created_by,
             time::OffsetDateTime::now_utc(),
@@ -257,7 +277,10 @@ impl AlertsCache {
 
         if let Some((alerts, timestamp)) = self.cache.write().await.as_mut() {
             for alert in alerts {
-                if &alert.labels == labels {
+                if matcher_labels
+                    .iter()
+                    .all(|name| alert.labels.get(name) == labels.get(name))
+                {
                     alert.silenced = true;
                 }
             }
@@ -366,18 +389,25 @@ mod tests {
     }
 
     #[test]
-    fn silence_uses_every_alert_label_as_an_exact_matcher() {
+    fn silence_uses_selected_alert_labels_as_exact_matchers() {
         let labels = HashMap::from([
             ("alertname".to_string(), "PodDown".to_string()),
             ("namespace".to_string(), "production".to_string()),
         ]);
+        let matcher_labels = vec!["alertname".to_string()];
         let now = time::OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
-        let request = silence_request(&labels, Some(Duration::from_secs(3_600)), "operator", now)
-            .expect("valid silence request");
+        let request = silence_request(
+            &labels,
+            &matcher_labels,
+            Some(Duration::from_secs(3_600)),
+            "operator",
+            now,
+        )
+        .expect("valid silence request");
         let value = serde_json::to_value(request).unwrap();
         let matchers = value["matchers"].as_array().unwrap();
 
-        assert_eq!(matchers.len(), labels.len());
+        assert_eq!(matchers.len(), 1);
         assert!(matchers.iter().all(|matcher| {
             matcher["isRegex"] == false
                 && matcher["isEqual"] == true
@@ -393,8 +423,9 @@ mod tests {
     #[test]
     fn forever_silence_uses_alertmanager_maximum_timestamp() {
         let labels = HashMap::from([("alertname".to_string(), "PodDown".to_string())]);
+        let matcher_labels = vec!["alertname".to_string()];
         let now = time::OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
-        let request = silence_request(&labels, None, "operator", now).unwrap();
+        let request = silence_request(&labels, &matcher_labels, None, "operator", now).unwrap();
 
         assert_eq!(request.ends_at, "9999-12-31T23:59:59Z");
     }

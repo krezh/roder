@@ -141,7 +141,12 @@ impl Backend {
                 },
             };
             let data = serde_json::to_value(&object).unwrap_or_default();
-            let status = Some(crate::project::ready_message_cells(&data).1);
+            let status = Some(crate::project::resource_status(
+                &resource.group,
+                &resource.kind,
+                &data,
+                object.metadata.deletion_timestamp.is_some(),
+            ));
             let mut errors = Vec::new();
             let mut relationships = Vec::new();
 

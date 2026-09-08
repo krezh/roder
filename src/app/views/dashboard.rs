@@ -2,7 +2,7 @@
 
 use leptos::prelude::*;
 use roder_core::{
-    ClusterOverview, HealthRollup, NodeSummary, OverviewWarning, ResourceKind, RowStatus,
+    ClusterOverview, NodeSummary, OverviewWarning, ResourceHealthRollup, ResourceKind, RowStatus,
 };
 
 use crate::app::components::table::StatusDot;
@@ -105,12 +105,12 @@ pub(crate) fn Dashboard() -> impl IntoView {
 fn select_kind(
     catalog: RwSignal<Vec<ResourceKind>>,
     selected_kind: RwSignal<Option<ResourceKind>>,
-    kind: &str,
+    key_or_kind: &str,
 ) {
     if let Some(resource) = catalog
         .get_untracked()
         .into_iter()
-        .find(|resource| resource.kind == kind)
+        .find(|resource| resource.key == key_or_kind || resource.kind == key_or_kind)
     {
         selected_kind.set(Some(resource));
     }
@@ -150,8 +150,26 @@ fn dashboard_view(
         .chain(&o.tuppr_resources)
         .map(|resource| resource.health.suspended as usize)
         .sum();
-    let failing = o.pod_failed as usize + controller_failing + unready_nodes;
-    let caution = o.pod_pending as usize + controller_suspended + warnings.len();
+    let controller_warning: usize = o
+        .flux_resources
+        .iter()
+        .chain(&o.external_secret_resources)
+        .chain(&o.kopiur_resources)
+        .chain(&o.tuppr_resources)
+        .map(|resource| (resource.health.warning + resource.health.unknown) as usize)
+        .sum();
+    let controller_unreadable = o
+        .flux_resources
+        .iter()
+        .chain(&o.external_secret_resources)
+        .chain(&o.kopiur_resources)
+        .chain(&o.tuppr_resources)
+        .filter(|resource| resource.error.is_some())
+        .count();
+    let failing =
+        o.pod_failed as usize + controller_failing + controller_unreadable + unready_nodes;
+    let caution =
+        o.pod_pending as usize + controller_suspended + controller_warning + warnings.len();
     let (health_class, health_label, health_summary) = if failing > 0 {
         (
             "health-error",
@@ -261,10 +279,7 @@ fn dashboard_view(
                                 <h2>"Flux"</h2>
                                 <div class="controller-grid">
                                     {o.flux_resources.clone().into_iter().map(|resource| {
-                                        rollup_card(
-                                            resource_label(&resource.kind), resource.kind,
-                                            resource.health, catalog, selected_kind
-                                        )
+                                        rollup_card(resource, catalog, selected_kind)
                                     }).collect_view()}
                                 </div>
                             </div>
@@ -274,10 +289,7 @@ fn dashboard_view(
                                 <h2>"External Secrets"</h2>
                                 <div class="controller-grid">
                                     {o.external_secret_resources.clone().into_iter().map(|resource| {
-                                        rollup_card(
-                                            resource_label(&resource.kind), resource.kind,
-                                            resource.health, catalog, selected_kind
-                                        )
+                                        rollup_card(resource, catalog, selected_kind)
                                     }).collect_view()}
                                 </div>
                             </div>
@@ -287,10 +299,7 @@ fn dashboard_view(
                                 <h2>"Kopiur"</h2>
                                 <div class="controller-grid">
                                     {o.kopiur_resources.clone().into_iter().map(|resource| {
-                                        rollup_card(
-                                            resource_label(&resource.kind), resource.kind,
-                                            resource.health, catalog, selected_kind
-                                        )
+                                        rollup_card(resource, catalog, selected_kind)
                                     }).collect_view()}
                                 </div>
                             </div>
@@ -300,10 +309,7 @@ fn dashboard_view(
                                 <h2>"Tuppr"</h2>
                                 <div class="controller-grid">
                                     {o.tuppr_resources.clone().into_iter().map(|resource| {
-                                        rollup_card(
-                                            resource_label(&resource.kind), resource.kind,
-                                            resource.health, catalog, selected_kind
-                                        )
+                                        rollup_card(resource, catalog, selected_kind)
                                     }).collect_view()}
                                 </div>
                             </div>
@@ -426,29 +432,32 @@ fn usage_meter(label: &'static str, value: f64, available: bool) -> impl IntoVie
 }
 
 fn rollup_card(
-    label: String,
-    target_kind: String,
-    rollup: HealthRollup,
+    resource: ResourceHealthRollup,
     catalog: RwSignal<Vec<ResourceKind>>,
     selected_kind: RwSignal<Option<ResourceKind>>,
 ) -> impl IntoView {
-    let unknown = rollup
-        .total
-        .saturating_sub(rollup.ready.saturating_add(rollup.failing))
-        .saturating_sub(rollup.reconciling)
-        .saturating_sub(rollup.suspended);
-    let state = if rollup.failing > 0 {
+    let label = resource_label(&resource.kind);
+    let target = if resource.key.is_empty() {
+        resource.kind.clone()
+    } else {
+        resource.key.clone()
+    };
+    let rollup = resource.health;
+    let error = resource.error.unwrap_or_default();
+    let unreadable = !error.is_empty();
+    let state = if unreadable || rollup.failing > 0 {
         "controller-error"
     } else if rollup.reconciling > 0 {
         "controller-pending"
-    } else if rollup.suspended > 0 {
+    } else if rollup.suspended > 0 || rollup.warning > 0 || rollup.unknown > 0 {
         "controller-warn"
     } else {
         "controller-ok"
     };
     view! {
         <button type="button" class=format!("card controller-card {state}")
-            on:click=move |_| select_kind(catalog, selected_kind, &target_kind)>
+            title=error
+            on:click=move |_| select_kind(catalog, selected_kind, &target)>
             <div class="controller-status" aria-hidden="true"></div>
             <div class="controller-main">
                 <div class="card-heading">
@@ -464,13 +473,19 @@ fn rollup_card(
                 {(rollup.suspended > 0).then(|| view! {
                     <span class="warn">{rollup.suspended}" suspended"</span>
                 })}
+                {(rollup.warning > 0).then(|| view! {
+                    <span class="warn">{rollup.warning}" warning"</span>
+                })}
                 {(rollup.failing > 0).then(|| view! {
                     <span class="error">{rollup.failing}" failing"</span>
                 })}
-                {(unknown > 0).then(|| view! {
-                    <span class="unknown">{unknown}" status unknown"</span>
+                {(rollup.unknown > 0).then(|| view! {
+                    <span class="unknown">{rollup.unknown}" status unknown"</span>
                 })}
-                {(rollup.reconciling == 0 && rollup.suspended == 0 && rollup.failing == 0 && unknown == 0).then(|| view! {
+                {unreadable.then(|| view! {
+                    <span class="error">"unreadable"</span>
+                })}
+                {(rollup.reconciling == 0 && rollup.suspended == 0 && rollup.warning == 0 && rollup.failing == 0 && rollup.unknown == 0 && !unreadable).then(|| view! {
                     <span class="ok">"All reconciled"</span>
                 })}
             </div>

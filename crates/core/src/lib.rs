@@ -293,9 +293,7 @@ pub struct ResourceTreeNode {
     /// selection. `None` only when `key` is also `None` (kind not in the
     /// current catalog).
     pub category: Option<Category>,
-    /// Ready/Suspended/Error status dot. Only populated for Kustomization/
-    /// HelmRelease "owner" nodes — leaves intentionally carry `None` (no live
-    /// status fetched per-leaf, by design, to keep the tree cheap).
+    /// Status projected from the fetched object. Unresolved leaves carry `None`.
     pub status: Option<RowStatus>,
     /// How this node relates to its parent. The root has no relation.
     pub relation: Option<ResourceTreeRelation>,
@@ -724,7 +722,7 @@ pub struct AccessRow {
 /// Verbs checked by the access review, in display order.
 pub const ACCESS_REVIEW_VERBS: &[&str] = &["get", "list", "create", "patch", "delete"];
 
-/// Counts of resources by reconciliation state for a CRD family.
+/// Counts of resources by projected health state for one resource type.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HealthRollup {
     pub total: u32,
@@ -732,15 +730,23 @@ pub struct HealthRollup {
     #[serde(default)]
     pub reconciling: u32,
     pub suspended: u32,
+    #[serde(default)]
+    pub warning: u32,
     pub failing: u32,
     #[serde(default)]
-    pub with_status: u32,
+    pub unknown: u32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResourceHealthRollup {
+    /// Stable `group/version/kind` catalog key used to open the exact resource type.
+    #[serde(default)]
+    pub key: String,
     pub kind: String,
     pub health: HealthRollup,
+    /// List/RBAC failure for this resource type. Counts remain zero when unreadable.
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

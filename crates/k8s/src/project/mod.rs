@@ -33,7 +33,7 @@ use self::core::{
     storageclass_cells,
 };
 use self::eso::{cluster_external_secret_cells, eso_generic_cells, external_secret_cells};
-pub(crate) use self::flux::ready_message_cells;
+use self::flux::ready_message_cells;
 use self::gateway::{gateway_cells, gatewayclass_cells, httproute_cells, parent_route_cells};
 use self::pods::pod_cells;
 use self::rbac::rolebinding_cells;
@@ -532,6 +532,11 @@ fn enhancement_values(
             (vec![], vec![], status)
         }
     }
+}
+
+/// Classify one object through the same GVK dispatch used by resource-list rows.
+pub(crate) fn resource_status(group: &str, kind: &str, data: &Value, deleting: bool) -> RowStatus {
+    enhancement_values(group, kind, data, deleting, None, None).2
 }
 
 fn is_augmented_crd(group: &str) -> bool {

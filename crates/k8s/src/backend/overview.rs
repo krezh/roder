@@ -10,7 +10,7 @@ use roder_core::{
 };
 
 use crate::metrics::{node_usage, parse_cpu, parse_mem};
-use crate::project::ts_string;
+use crate::project::{resource_status, ts_string};
 
 use super::{api_err, Backend};
 use crate::client::K8sError;
@@ -190,67 +190,15 @@ impl Backend {
         Ok(events)
     }
 
-    /// Count reconciliation states for every kind in a CRD family.
-    /// Lists all matching kinds concurrently (instead of sequentially) so the
-    /// dashboard overview doesn't accumulate per-kind latency.
-    async fn rollup(
-        &self,
-        category: Category,
-        group: Option<&str>,
-        kind: Option<&str>,
-    ) -> HealthRollup {
+    async fn rollup(&self, entry: crate::discovery::CatalogEntry) -> ResourceHealthRollup {
         let client = self.client();
-        let catalog_store = self.shared.catalog();
-        let catalog = catalog_store.load();
-        let futs = catalog
-            .entries
-            .iter()
-            .filter(|entry| {
-                entry.kind.category == category
-                    && group.is_none_or(|group| entry.kind.group == group)
-                    && kind.is_none_or(|kind| entry.kind.kind == kind)
-            })
-            .map(|entry| {
-                let api: Api<DynamicObject> = Api::all_with(client.clone(), &entry.api_resource);
-                async move {
-                    let Ok(list) = api.list(&ListParams::default()).await else {
-                        return Vec::new();
-                    };
-                    list.items
-                }
-            });
-        let results = join_all(futs).await;
-        let mut rollup = HealthRollup::default();
-        for items in results {
-            for obj in items {
-                rollup.total += 1;
-                if obj
-                    .data
-                    .get("status")
-                    .and_then(|status| status.as_object())
-                    .is_some_and(|status| !status.is_empty())
-                {
-                    rollup.with_status += 1;
-                }
-                let suspended = obj
-                    .data
-                    .get("spec")
-                    .and_then(|s| s.get("suspend"))
-                    .and_then(|b| b.as_bool())
-                    .unwrap_or(false);
-                if suspended {
-                    rollup.suspended += 1;
-                    continue;
-                }
-                match reconciliation_state(&obj.data) {
-                    ReconciliationState::Ready => rollup.ready += 1,
-                    ReconciliationState::Reconciling => rollup.reconciling += 1,
-                    ReconciliationState::Failing => rollup.failing += 1,
-                    ReconciliationState::Unknown => {}
-                }
-            }
-        }
-        rollup
+        let api: Api<DynamicObject> = Api::all_with(client, &entry.api_resource);
+        let result = api
+            .list(&ListParams::default())
+            .await
+            .map(|list| list.items)
+            .map_err(|error| error.to_string());
+        summarize_resources(entry.kind, result)
     }
 
     async fn resource_rollups(
@@ -260,104 +208,155 @@ impl Backend {
     ) -> Vec<ResourceHealthRollup> {
         let catalog_store = self.shared.catalog();
         let catalog = catalog_store.load();
-        let mut kinds: Vec<String> = catalog
+        let entries = catalog
             .entries
             .iter()
             .filter(|entry| {
                 entry.kind.category == category
                     && group.is_none_or(|group| entry.kind.group == group)
             })
-            .map(|entry| entry.kind.kind.clone())
-            .collect();
-        kinds.sort();
-        kinds.dedup();
+            .cloned()
+            .collect::<Vec<_>>();
 
-        join_all(kinds.into_iter().map(|kind| {
-            let category = category.clone();
-            async move {
-                let health = self.rollup(category, group, Some(&kind)).await;
-                ResourceHealthRollup { kind, health }
+        join_all(entries.into_iter().map(|entry| self.rollup(entry)))
+            .await
+            .into_iter()
+            .filter(|resource| resource.health.total > 0 || resource.error.is_some())
+            .collect()
+    }
+}
+
+fn summarize_resources(
+    kind: roder_core::ResourceKind,
+    result: Result<Vec<DynamicObject>, String>,
+) -> ResourceHealthRollup {
+    let mut health = HealthRollup::default();
+    let error = match result {
+        Ok(objects) => {
+            for object in objects {
+                record_status(&mut health, &kind, &object);
             }
-        }))
-        .await
-        .into_iter()
-        .filter(|resource| resource.health.with_status > 0)
-        .collect()
+            None
+        }
+        Err(error) => Some(error),
+    };
+    ResourceHealthRollup {
+        key: kind.key,
+        kind: kind.kind,
+        health,
+        error,
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-enum ReconciliationState {
-    Ready,
-    Reconciling,
-    Failing,
-    Unknown,
-}
-
-fn reconciliation_state(data: &serde_json::Value) -> ReconciliationState {
-    if condition_is_true(data, "Stalled") {
-        return ReconciliationState::Failing;
+fn record_status(
+    rollup: &mut HealthRollup,
+    kind: &roder_core::ResourceKind,
+    object: &DynamicObject,
+) {
+    rollup.total += 1;
+    let suspended = object
+        .data
+        .pointer("/spec/suspend")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    if suspended {
+        rollup.suspended += 1;
+        return;
     }
-    if condition_is_true(data, "Reconciling") {
-        return ReconciliationState::Reconciling;
-    }
-    match ready_condition(data) {
-        Some(true) => ReconciliationState::Ready,
-        Some(false) => ReconciliationState::Failing,
-        None => ReconciliationState::Unknown,
-    }
-}
 
-fn condition_is_true(data: &serde_json::Value, condition_type: &str) -> bool {
-    data.get("status")
-        .and_then(|status| status.get("conditions"))
-        .and_then(|conditions| conditions.as_array())
-        .is_some_and(|conditions| {
-            conditions.iter().any(|condition| {
-                condition["type"] == condition_type && condition["status"] == "True"
-            })
-        })
-}
-
-fn ready_condition(data: &serde_json::Value) -> Option<bool> {
-    let conds = data.get("status")?.get("conditions")?.as_array()?;
-    let ready = conds.iter().find(|c| c["type"] == "Ready")?;
-    match ready["status"].as_str()? {
-        "True" => Some(true),
-        "False" => Some(false),
-        _ => None,
+    let status = resource_status(
+        &kind.group,
+        &kind.kind,
+        &object.data,
+        object.metadata.deletion_timestamp.is_some(),
+    );
+    match status {
+        roder_core::RowStatus::Ok | roder_core::RowStatus::Done => rollup.ready += 1,
+        roder_core::RowStatus::Pending => rollup.reconciling += 1,
+        roder_core::RowStatus::Warn => rollup.warning += 1,
+        roder_core::RowStatus::Error => rollup.failing += 1,
+        roder_core::RowStatus::Unknown => rollup.unknown += 1,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kube::api::ObjectMeta;
+    use kube::core::{ApiResource, GroupVersionKind};
+    use roder_core::{Category, ResourceKind, RowStatus};
+
+    fn resource_kind(group: &str, kind: &str) -> ResourceKind {
+        ResourceKind {
+            key: ResourceKind::make_key(group, "v1", kind),
+            group: group.into(),
+            version: "v1".into(),
+            kind: kind.into(),
+            plural: format!("{}s", kind.to_lowercase()),
+            namespaced: true,
+            category: Category::Custom(group.into()),
+        }
+    }
 
     #[test]
-    fn reconciling_is_not_classified_as_failed() {
-        let data = serde_json::json!({
+    fn rollup_uses_the_row_projector_status() {
+        let api_resource = ApiResource::from_gvk(&GroupVersionKind::gvk(
+            "kustomize.toolkit.fluxcd.io",
+            "v1",
+            "Kustomization",
+        ));
+        let mut object = DynamicObject::new("release", &api_resource);
+        object.data = serde_json::json!({
             "status": { "conditions": [
                 { "type": "Ready", "status": "False" },
                 { "type": "Reconciling", "status": "True" }
             ]}
         });
+        let kind = ResourceKind {
+            key: "kustomize.toolkit.fluxcd.io/v1/Kustomization".into(),
+            group: "kustomize.toolkit.fluxcd.io".into(),
+            version: "v1".into(),
+            kind: "Kustomization".into(),
+            plural: "kustomizations".into(),
+            namespaced: true,
+            category: Category::Flux,
+        };
+        let mut rollup = HealthRollup::default();
 
-        assert_eq!(
-            reconciliation_state(&data),
-            ReconciliationState::Reconciling
-        );
+        record_status(&mut rollup, &kind, &object);
+
+        assert_eq!(rollup.failing, 1);
+        assert_eq!(rollup.reconciling, 0);
     }
 
     #[test]
-    fn stalled_takes_precedence_over_reconciling() {
-        let data = serde_json::json!({
-            "status": { "conditions": [
-                { "type": "Ready", "status": "False" },
-                { "type": "Reconciling", "status": "True" },
-                { "type": "Stalled", "status": "True" }
-            ]}
-        });
+    fn rollup_records_unknown_instead_of_treating_it_as_healthy() {
+        let api_resource =
+            ApiResource::from_gvk(&GroupVersionKind::gvk("example.io", "v1", "Widget"));
+        let mut object = DynamicObject::new("widget", &api_resource);
+        object.metadata = ObjectMeta::default();
+        let kind = resource_kind("example.io", "Widget");
+        let mut rollup = HealthRollup::default();
 
-        assert_eq!(reconciliation_state(&data), ReconciliationState::Failing);
+        record_status(&mut rollup, &kind, &object);
+
+        assert_eq!(
+            resource_status("example.io", "Widget", &object.data, false),
+            RowStatus::Unknown
+        );
+        assert_eq!(rollup.unknown, 1);
+        assert_eq!(rollup.ready, 0);
+    }
+
+    #[test]
+    fn unreadable_rollup_keeps_its_canonical_resource_key_and_error() {
+        let rollup = summarize_resources(
+            resource_kind("example.io", "Widget"),
+            Err("403 Forbidden".into()),
+        );
+
+        assert_eq!(rollup.key, "example.io/v1/Widget");
+        assert_eq!(rollup.health.total, 0);
+        assert_eq!(rollup.error.as_deref(), Some("403 Forbidden"));
     }
 }

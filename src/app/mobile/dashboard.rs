@@ -1,5 +1,7 @@
 use leptos::prelude::*;
-use roder_core::{ClusterOverview, HealthRollup, NodeSummary, OverviewWarning, ResourceKind};
+use roder_core::{
+    ClusterOverview, NodeSummary, OverviewWarning, ResourceHealthRollup, ResourceKind,
+};
 
 use crate::app::state::{Catalog, DetailTarget, Tick};
 use crate::app::util::format::{
@@ -10,12 +12,12 @@ use crate::data;
 fn select_kind(
     catalog: RwSignal<Vec<ResourceKind>>,
     selected: RwSignal<Option<ResourceKind>>,
-    name: &str,
+    key_or_kind: &str,
 ) {
     if let Some(kind) = catalog
         .get_untracked()
         .into_iter()
-        .find(|kind| kind.kind == name)
+        .find(|kind| kind.key == key_or_kind || kind.kind == key_or_kind)
     {
         selected.set(Some(kind));
     }
@@ -99,9 +101,28 @@ fn mobile_dashboard_sections(
         .chain(&overview.tuppr_resources)
         .map(|item| item.health.suspended as usize)
         .sum();
-    let failing =
-        overview.pod_failed as usize + controller_failing + nodes.len().saturating_sub(ready);
-    let caution = overview.pod_pending as usize + controller_suspended + warnings.len();
+    let controller_warning: usize = overview
+        .flux_resources
+        .iter()
+        .chain(&overview.external_secret_resources)
+        .chain(&overview.kopiur_resources)
+        .chain(&overview.tuppr_resources)
+        .map(|item| (item.health.warning + item.health.unknown) as usize)
+        .sum();
+    let controller_unreadable = overview
+        .flux_resources
+        .iter()
+        .chain(&overview.external_secret_resources)
+        .chain(&overview.kopiur_resources)
+        .chain(&overview.tuppr_resources)
+        .filter(|item| item.error.is_some())
+        .count();
+    let failing = overview.pod_failed as usize
+        + controller_failing
+        + controller_unreadable
+        + nodes.len().saturating_sub(ready);
+    let caution =
+        overview.pod_pending as usize + controller_suspended + controller_warning + warnings.len();
     let (health, label, summary) = if failing > 0 {
         (
             "error",
@@ -176,36 +197,38 @@ fn mobile_usage_meter(label: &'static str, value: f64, available: bool) -> impl 
 
 fn mobile_controller_group(
     title: &'static str,
-    resources: Vec<roder_core::ResourceHealthRollup>,
+    resources: Vec<ResourceHealthRollup>,
     catalog: RwSignal<Vec<ResourceKind>>,
     selected: RwSignal<Option<ResourceKind>>,
 ) -> impl IntoView {
     (!resources.is_empty()).then(|| view! { <section class="mobile-dashboard-section mobile-controller-section"><header><div><small>"Controllers"</small><h2>{title}</h2></div></header><div class="mobile-controller-grid">
-        {resources.into_iter().map(|resource| mobile_rollup(resource.kind, resource.health, catalog, selected)).collect_view()}
+        {resources.into_iter().map(|resource| mobile_rollup(resource, catalog, selected)).collect_view()}
     </div></section> })
 }
 
 fn mobile_rollup(
-    kind: String,
-    health: HealthRollup,
+    resource: ResourceHealthRollup,
     catalog: RwSignal<Vec<ResourceKind>>,
     selected: RwSignal<Option<ResourceKind>>,
 ) -> impl IntoView {
-    let unknown = health
-        .total
-        .saturating_sub(health.ready + health.failing)
-        .saturating_sub(health.reconciling)
-        .saturating_sub(health.suspended);
-    let state = if health.failing > 0 {
+    let kind = resource.kind;
+    let target = if resource.key.is_empty() {
+        kind.clone()
+    } else {
+        resource.key
+    };
+    let health = resource.health;
+    let error = resource.error.unwrap_or_default();
+    let unreadable = !error.is_empty();
+    let state = if unreadable || health.failing > 0 {
         "error"
     } else if health.reconciling > 0 {
         "pending"
-    } else if health.suspended > 0 {
+    } else if health.suspended > 0 || health.warning > 0 || health.unknown > 0 {
         "warning"
     } else {
         "ok"
     };
-    let target = kind.clone();
     let label = {
         let label = camel_label(&kind);
         if let Some(stem) = label.strip_suffix("Policy") {
@@ -218,10 +241,11 @@ fn mobile_rollup(
             format!("{label}s")
         }
     };
-    view! { <button class=format!("mobile-controller-card {state}") on:click=move |_| select_kind(catalog, selected, &target)><i></i><span><strong>{label}</strong><b>{health.ready}" / "{health.total}</b><small>"ready"</small></span><em>
+    view! { <button class=format!("mobile-controller-card {state}") title=error on:click=move |_| select_kind(catalog, selected, &target)><i></i><span><strong>{label}</strong><b>{health.ready}" / "{health.total}</b><small>"ready"</small></span><em>
         {(health.reconciling > 0).then(|| view! { <span>{health.reconciling}" reconciling"</span> })}{(health.suspended > 0).then(|| view! { <span>{health.suspended}" suspended"</span> })}
-        {(health.failing > 0).then(|| view! { <span>{health.failing}" failing"</span> })}{(unknown > 0).then(|| view! { <span>{unknown}" unknown"</span> })}
-        {(health.reconciling == 0 && health.suspended == 0 && health.failing == 0 && unknown == 0).then(|| view! { <span>"All reconciled"</span> })}
+        {(health.warning > 0).then(|| view! { <span>{health.warning}" warning"</span> })}{(health.failing > 0).then(|| view! { <span>{health.failing}" failing"</span> })}
+        {(health.unknown > 0).then(|| view! { <span>{health.unknown}" unknown"</span> })}{unreadable.then(|| view! { <span>"unreadable"</span> })}
+        {(health.reconciling == 0 && health.suspended == 0 && health.warning == 0 && health.failing == 0 && health.unknown == 0 && !unreadable).then(|| view! { <span>"All reconciled"</span> })}
     </em></button> }
 }
 

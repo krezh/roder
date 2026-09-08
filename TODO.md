@@ -2,10 +2,6 @@
 
 ## Correctness Foundations
 
-- Centralize GVK-aware resource status calculation across lists, trees, dashboard rollups, and alert targets
-- Carry canonical resource keys in health rollups instead of selecting resources by Kind
-- Track unknown and unreadable resources in dashboard health instead of silently treating them as healthy
-- Surface per-kind list and RBAC failures in dashboard rollups
 - Map Warning and Normal Event types to meaningful row status
 - Detect pending LoadBalancer Services and Ingresses
 - Detect Endpoints and EndpointSlices without ready backends

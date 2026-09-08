@@ -3,6 +3,7 @@
 .direnv
 .devenv
 .envrc.local
+.jj
 result
 result-*
 docs

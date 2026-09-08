@@ -44,15 +44,23 @@
   --pending: #d9a441;
   --unknown: #7a7a7a;
   --pill-fg: #0c0c0d;
+  --scrollbar-thumb: color-mix(in srgb, var(--muted) 18%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--muted) 42%, transparent);
+  --scrollbar-thumb-active: color-mix(in srgb, var(--accent) 58%, transparent);
   color-scheme: dark light;
 }
 
 * {
   box-sizing: border-box;
-  // Chromium doesn't propagate these through inheritance despite the spec
-  // marking them inherited, so every element needs the rule directly.
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
+}
+
+// Keep Firefox's compact native scrollbar. In Chromium, these standard
+// properties override the more precise WebKit dimensions below.
+@supports (-moz-appearance: none) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+  }
 }
 
 input,
@@ -77,8 +85,8 @@ body {
 }
 
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 2px;
+  height: 2px;
 }
 
 ::-webkit-scrollbar-track {
@@ -86,12 +94,20 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 3px;
+  background: var(--scrollbar-thumb);
+  border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--muted);
+  background: var(--scrollbar-thumb-hover);
+}
+
+::-webkit-scrollbar-thumb:active {
+  background: var(--scrollbar-thumb-active);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 // 13px suits the desktop's dense grid, but reads as tiny on a phone held at

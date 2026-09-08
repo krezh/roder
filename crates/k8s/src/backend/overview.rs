@@ -264,12 +264,7 @@ fn record_status(
         return;
     }
 
-    let status = resource_status(
-        &kind.group,
-        &kind.kind,
-        &object.data,
-        object.metadata.deletion_timestamp.is_some(),
-    );
+    let status = resource_status(&kind.group, &kind.kind, object);
     match status {
         roder_core::RowStatus::Ok | roder_core::RowStatus::Done => rollup.ready += 1,
         roder_core::RowStatus::Pending => rollup.reconciling += 1,
@@ -341,7 +336,7 @@ mod tests {
         record_status(&mut rollup, &kind, &object);
 
         assert_eq!(
-            resource_status("example.io", "Widget", &object.data, false),
+            resource_status("example.io", "Widget", &object),
             RowStatus::Unknown
         );
         assert_eq!(rollup.unknown, 1);

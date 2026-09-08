@@ -5,14 +5,9 @@
 - Map Warning and Normal Event types to meaningful row status
 - Detect pending LoadBalancer Services and Ingresses
 - Detect Endpoints and EndpointSlices without ready backends
-- Treat intentionally scaled-to-zero workloads as healthy
-- Evaluate workload rollout failure, observed generation, revision convergence, and availability conditions
 - Derive HPA health from AbleToScale, ScalingActive, and ScalingLimited conditions
 - Derive PDB health from conditions and desired/current healthy counts
 - Treat Lost PVCs as errors
-- Use Done for successfully completed resources where applicable
-- Expand generic status support for common healthy, progressing, degraded, paused, completed, and failed phases
-- Ignore stale conditions whose observed generation does not match the resource generation
 
 ## Actions And Access
 
@@ -39,7 +34,6 @@
 - Add CloudNativePG cluster, archival, and backup freshness rollups
 - Show backup age as an RPO signal
 - Add Prometheus and Alertmanager readiness rollups
-- Ensure unknown resources cannot render with an OK card style
 
 ## Resource Relationships
 

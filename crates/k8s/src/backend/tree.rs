@@ -144,8 +144,7 @@ impl Backend {
             let status = Some(crate::project::resource_status(
                 &resource.group,
                 &resource.kind,
-                &data,
-                object.metadata.deletion_timestamp.is_some(),
+                &object,
             ));
             let mut errors = Vec::new();
             let mut relationships = Vec::new();

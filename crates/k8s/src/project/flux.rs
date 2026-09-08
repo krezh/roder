@@ -3,18 +3,13 @@
 use roder_core::RowStatus;
 use serde_json::Value;
 
-use super::status::{cond_to_status, condition_status, ready_label, ready_reason};
+use super::status::{
+    cond_to_status, condition_message, condition_status, ready_label, ready_reason,
+};
 
 pub(crate) fn ready_message_cells(data: &Value) -> (Vec<String>, RowStatus) {
     let ready = condition_status(data, "Ready");
-    let message = data
-        .get("status")
-        .and_then(|s| s.get("conditions"))
-        .and_then(|c| c.as_array())
-        .and_then(|arr| arr.iter().find(|c| c["type"] == "Ready"))
-        .and_then(|c| c["message"].as_str())
-        .unwrap_or_default()
-        .to_string();
+    let message = condition_message(data, "Ready").unwrap_or_default();
     let suspended = data
         .get("spec")
         .and_then(|s| s.get("suspend"))

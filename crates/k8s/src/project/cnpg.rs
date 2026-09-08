@@ -120,7 +120,7 @@ fn cluster_phase_status(phase: &str, ready: i64, instances: i64) -> RowStatus {
 
 fn backup_phase_status(phase: &str) -> RowStatus {
     match phase.to_ascii_lowercase().as_str() {
-        "completed" | "succeeded" => RowStatus::Ok,
+        "completed" | "succeeded" => RowStatus::Done,
         "pending" | "running" | "started" | "finalizing" => RowStatus::Pending,
         "failed" | "error" | "walarchivingfailing" | "invalid backup definition" => {
             RowStatus::Error
@@ -188,6 +188,13 @@ mod tests {
         assert_eq!(cells[0], "app");
         assert_eq!(cells[2], "failed");
         assert_eq!(status, RowStatus::Error);
+    }
+
+    #[test]
+    fn completed_backup_is_done() {
+        let data = json!({"status": {"phase": "completed"}});
+
+        assert_eq!(backup_cells(&data).1, RowStatus::Done);
     }
 
     #[test]

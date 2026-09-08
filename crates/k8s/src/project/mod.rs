@@ -40,7 +40,8 @@ use self::rbac::rolebinding_cells;
 use self::rook::{ceph_cluster_cells, ceph_resource_cells, object_bucket_claim_cells};
 use self::status::generic_status;
 use self::workloads::{
-    cronjob_cells, daemonset_cells, job_cells, replicaset_cells, workload_cells,
+    cronjob_cells, daemonset_cells, deployment_cells, job_cells, replicaset_cells,
+    statefulset_cells,
 };
 
 /// One source of truth per kind: the extra column headers *and* the projector that
@@ -83,9 +84,8 @@ fn explicit_view(group: &str, kind: &str) -> Option<KindView> {
             ],
             Project::Pod
         ),
-        ("apps", "Deployment") | ("apps", "StatefulSet") => {
-            view!(&["Ready", "Available"], Plain(workload_cells))
-        }
+        ("apps", "Deployment") => view!(&["Ready", "Available"], Plain(deployment_cells)),
+        ("apps", "StatefulSet") => view!(&["Ready", "Available"], Plain(statefulset_cells)),
         ("apps", "DaemonSet") => view!(&["Ready", "Available"], Plain(daemonset_cells)),
         ("apps", "ReplicaSet") => view!(&["Ready"], Plain(replicaset_cells)),
         ("batch", "Job") => view!(&["Completions", "Status"], Plain(job_cells)),
@@ -362,8 +362,9 @@ pub(crate) fn project_table_row(
     }
 
     let deleting = object.metadata.deletion_timestamp.is_some();
+    let projection_data = serde_json::to_value(&object).unwrap_or_else(|_| object.data.clone());
     let (enhancement_cells, enhancement_trends, mut status) =
-        enhancement_values(group, kind, &object.data, deleting, usage, pvc_usage);
+        enhancement_values(group, kind, &projection_data, deleting, usage, pvc_usage);
     if deleting {
         status = RowStatus::Warn;
     }
@@ -442,8 +443,9 @@ pub(crate) fn reproject_table_row(
     pvc_usage: Option<PvcUsage>,
 ) -> ResourceRow {
     let deleting = object.metadata.deletion_timestamp.is_some();
+    let projection_data = serde_json::to_value(object).unwrap_or_else(|_| object.data.clone());
     let (enhancement_cells, enhancement_trends, mut status) =
-        enhancement_values(group, kind, &object.data, deleting, usage, pvc_usage);
+        enhancement_values(group, kind, &projection_data, deleting, usage, pvc_usage);
     if deleting {
         status = RowStatus::Warn;
     }
@@ -535,8 +537,17 @@ fn enhancement_values(
 }
 
 /// Classify one object through the same GVK dispatch used by resource-list rows.
-pub(crate) fn resource_status(group: &str, kind: &str, data: &Value, deleting: bool) -> RowStatus {
-    enhancement_values(group, kind, data, deleting, None, None).2
+pub(crate) fn resource_status(group: &str, kind: &str, object: &DynamicObject) -> RowStatus {
+    let data = serde_json::to_value(object).unwrap_or_else(|_| object.data.clone());
+    enhancement_values(
+        group,
+        kind,
+        &data,
+        object.metadata.deletion_timestamp.is_some(),
+        None,
+        None,
+    )
+    .2
 }
 
 fn is_augmented_crd(group: &str) -> bool {
@@ -732,6 +743,32 @@ mod tests {
             .unwrap()
             .0;
         assert!(row.cells[3].starts_with("2\x1f"), "{:?}", row.cells[3]);
+    }
+
+    #[test]
+    fn list_projection_preserves_generation_for_status() {
+        let definitions = [column("Name", 0), column("Ready", 0), column("Age", 0)];
+        let layout = table_layout("apps", "Deployment", false, &definitions);
+        let table_row = TableRow {
+            cells: vec![json!("api"), json!("3/3"), json!("1h")],
+            object: Some(
+                serde_json::from_value(json!({
+                    "apiVersion": "apps/v1",
+                    "kind": "Deployment",
+                    "metadata": {"name": "api", "generation": 3, "uid": "uid-api"},
+                    "spec": {"replicas": 3},
+                    "status": {"observedGeneration": 2, "replicas": 3, "updatedReplicas": 3, "readyReplicas": 3, "availableReplicas": 3}
+                }))
+                .unwrap(),
+            ),
+            ..Default::default()
+        };
+
+        let row = project_table_row("apps", "Deployment", &layout, &table_row, None, None)
+            .unwrap()
+            .0;
+
+        assert_eq!(row.status, RowStatus::Pending);
     }
 
     #[test]

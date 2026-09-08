@@ -29,18 +29,26 @@
       automergeType: "pr",
       ignoreTests: false,
     },
-    // {
-    //   matchPackageNames: [
-    //     'wasm-bindgen',
-    //     'wasm-bindgen-futures',
-    //     'js-sys',
-    //     'web-sys',
-    //   ],
-    //   groupName: 'wasm-bindgen',
-    //   automerge: true,
-    //   automergeType: 'pr',
-    //   ignoreTests: false,
-    // },
+    {
+      // The wasm-bindgen crates hard-pin each other with `=` (e.g.
+      // wasm-bindgen-futures 0.4.77 requires js-sys "=0.3.104"), so cargo can
+      // only move them in lockstep. Cargo's default rangeStrategy
+      // ("update-lockfile") makes Renovate bump them one at a time with
+      // `cargo update --precise`, which cargo rejects — leaving an empty
+      // commit and no PR. "bump" edits Cargo.toml, which switches the lock
+      // update to a whole-workspace `cargo update`.
+      matchPackageNames: [
+        "wasm-bindgen",
+        "wasm-bindgen-futures",
+        "js-sys",
+        "web-sys",
+      ],
+      groupName: "wasm-bindgen",
+      rangeStrategy: "bump",
+      automerge: true,
+      automergeType: "pr",
+      ignoreTests: false,
+    },
     {
       matchPackageNames: ["kube", "k8s-openapi"],
       groupName: "kube",

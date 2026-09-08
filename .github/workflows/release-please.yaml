@@ -3,9 +3,6 @@ name: Release Please
 on:
   workflow_dispatch:
   push:
-    paths:
-      - "**"
-      - "!.github/**"
     branches:
       - main
 

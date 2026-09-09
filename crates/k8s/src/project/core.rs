@@ -77,7 +77,13 @@ pub(crate) fn configmap_cells(data: &Value) -> (Vec<String>, RowStatus) {
 }
 
 pub(crate) fn endpoints_cells(data: &Value) -> (Vec<String>, RowStatus) {
-    (vec![endpoints_summary(data)], RowStatus::Ok)
+    let summary = endpoints_summary(data);
+    let status = if summary.is_empty() {
+        RowStatus::Error
+    } else {
+        RowStatus::Ok
+    };
+    (vec![summary], status)
 }
 
 pub(crate) fn service_cells(data: &Value) -> (Vec<String>, RowStatus) {
@@ -163,9 +169,21 @@ pub(crate) fn storageclass_cells(data: &Value) -> (Vec<String>, RowStatus) {
 
 pub(crate) fn endpointslice_cells(data: &Value) -> (Vec<String>, RowStatus) {
     let addr_type = str_at(data, &["addressType"]).unwrap_or_default();
-    let endpoints = data
-        .get("endpoints")
-        .and_then(|e| e.as_array())
+    let endpoint_values = data.get("endpoints").and_then(|e| e.as_array());
+    let has_ready_endpoint = endpoint_values.is_some_and(|endpoints| {
+        endpoints.iter().any(|endpoint| {
+            let has_address = endpoint
+                .get("addresses")
+                .and_then(Value::as_array)
+                .is_some_and(|addresses| !addresses.is_empty());
+            let ready = endpoint
+                .pointer("/conditions/ready")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            has_address && ready
+        })
+    });
+    let endpoints = endpoint_values
         .map(|a| {
             a.iter()
                 .flat_map(|e| {
@@ -194,7 +212,12 @@ pub(crate) fn endpointslice_cells(data: &Value) -> (Vec<String>, RowStatus) {
                 .join("\n")
         })
         .unwrap_or_default();
-    (vec![addr_type, endpoints, ports], RowStatus::Ok)
+    let status = if has_ready_endpoint {
+        RowStatus::Ok
+    } else {
+        RowStatus::Error
+    };
+    (vec![addr_type, endpoints, ports], status)
 }
 
 pub(crate) fn ingress_cells(data: &Value) -> (Vec<String>, RowStatus) {
@@ -272,4 +295,62 @@ pub(crate) fn pdb_cells(data: &Value) -> (Vec<String>, RowStatus) {
         RowStatus::Ok
     };
     (vec![min, max, allowed.to_string()], st)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn endpoints_require_a_ready_address() {
+        let cases = [
+            (json!({}), RowStatus::Error),
+            (
+                json!({"subsets": [{"notReadyAddresses": [{"ip": "10.0.0.1"}]}]}),
+                RowStatus::Error,
+            ),
+            (
+                json!({"subsets": [{"addresses": [{"ip": "10.0.0.1"}]}]}),
+                RowStatus::Ok,
+            ),
+        ];
+
+        for (data, expected) in cases {
+            assert_eq!(endpoints_cells(&data).1, expected, "{data}");
+        }
+    }
+
+    #[test]
+    fn endpoint_slices_follow_ready_condition_semantics() {
+        let cases = [
+            (json!({}), RowStatus::Error),
+            (
+                json!({"endpoints": [{
+                    "addresses": ["10.0.0.1"],
+                    "conditions": {"ready": false}
+                }]}),
+                RowStatus::Error,
+            ),
+            (
+                json!({"endpoints": [{"conditions": {"ready": true}}]}),
+                RowStatus::Error,
+            ),
+            (
+                json!({"endpoints": [{"addresses": ["10.0.0.1"]}]}),
+                RowStatus::Ok,
+            ),
+            (
+                json!({"endpoints": [{
+                    "addresses": ["10.0.0.1"],
+                    "conditions": {"ready": true}
+                }]}),
+                RowStatus::Ok,
+            ),
+        ];
+
+        for (data, expected) in cases {
+            assert_eq!(endpointslice_cells(&data).1, expected, "{data}");
+        }
+    }
 }

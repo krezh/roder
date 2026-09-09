@@ -4,7 +4,6 @@
 
 - Map Warning and Normal Event types to meaningful row status
 - Detect pending LoadBalancer Services and Ingresses
-- Detect Endpoints and EndpointSlices without ready backends
 - Derive HPA health from AbleToScale, ScalingActive, and ScalingLimited conditions
 - Derive PDB health from conditions and desired/current healthy counts
 - Treat Lost PVCs as errors

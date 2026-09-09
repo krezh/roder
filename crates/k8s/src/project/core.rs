@@ -80,6 +80,12 @@ pub(crate) fn configmap_cells(data: &Value) -> (Vec<String>, RowStatus) {
 }
 
 pub(crate) fn event_cells(data: &Value) -> (Vec<String>, RowStatus) {
+    let last_seen = str_at(data, &["eventTime"])
+        .or_else(|| str_at(data, &["series", "lastObservedTime"]))
+        .or_else(|| str_at(data, &["lastTimestamp"]))
+        .or_else(|| str_at(data, &["firstTimestamp"]))
+        .or_else(|| str_at(data, &["metadata", "creationTimestamp"]))
+        .unwrap_or_default();
     let type_ = str_at(data, &["type"]).unwrap_or_default();
     let reason = str_at(data, &["reason"]).unwrap_or_default();
     let kind = str_at(data, &["involvedObject", "kind"]).unwrap_or_default();
@@ -95,7 +101,7 @@ pub(crate) fn event_cells(data: &Value) -> (Vec<String>, RowStatus) {
         "Warning" => RowStatus::Warn,
         _ => RowStatus::Unknown,
     };
-    (vec![type_, reason, object, message], status)
+    (vec![last_seen, type_, reason, object, message], status)
 }
 
 pub(crate) fn endpoints_cells(data: &Value) -> (Vec<String>, RowStatus) {
@@ -387,6 +393,15 @@ mod tests {
         ] {
             assert_eq!(event_cells(&json!({"type": type_})).1, expected, "{type_}");
         }
+    }
+
+    #[test]
+    fn event_last_seen_prefers_the_latest_observation() {
+        let (cells, _) = event_cells(&json!({
+            "eventTime": "2026-09-10T10:00:00Z",
+            "lastTimestamp": "2026-09-10T09:00:00Z"
+        }));
+        assert_eq!(cells[0], "2026-09-10T10:00:00Z");
     }
 
     #[test]

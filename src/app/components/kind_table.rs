@@ -129,12 +129,24 @@ pub(crate) fn KindTable(
         })
     });
 
-    let window = table_window(t, shown_uids);
+    let virtual_window = table_window(t, shown_uids);
+    let window = Memo::new(move |_| {
+        if is_events {
+            (0, shown_uids.with(|uids| uids.len()))
+        } else {
+            virtual_window.get()
+        }
+    });
 
     // Reflow when a relist publishes a changed Table schema.
     let namespaced = kind.namespaced;
     let key = kind.key.clone();
     let title = kind.kind.clone();
+    let view_title = if is_events {
+        "Events".to_string()
+    } else {
+        title.clone()
+    };
     let is_pod_kind = kind.group.is_empty() && kind.kind == "Pod";
     let node_col = Memo::new(move |_| columns.get().iter().position(|c| c == "Node"));
 
@@ -354,12 +366,24 @@ pub(crate) fn KindTable(
     // fit `.table-wrap` — see `table_column_truncation` for the mechanism.
     let truncate_col = table_column_truncation(table_ref, sizer, columns);
 
-    // Grid track count follows the live column count, so the grid reflows when
-    // columns change. The single widest generic column may be capped to a fixed
-    // pixel width (`truncate_col`) so it truncates with an ellipsis instead of
-    // blowing the table out past its container — every other track keeps its
-    // natural `max-content` size.
+    // Grid track count follows the live column count. Events use a stable layout
+    // so long object names cannot squeeze the message out of view.
     let tmpl = move || {
+        if is_events {
+            let tracks = sizer.with(|values| {
+                values
+                    .iter()
+                    .take(5)
+                    .enumerate()
+                    .map(|(i, value)| {
+                        let extra = if i == 2 { 36.0 } else { 24.0 };
+                        format!("{:.0}px", text_width(value) + extra)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            });
+            return format!("--event-cols:{tracks} minmax(30rem,1fr);");
+        }
         let n = columns.with(|c| c.len());
         let cap = truncate_col.get();
         let tracks: String = (0..n)
@@ -394,9 +418,9 @@ pub(crate) fn KindTable(
     let sel_sv = StoredValue::new(selector);
 
     view! {
-        <div class="resource-view">
+        <div class="resource-view" class:events-view=is_events>
             <div class="view-head">
-                <h2 class="view-title">{title.clone()}</h2>
+                <h2 class="view-title">{view_title}</h2>
                 {if let Some(nf) = ns_filter.filter(|_| namespaced) {
                     let nl = ns_list.unwrap();
                     let select_namespace = Callback::new(move |value: String| {
@@ -474,7 +498,10 @@ pub(crate) fn KindTable(
                         </div>
                     }
                 })}
-                <span class="count">{move || format!("{} items", shown_uids.with(|v| v.len()))}</span>
+                <span class="count">{move || {
+                    let count = shown_uids.with(|v| v.len());
+                    if is_events { format!("{count} events") } else { format!("{count} items") }
+                }}</span>
                 {on_close.map(|cb| view! {
                     <button class="view-close" on:click=move |_| cb.run(())>"×"</button>
                 })}
@@ -490,7 +517,7 @@ pub(crate) fn KindTable(
                     on:click=move |_| status_filter.update(|f| *f = if *f == Some(RowStatus::Ok) { None } else { Some(RowStatus::Ok) })
                 >
                     <span class="strip-marker ok" aria-hidden="true"></span>
-                    <span class="strip-lbl">"OK"</span>
+                    <span class="strip-lbl">{if is_events { "Normal" } else { "OK" }}</span>
                     <span class="strip-val ok">{move || status_counts.get().1[0]}</span>
                     <span class="strip-share ok" aria-hidden="true" style=move || {
                         let (total, counts) = status_counts.get();
@@ -516,7 +543,7 @@ pub(crate) fn KindTable(
                     on:click=move |_| status_filter.update(|f| *f = if *f == Some(RowStatus::Warn) { None } else { Some(RowStatus::Warn) })
                 >
                     <span class="strip-marker warn" aria-hidden="true"></span>
-                    <span class="strip-lbl">"Warn"</span>
+                    <span class="strip-lbl">{if is_events { "Warnings" } else { "Warn" }}</span>
                     <span class="strip-val warn">{move || status_counts.get().1[2]}</span>
                     <span class="strip-share warn" aria-hidden="true" style=move || {
                         let (total, counts) = status_counts.get();
@@ -611,7 +638,7 @@ pub(crate) fn KindTable(
                 </div>
             </div>
             <div class="table-wrap" node_ref=table_ref>
-                <div class="grid-table" style=tmpl class:selecting=move || !selected.get().is_empty()>
+                <div class="grid-table" class:event-table=is_events style=tmpl class:selecting=move || !selected.get().is_empty()>
                     {header}
                     <div class="grid-row sizer" aria-hidden="true">
                         {move || sizer.get().into_iter().map(|s| view! { <div class="cell">{s}</div> }).collect_view()}
@@ -714,12 +741,26 @@ pub(crate) fn KindTable(
                                             }.into_any()
                                         } else if column == "Namespace" {
                                             view! { <FlashTd value=val class="cell-ns" flash=flash /> }.into_any()
-                                        } else if column == "Age" {
+                                        } else if column == "Age" || (is_events && column == "Last Seen") {
                                             view! {
-                                                <div class="cell cell-age"><div class="cw"><div class="cwi">
-                                                    {move || { tick.get(); data::humanize_cell(&val()) }}
-                                                </div></div></div>
+                                                <FlashTd value=val class="cell-age" no_flash=true />
                                             }.into_any()
+                                        } else if is_events && column == "Type" {
+                                            view! {
+                                                <div class="cell cell-event-type" class:flash=move || flash.get()>
+                                                    <div class="cw"><div class="cwi"><span
+                                                        class:event-type-warning=move || val().eq_ignore_ascii_case("warning")
+                                                        class:event-type-normal=move || !val().eq_ignore_ascii_case("warning")>
+                                                        {val}
+                                                    </span></div></div>
+                                                </div>
+                                            }.into_any()
+                                        } else if is_events && column == "Reason" {
+                                            view! { <FlashTd value=val class="cell-event-reason" flash=flash /> }.into_any()
+                                        } else if is_events && column == "Object" {
+                                            view! { <FlashTd value=val class="cell-event-object" flash=flash /> }.into_any()
+                                        } else if is_events && column == "Message" {
+                                            view! { <FlashTd value=val class="cell-event-message" flash=flash /> }.into_any()
                                         } else if bool_cols.with_untracked(|v| v.contains(&i)) {
                                             view! { <FlashTd value=val no_flash=true
                                                 color=Signal::derive(move || match val().as_str() {

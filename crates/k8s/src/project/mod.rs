@@ -205,7 +205,10 @@ fn explicit_view(group: &str, kind: &str) -> Option<KindView> {
         ),
         ("", "Secret") => view!(&["Type", "Data"], Plain(secret_cells)),
         ("", "ConfigMap") => view!(&["Data"], Plain(configmap_cells)),
-        ("", "Event") => view!(&["Type", "Reason", "Object", "Message"], Plain(event_cells)),
+        ("", "Event") => view!(
+            &["Last Seen", "Type", "Reason", "Object", "Message"],
+            Plain(event_cells)
+        ),
         ("", "Endpoints") => view!(&["Endpoints"], Plain(endpoints_cells)),
         ("discovery.k8s.io", "EndpointSlice") => {
             view!(
@@ -489,6 +492,9 @@ fn enhancement_headers(group: &str, kind: &str) -> &'static [&'static str] {
             "Restarts", "CPU", "%CPU/R", "%CPU/L", "MEM", "%MEM/R", "%MEM/L", "IP", "Node",
         ],
         ("", "PersistentVolumeClaim") => &["Usage", "Mount"],
+        ("", "Event") => explicit_view(group, kind)
+            .map(|view| view.headers)
+            .unwrap_or(&[]),
         _ if is_augmented_crd(group) => explicit_view(group, kind)
             .map(|view| view.headers)
             .unwrap_or(&[]),
@@ -512,6 +518,10 @@ fn enhancement_values(
         ("", "PersistentVolumeClaim") => {
             let (cells, status) = pvc_cells(data, pvc_usage);
             (vec![cells[2].clone(), cells[3].clone()], vec![], status)
+        }
+        ("", "Event") => {
+            let (cells, status) = event_cells(data);
+            (cells, vec![], status)
         }
         _ if is_augmented_crd(group) => match explicit_view(group, kind) {
             Some(view) => match view.project {
@@ -768,7 +778,11 @@ mod tests {
             ),
             ("", "Secret", &["Type", "Data"]),
             ("", "ConfigMap", &["Data"]),
-            ("", "Event", &["Type", "Reason", "Object", "Message"]),
+            (
+                "",
+                "Event",
+                &["Last Seen", "Type", "Reason", "Object", "Message"],
+            ),
             ("", "Endpoints", &["Endpoints"]),
             (
                 "discovery.k8s.io",

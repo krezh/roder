@@ -5,7 +5,8 @@ use k8s_openapi::api::authorization::v1::{
 };
 use kube::api::{Api, PostParams};
 use roder_core::{
-    AccessRow, ActionPermissions, DrainOptions, ResourceAction, ResourceKind, ACCESS_REVIEW_VERBS,
+    AccessRow, ActionPermissions, DrainOptions, ResourceAction, ResourceKind,
+    ACCESS_REVIEW_OPERATIONS,
 };
 
 use super::Backend;
@@ -258,15 +259,52 @@ impl Backend {
     /// its cache, so re-opening the review shortly after is cheap.
     pub async fn access_review(&self, ns: Option<&str>) -> Vec<AccessRow> {
         let futs = self.kinds().into_iter().map(|k| async move {
-            let mut verbs = Vec::with_capacity(ACCESS_REVIEW_VERBS.len());
-            for verb in ACCESS_REVIEW_VERBS {
-                verbs.push((verb.to_string(), self.can(verb, &k.key, ns).await));
+            let capabilities = k.capabilities();
+            let mut operations = Vec::with_capacity(ACCESS_REVIEW_OPERATIONS.len());
+            for verb in ["get", "list", "watch", "create", "patch", "delete"] {
+                operations.push((verb.to_string(), Some(self.can(verb, &k.key, ns).await)));
             }
+            operations.push((
+                "status".to_string(),
+                Some(self.can_subresource("update", &k.key, ns, "status").await),
+            ));
+            for (label, action) in [
+                ("logs", ResourceAction::Logs),
+                ("exec", ResourceAction::Exec),
+                ("evict", ResourceAction::Evict),
+            ] {
+                operations.push((
+                    label.to_string(),
+                    if capabilities.supports(action) {
+                        Some(self.can_action(action, &k.key, ns, None, None).await)
+                    } else {
+                        None
+                    },
+                ));
+            }
+            let dependent_actions = [
+                ResourceAction::Drain,
+                ResourceAction::CronJobTrigger,
+                ResourceAction::JobRerun,
+                ResourceAction::KopiurSnapshotNow,
+            ];
+            let mut applicable = false;
+            let mut dependencies_allowed = true;
+            for action in dependent_actions {
+                if capabilities.supports(action) {
+                    applicable = true;
+                    dependencies_allowed &= self.can_action(action, &k.key, ns, None, None).await;
+                }
+            }
+            operations.push((
+                "deps".to_string(),
+                applicable.then_some(dependencies_allowed),
+            ));
             AccessRow {
                 kind: k.kind,
                 group: k.group,
                 namespaced: k.namespaced,
-                verbs,
+                operations,
             }
         });
         let mut rows = futures::future::join_all(futs).await;

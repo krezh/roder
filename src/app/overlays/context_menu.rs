@@ -8,12 +8,13 @@ use crate::app::events::{fire_action, fire_action_with};
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::overlays::delete::{ask_delete, delete_extra, DeleteRequest};
 use crate::app::overlays::toast::{show_toast, show_toast_detail, Toast, ToastKind};
+use crate::app::resource_actions::AvailableActions;
 use crate::app::state::{
     open_logs, Catalog, CtxMenu, DebugImage, DetailTarget, DrainOpen, DrainTarget, ExecOpen,
     ExecTarget, FileBrowserOpen, LogPods, LogTarget, TableRows, TableSelected, TableTargets,
     TalosFeatures, TreeOpen,
 };
-use crate::app::table_logic::{node_is_control_plane, resolve_current_action_targets, targets_all};
+use crate::app::table_logic::{node_is_control_plane, resolve_current_action_targets};
 use crate::app::util::clipboard::copy_to_clipboard;
 use crate::app::util::format::parse_key;
 use crate::app::util::predicate::KindKind;
@@ -193,20 +194,21 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                     .get()
                     .is_some_and(|permissions| permissions.allows_all(action))
             };
-            let is_pod = targets_all(&targets, |kind| kind.is_pod());
-            let is_workload = targets_all(&targets, |kind| kind.is_workload());
-            let is_scalable = targets_all(&targets, |kind| kind.is_scalable());
-            let can_flux_reconcile = targets_all(&targets, |kind| kind.supports(ResourceAction::FluxReconcile));
-            let can_flux_suspend = targets_all(&targets, |kind| kind.supports(ResourceAction::FluxSuspend));
+            let available = AvailableActions::for_targets(&targets);
+            let is_pod = available.supports(ResourceAction::Exec);
+            let is_workload = available.supports(ResourceAction::Restart);
+            let is_scalable = available.supports(ResourceAction::Scale);
+            let can_flux_reconcile = available.supports(ResourceAction::FluxReconcile);
+            let can_flux_suspend = available.supports(ResourceAction::FluxSuspend);
             let is_flux = can_flux_reconcile || can_flux_suspend;
-            let is_helmrelease = targets_all(&targets, |kind| kind.is_helmrelease());
-            let has_source_ref = targets_all(&targets, |kind| kind.has_source_ref());
-            let is_eso = targets_all(&targets, |kind| kind.is_eso());
-            let is_certificate = targets_all(&targets, |kind| kind.is_certificate());
-            let is_cronjob = targets_all(&targets, |kind| kind.is_cronjob());
-            let is_job = targets_all(&targets, |kind| kind.is_job());
-            let is_kopiur_snapshot_policy = targets_all(&targets, |kind| kind.is_kopiur_snapshot_policy());
-            let is_node = targets_all(&targets, |kind| kind.is_node());
+            let is_helmrelease = available.supports(ResourceAction::FluxForce);
+            let has_source_ref = available.supports(ResourceAction::FluxReconcileWithSource);
+            let is_eso = available.supports(ResourceAction::ExternalSecretsRefresh);
+            let is_certificate = available.supports(ResourceAction::CertificateRenew);
+            let is_cronjob = available.supports(ResourceAction::CronJobTrigger);
+            let is_job = available.supports(ResourceAction::JobRerun);
+            let is_kopiur_snapshot_policy = available.supports(ResourceAction::KopiurSnapshotNow);
+            let is_node = available.supports(ResourceAction::Cordon);
             let talos_actions = talos_features.get().actions;
             let suspend_state: Option<bool> = rows_opt.and_then(|rows| {
                 rows.with_untracked(|rm| {
@@ -248,7 +250,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
 
             let open = { let t = m.target.clone(); move |_| { detail.set(Some(t.clone())); do_close(); } };
             let open_tree = { let t = m.target.clone(); move |_| { tree_open.set(Some(t.clone())); do_close(); } };
-            let has_logs = targets_all(&targets, |kind| kind.has_logs());
+            let has_logs = available.supports(ResourceAction::Logs);
             let logs = {
                 let ts = targets.clone();
                 move |_| {

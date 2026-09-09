@@ -8,6 +8,7 @@ use crate::app::controllers::detail::{
 };
 use crate::app::jobs::CronJobJobs;
 use crate::app::log_stream::{extract_timestamp, use_log_stream};
+use crate::app::resource_actions::AvailableActions;
 use crate::app::state::{
     DetailTarget, DrainOpen, DrainTarget, ExecOpen, ExecTarget, TalosFeatures,
 };
@@ -17,7 +18,6 @@ use crate::app::util::json::{
     conditions, container_envs, container_images, data_entries, json_map, json_str, owner_refs,
     rbac_rules, section_scalars, selector_from, status_scalars,
 };
-use crate::app::util::predicate::KindKind;
 use crate::app::util::yaml_hl;
 use crate::data;
 
@@ -64,21 +64,21 @@ pub(crate) fn MobileRowDetail(
         }
     });
 
-    let (group, version, kind) = parse_key(&target.key);
-    let kind_kind = KindKind::new(&group, &version, &kind);
-    let is_workload = kind_kind.is_workload();
-    let is_scalable = kind_kind.is_scalable();
-    let is_flux = kind_kind.supports(ResourceAction::FluxReconcile)
-        || kind_kind.supports(ResourceAction::FluxSuspend);
-    let is_helmrelease = kind_kind.is_helmrelease();
-    let has_source_ref = kind_kind.has_source_ref();
-    let is_eso = kind_kind.is_eso();
-    let is_certificate = kind_kind.is_certificate();
-    let is_pod = kind_kind.is_pod();
-    let is_node = kind_kind.is_node();
-    let is_job = kind_kind.is_job();
-    let is_cronjob = kind_kind.is_cronjob();
-    let is_snapshot_policy = kind_kind.is_kopiur_snapshot_policy();
+    let (_, _, kind) = parse_key(&target.key);
+    let available = AvailableActions::for_targets(std::slice::from_ref(&target));
+    let is_workload = available.supports(ResourceAction::Restart);
+    let is_scalable = available.supports(ResourceAction::Scale);
+    let is_flux = available.supports(ResourceAction::FluxReconcile)
+        || available.supports(ResourceAction::FluxSuspend);
+    let is_helmrelease = available.supports(ResourceAction::FluxForce);
+    let has_source_ref = available.supports(ResourceAction::FluxReconcileWithSource);
+    let is_eso = available.supports(ResourceAction::ExternalSecretsRefresh);
+    let is_certificate = available.supports(ResourceAction::CertificateRenew);
+    let is_pod = available.supports(ResourceAction::Exec);
+    let is_node = available.supports(ResourceAction::Cordon);
+    let is_job = available.supports(ResourceAction::JobRerun);
+    let is_cronjob = available.supports(ResourceAction::CronJobTrigger);
+    let is_snapshot_policy = available.supports(ResourceAction::KopiurSnapshotNow);
     let has_pods = is_workload || is_job;
     let features = expect_context::<TalosFeatures>().0;
     let talos_available = move || is_node && features.get().read;

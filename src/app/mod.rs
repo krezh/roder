@@ -23,6 +23,7 @@ mod log_stream;
 mod logs;
 mod mobile;
 mod overlays;
+mod resource_actions;
 mod search_state;
 mod state;
 mod table_logic;

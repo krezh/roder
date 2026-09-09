@@ -11,8 +11,6 @@ use roder_core::{ResourceRow, RowStatus};
 
 use crate::app::components::table::cmp_cell;
 use crate::app::state::{CtxMenu, DetailTarget, SortKey};
-use crate::app::util::format::parse_key;
-use crate::app::util::predicate::KindKind;
 
 /// Where the keyboard cursor lands after moving `delta` rows.
 ///
@@ -276,26 +274,11 @@ pub(crate) fn resolve_current_action_targets(
     resolve_action_targets(&menu.uid, &menu.target, selected.as_ref(), &rows, &targets)
 }
 
-/// Whether every resolved target supports a kind-specific action. Mixed-kind
-/// selections may only expose an action when it is valid for every target.
-pub(crate) fn targets_all(
-    targets: &[DetailTarget],
-    predicate: impl for<'a> Fn(KindKind<'a>) -> bool,
-) -> bool {
-    !targets.is_empty()
-        && targets.iter().all(|target| {
-            let (group, version, kind) = parse_key(&target.key);
-            predicate(KindKind::new(&group, &version, &kind))
-        })
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        move_cursor, node_is_control_plane, resolve_action_targets, surfaced_cells, targets_all,
-    };
+    use super::{move_cursor, node_is_control_plane, resolve_action_targets, surfaced_cells};
     use crate::app::state::DetailTarget;
-    use roder_core::{ResourceAction, ResourceRow, RowStatus};
+    use roder_core::{ResourceRow, RowStatus};
     use std::collections::{BTreeMap, BTreeSet, HashMap};
 
     fn uids(n: usize) -> Vec<String> {
@@ -395,26 +378,6 @@ mod tests {
         assert_eq!(resolved.targets.len(), 2);
         assert_eq!(resolved.targets[0].key, "/v1/Service");
         assert_eq!(resolved.targets[1].key, "apps/v1/Deployment");
-    }
-
-    #[test]
-    fn kind_specific_actions_require_every_selected_target_to_match() {
-        let targets = [
-            DetailTarget {
-                key: "kustomize.toolkit.fluxcd.io/v1/Kustomization".to_string(),
-                namespace: Some("default".to_string()),
-                name: "apps".to_string(),
-            },
-            DetailTarget {
-                key: "batch/v1/CronJob".to_string(),
-                namespace: Some("default".to_string()),
-                name: "backup".to_string(),
-            },
-        ];
-        assert!(!targets_all(&targets, |kind| {
-            kind.supports(ResourceAction::FluxReconcile)
-        }));
-        assert!(!targets_all(&targets, |kind| kind.is_cronjob()));
     }
 
     #[test]

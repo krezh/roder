@@ -953,19 +953,20 @@ pub enum DrainEventKind {
     Cancelled,
 }
 
-/// One resource kind's RBAC access review row: which verbs the current
-/// identity may perform on it, in the requested namespace scope.
+/// One resource kind's RBAC access review row in the requested namespace scope.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AccessRow {
     pub kind: String,
     pub group: String,
     pub namespaced: bool,
-    /// `(verb, allowed)` pairs, in a fixed order (see `ACCESS_REVIEW_VERBS`).
-    pub verbs: Vec<(String, bool)>,
+    /// `None` means the operation does not apply to this kind.
+    pub operations: Vec<(String, Option<bool>)>,
 }
 
-/// Verbs checked by the access review, in display order.
-pub const ACCESS_REVIEW_VERBS: &[&str] = &["get", "list", "create", "patch", "delete"];
+/// Operations checked by the access review, in display order.
+pub const ACCESS_REVIEW_OPERATIONS: &[&str] = &[
+    "get", "list", "watch", "create", "patch", "delete", "status", "logs", "exec", "evict", "deps",
+];
 
 /// Counts of resources by projected health state for one resource type.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

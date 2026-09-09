@@ -10,12 +10,12 @@ use crate::app::controllers::detail::{DetailTab as Tab, ResourceDetailController
 use crate::app::logs::LogsView;
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::overlays::delete::{ask_delete, delete_extra, DeleteRequest};
+use crate::app::resource_actions::AvailableActions;
 use crate::app::state::{
     DetailTarget, DrainOpen, DrainTarget, ExecOpen, ExecTarget, TalosFeatures,
 };
 use crate::app::util::format::parse_key;
 use crate::app::util::json::selector_from;
-use crate::app::util::predicate::KindKind;
 use crate::app::util::yaml_hl;
 use crate::data;
 use leptos::prelude::*;
@@ -109,27 +109,27 @@ pub(crate) fn RowDetail(
     let tab = RwSignal::new(initial_tab);
     let yaml_editing = RwSignal::new(false);
 
-    let (group, version, kind) = parse_key(&target.key);
-    let kk = KindKind::new(&group, &version, &kind);
-    let is_workload = kk.is_workload();
-    let is_scalable = kk.is_scalable();
-    let is_flux =
-        kk.supports(ResourceAction::FluxReconcile) || kk.supports(ResourceAction::FluxSuspend);
-    let is_helmrelease = kk.is_helmrelease();
-    let has_source_ref = kk.has_source_ref();
-    let is_eso = kk.is_eso();
-    let is_certificate = kk.is_certificate();
-    let is_pod = kk.is_pod();
-    let is_node = kk.is_node();
-    let is_job = kk.is_job();
+    let (_, _, kind) = parse_key(&target.key);
+    let available = AvailableActions::for_targets(std::slice::from_ref(&target));
+    let is_workload = available.supports(ResourceAction::Restart);
+    let is_scalable = available.supports(ResourceAction::Scale);
+    let is_flux = available.supports(ResourceAction::FluxReconcile)
+        || available.supports(ResourceAction::FluxSuspend);
+    let is_helmrelease = available.supports(ResourceAction::FluxForce);
+    let has_source_ref = available.supports(ResourceAction::FluxReconcileWithSource);
+    let is_eso = available.supports(ResourceAction::ExternalSecretsRefresh);
+    let is_certificate = available.supports(ResourceAction::CertificateRenew);
+    let is_pod = available.supports(ResourceAction::Exec);
+    let is_node = available.supports(ResourceAction::Cordon);
+    let is_job = available.supports(ResourceAction::JobRerun);
     let features = expect_context::<TalosFeatures>().0;
     let talos_available = move || is_node && features.get().read;
     let talos_actions = move || is_node && features.get().actions;
     let talos_config = move || is_node && features.get().config;
     // Pod-owning resources get a live "Pods" tab listing their pods by selector.
-    let has_pods = is_workload || kk.is_job();
-    let is_cronjob = kk.is_cronjob();
-    let is_kopiur_snapshot_policy = kk.is_kopiur_snapshot_policy();
+    let has_pods = is_workload || is_job;
+    let is_cronjob = available.supports(ResourceAction::CronJobTrigger);
+    let is_kopiur_snapshot_policy = available.supports(ResourceAction::KopiurSnapshotNow);
     let ns = target.namespace.clone().unwrap_or_default();
     let pod = target.name.clone();
     let exec_open = expect_context::<ExecOpen>().0;

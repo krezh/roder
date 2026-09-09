@@ -1,16 +1,7 @@
 # TODO
 
-## Correctness Foundations
-
-- Map Warning and Normal Event types to meaningful row status
-- Detect pending LoadBalancer Services and Ingresses
-- Derive HPA health from AbleToScale, ScalingActive, and ScalingLimited conditions
-- Derive PDB health from conditions and desired/current healthy counts
-- Treat Lost PVCs as errors
-
 ## Actions And Access
 
-- Add watch, status update, logs, exec, eviction, and dependent-resource operations to Access Review
 - Group Access Review rows by category or operator
 
 ## Dashboard
@@ -77,7 +68,6 @@
 - Add Kopiur policy and snapshot detail summaries
 - Add restore history and progress summaries
 - Add KubernetesUpgrade and TalosUpgrade row projections and detail summaries
-- Add Kopiur Snapshot Now to bulk actions where valid
 
 ## Monitoring And Alerts
 
@@ -118,12 +108,10 @@
 - Make referenced resources in detail summaries clickable
 - Reuse category icons and colors in mobile resource trees
 - Define per-GVK mobile summary columns
-- Generate desktop and mobile actions from the same capability registry
-- Add missing mobile bulk actions for External Secrets, Kopiur, and CronJobs
 
 ## Testing
 
-- Add table-driven discovery-family and projector-coverage tests
+- Add table-driven discovery-family tests
 - Add unit tests for generic status, core, Flux, External Secrets, Gateway API, and RBAC projectors
 - Add layout integration tests for Rook, CloudNativePG, Kopiur, Tuppr, and monitoring resources
 - Install representative operator CRDs in integration tests

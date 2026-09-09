@@ -34,6 +34,9 @@ pub(crate) fn MobileBulkBar(
     #[prop(default = false)] bulk_helmrelease: bool,
     #[prop(default = false)] bulk_has_source_ref: bool,
     #[prop(default = false)] bulk_certificate: bool,
+    #[prop(default = false)] bulk_eso: bool,
+    #[prop(default = false)] bulk_cronjob: bool,
+    #[prop(default = false)] bulk_kopiur: bool,
 ) -> impl IntoView {
     let confirm = expect_context::<RwSignal<Option<Confirm>>>();
     let delete_confirm = expect_context::<RwSignal<Option<DeleteRequest>>>();
@@ -96,6 +99,15 @@ pub(crate) fn MobileBulkBar(
                             move || do_bulk("certificate-renew"),
                         );
                     }>{move || label(ResourceAction::CertificateRenew, "Force renew")}</button>
+                })}
+                {bulk_eso.then(|| view! {
+                    <button class="act" disabled=move || !allowed(ResourceAction::ExternalSecretsRefresh) on:click=move |_| do_bulk("eso-refresh")>{move || label(ResourceAction::ExternalSecretsRefresh, "Refresh")}</button>
+                })}
+                {bulk_cronjob.then(|| view! {
+                    <button class="act" disabled=move || !allowed(ResourceAction::CronJobTrigger) on:click=move |_| do_bulk("cronjob-trigger")>{move || label(ResourceAction::CronJobTrigger, "Trigger")}</button>
+                })}
+                {bulk_kopiur.then(|| view! {
+                    <button class="act" disabled=move || !allowed(ResourceAction::KopiurSnapshotNow) on:click=move |_| do_bulk("kopiur-snapshot-now")>{move || label(ResourceAction::KopiurSnapshotNow, "Snapshot now")}</button>
                 })}
                 <button class="act danger" disabled=move || !allowed(ResourceAction::Delete) on:click=move |_| {
                     let n = selected.get_untracked().len();

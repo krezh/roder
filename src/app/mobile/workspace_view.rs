@@ -229,14 +229,17 @@ fn MobilePane(kind: ResourceKind, rows: RowMap, columns: RwSignal<Vec<String>>) 
 
     let is_pod_kind = kind.group.is_empty() && kind.kind == "Pod";
     let kk = KindKind::new(&kind.group, &kind.version, &kind.kind);
-    let bulk_workload = kk.is_workload();
-    let bulk_job = kk.is_job();
+    let bulk_workload = kk.supports(ResourceAction::Restart);
+    let bulk_job = kk.supports(ResourceAction::JobRerun);
     let bulk_flux_reconcile = kk.supports(ResourceAction::FluxReconcile);
     let bulk_flux_suspend = kk.supports(ResourceAction::FluxSuspend);
-    let bulk_helmrelease = kk.is_helmrelease();
-    let bulk_has_source_ref = kk.has_source_ref();
-    let bulk_certificate = kk.is_certificate();
-    let bulk_logs = kk.has_logs();
+    let bulk_helmrelease = kk.supports(ResourceAction::FluxForce);
+    let bulk_has_source_ref = kk.supports(ResourceAction::FluxReconcileWithSource);
+    let bulk_certificate = kk.supports(ResourceAction::CertificateRenew);
+    let bulk_logs = kk.supports(ResourceAction::Logs);
+    let bulk_eso = kk.supports(ResourceAction::ExternalSecretsRefresh);
+    let bulk_cronjob = kk.supports(ResourceAction::CronJobTrigger);
+    let bulk_kopiur = kk.supports(ResourceAction::KopiurSnapshotNow);
     let key_sv = StoredValue::new(kind.key.clone());
     let bulk_permissions = selection_permissions_resource(move || {
         let key = key_sv.get_value();
@@ -328,6 +331,9 @@ fn MobilePane(kind: ResourceKind, rows: RowMap, columns: RwSignal<Vec<String>>) 
             bulk_flux_suspend=bulk_flux_suspend
             bulk_helmrelease=bulk_helmrelease
             bulk_has_source_ref=bulk_has_source_ref
-            bulk_certificate=bulk_certificate />
+            bulk_certificate=bulk_certificate
+            bulk_eso=bulk_eso
+            bulk_cronjob=bulk_cronjob
+            bulk_kopiur=bulk_kopiur />
     }
 }

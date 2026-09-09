@@ -2,7 +2,7 @@
 //! across every known resource kind, given OIDC passthrough.
 
 use leptos::prelude::*;
-use roder_core::{AccessRow, ACCESS_REVIEW_VERBS};
+use roder_core::{AccessRow, ACCESS_REVIEW_OPERATIONS};
 
 use crate::app::state::AccessReviewOpen;
 use crate::data;
@@ -12,8 +12,8 @@ use crate::data;
 fn access_colgroup() -> impl IntoView {
     view! {
         <colgroup>
-            <col style="width: 40%" />
-            {ACCESS_REVIEW_VERBS.iter().map(|_| view! { <col /> }).collect_view()}
+            <col style="width: 28%" />
+            {ACCESS_REVIEW_OPERATIONS.iter().map(|_| view! { <col /> }).collect_view()}
         </colgroup>
     }
 }
@@ -71,7 +71,7 @@ pub(crate) fn AccessReview() -> impl IntoView {
                                 <thead>
                                     <tr>
                                         <th>"Kind"</th>
-                                        {ACCESS_REVIEW_VERBS.iter().map(|v| view! { <th>{*v}</th> }).collect_view()}
+                                        {ACCESS_REVIEW_OPERATIONS.iter().map(|v| view! { <th>{*v}</th> }).collect_view()}
                                     </tr>
                                 </thead>
                             </table>
@@ -84,10 +84,18 @@ pub(crate) fn AccessReview() -> impl IntoView {
                                             view! {
                                                 <tr>
                                                     <td class="access-kind">{name}</td>
-                                                    {row.verbs.into_iter().map(|(_, allowed)| view! {
+                                                    {row.operations.into_iter().map(|(_, allowed)| view! {
                                                         <td class="access-cell">
-                                                            <span class=if allowed { "access-yes" } else { "access-no" }>
-                                                                {if allowed { "✓" } else { "✕" }}
+                                                            <span class=match allowed {
+                                                                Some(true) => "access-yes",
+                                                                Some(false) => "access-no",
+                                                                None => "muted",
+                                                            }>
+                                                                {match allowed {
+                                                                    Some(true) => "✓",
+                                                                    Some(false) => "✕",
+                                                                    None => "·",
+                                                                }}
                                                             </span>
                                                         </td>
                                                     }).collect_view()}

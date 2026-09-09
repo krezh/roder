@@ -200,14 +200,17 @@ pub(crate) fn KindTable(
             .collect::<std::collections::HashSet<usize>>()
     });
     let kk = KindKind::new(&kind.group, &kind.version, &kind.kind);
-    let bulk_workload = kk.is_workload();
-    let bulk_job = kk.is_job();
+    let bulk_workload = kk.supports(ResourceAction::Restart);
+    let bulk_job = kk.supports(ResourceAction::JobRerun);
     let bulk_flux_reconcile = kk.supports(ResourceAction::FluxReconcile);
     let bulk_flux_suspend = kk.supports(ResourceAction::FluxSuspend);
-    let bulk_certificate = kk.is_certificate();
-    let bulk_helmrelease = kk.is_helmrelease();
-    let bulk_has_source_ref = kk.has_source_ref();
-    let bulk_logs = kk.has_logs();
+    let bulk_certificate = kk.supports(ResourceAction::CertificateRenew);
+    let bulk_helmrelease = kk.supports(ResourceAction::FluxForce);
+    let bulk_has_source_ref = kk.supports(ResourceAction::FluxReconcileWithSource);
+    let bulk_logs = kk.supports(ResourceAction::Logs);
+    let bulk_eso = kk.supports(ResourceAction::ExternalSecretsRefresh);
+    let bulk_cronjob = kk.supports(ResourceAction::CronJobTrigger);
+    let bulk_kopiur = kk.supports(ResourceAction::KopiurSnapshotNow);
     let key_sv = StoredValue::new(kind.key.clone());
 
     let rows = t.rows;
@@ -591,6 +594,15 @@ pub(crate) fn KindTable(
                                 move || do_bulk("certificate-renew"),
                             );
                         }>{move || bulk_label(ResourceAction::CertificateRenew, "Force renew")}</button>
+                    })}
+                    {bulk_eso.then(|| view! {
+                        <button class="act" disabled=move || !bulk_allowed(ResourceAction::ExternalSecretsRefresh) on:click=move |_| do_bulk("eso-refresh")>{move || bulk_label(ResourceAction::ExternalSecretsRefresh, "Refresh")}</button>
+                    })}
+                    {bulk_cronjob.then(|| view! {
+                        <button class="act" disabled=move || !bulk_allowed(ResourceAction::CronJobTrigger) on:click=move |_| do_bulk("cronjob-trigger")>{move || bulk_label(ResourceAction::CronJobTrigger, "Trigger")}</button>
+                    })}
+                    {bulk_kopiur.then(|| view! {
+                        <button class="act" disabled=move || !bulk_allowed(ResourceAction::KopiurSnapshotNow) on:click=move |_| do_bulk("kopiur-snapshot-now")>{move || bulk_label(ResourceAction::KopiurSnapshotNow, "Snapshot now")}</button>
                     })}
                     <button class="act danger" disabled=move || !bulk_allowed(ResourceAction::Delete) on:click=move |_| {
                         let n = selected.get_untracked().len();

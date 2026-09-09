@@ -270,12 +270,14 @@ js-minify = true
 hash-files = true
 
 [profile.release]
-codegen-units = 1
-lto = true
-opt-level = "z"
+codegen-units = 16
+lto = "thin"
+opt-level = 2
 panic = "abort"
 
 # wasm release: optimize for size
 [profile.wasm-release]
 inherits = "release"
+codegen-units = 1
+lto = true
 opt-level = "z"

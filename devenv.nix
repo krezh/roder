@@ -123,7 +123,7 @@
     "test:docker" = {
       exec = ''
         WBG_VER=$(${lib.getExe pkgs.yq-go} .workspace.dependencies.wasm-bindgen Cargo.toml)
-        docker buildx build --build-arg WB_VERSION="$WBG_VER" -t roder:test .
+        docker buildx build --build-arg WB_VERSION="$WBG_VER" --build-arg RELEASE=false -t roder:test .
       '';
       before = [ "devenv:enterTest" ];
     };

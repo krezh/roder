@@ -1,5 +1,7 @@
 //! Reactive hooks shared by the live tables.
 
+use std::collections::HashMap;
+
 use leptos::html::Div;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -178,6 +180,42 @@ pub(crate) struct ResourceTable {
 /// Rows rendered beyond the viewport on each side, so scrolling doesn't flash blanks.
 pub(crate) const OVERSCAN: usize = 12;
 
+/// Returns the row range and leading/trailing spacers for variable-height rows.
+pub(crate) fn variable_window_layout(
+    uids: &[String],
+    heights: &HashMap<String, f64>,
+    estimated_height: f64,
+    scroll_top: f64,
+    viewport_height: f64,
+) -> (usize, usize, f64, f64) {
+    let estimate = estimated_height.max(1.0);
+    let overscan = estimate * OVERSCAN as f64;
+    let window_start = (scroll_top - overscan).max(0.0);
+    let window_end = scroll_top + viewport_height + overscan;
+    let height = |uid: &String| heights.get(uid).copied().unwrap_or(estimate);
+
+    let mut first = 0;
+    let mut before = 0.0;
+    while first < uids.len() {
+        let row_height = height(&uids[first]);
+        if before + row_height > window_start {
+            break;
+        }
+        before += row_height;
+        first += 1;
+    }
+
+    let mut last = first;
+    let mut through_window = before;
+    while last < uids.len() && through_window < window_end {
+        through_window += height(&uids[last]);
+        last += 1;
+    }
+
+    let after = uids[last..].iter().map(height).sum();
+    (first, last, before, after)
+}
+
 /// Create the shared table signals and long-press infra. Does not attach any
 /// keyboard shortcuts — those live in [`KindTable`] and are opt-in per instance.
 pub(crate) fn use_table_state() -> ResourceTable {
@@ -318,6 +356,25 @@ pub(crate) fn table_window(
     });
 
     window
+}
+
+#[cfg(test)]
+mod tests {
+    use super::variable_window_layout;
+    use std::collections::HashMap;
+
+    #[test]
+    fn variable_window_uses_measured_heights_for_ranges_and_spacers() {
+        let uids = (0..40).map(|i| format!("uid-{i}")).collect::<Vec<_>>();
+        let heights = HashMap::from([("uid-0".to_string(), 100.0), ("uid-1".to_string(), 20.0)]);
+
+        let (first, last, before, after) =
+            variable_window_layout(&uids, &heights, 20.0, 400.0, 100.0);
+
+        assert_eq!((first, last), (4, 33));
+        assert_eq!(before, 160.0);
+        assert_eq!(after, 140.0);
+    }
 }
 
 /// Scroll the virtual viewport so the row at `index` is on screen.

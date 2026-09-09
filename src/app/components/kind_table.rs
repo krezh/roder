@@ -8,6 +8,7 @@ use crate::app::controllers::detail::selection_permissions_resource;
 use crate::app::events::{make_bulk_open_logs, make_do_bulk, make_do_delete, RowMap};
 use crate::app::hooks::{
     table_column_truncation, table_window, use_sse_subscription, use_table_state,
+    variable_window_layout,
 };
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::overlays::delete::{ask_delete, DeleteRequest};
@@ -129,13 +130,47 @@ pub(crate) fn KindTable(
         })
     });
 
-    let virtual_window = table_window(t, shown_uids);
-    let window = Memo::new(move |_| {
+    let fixed_window = table_window(t, shown_uids);
+    let event_heights = RwSignal::new(std::collections::HashMap::<String, f64>::new());
+    let layout = Memo::new(move |_| {
         if is_events {
-            (0, shown_uids.with(|uids| uids.len()))
+            shown_uids.with(|uids| {
+                event_heights.with(|heights| {
+                    let (measured_total, measured_count) = uids
+                        .iter()
+                        .filter_map(|uid| heights.get(uid))
+                        .fold((0.0, 0usize), |(total, count), height| {
+                            (total + height, count + 1)
+                        });
+                    let estimate = if measured_count == 0 {
+                        t.row_h.get()
+                    } else {
+                        measured_total / measured_count as f64
+                    };
+                    variable_window_layout(
+                        uids,
+                        heights,
+                        estimate,
+                        t.scroll_top.get(),
+                        t.viewport_h.get(),
+                    )
+                })
+            })
         } else {
-            virtual_window.get()
+            let (first, last) = fixed_window.get();
+            let total = shown_uids.with(|uids| uids.len());
+            let row_height = t.row_h.get();
+            (
+                first,
+                last,
+                first as f64 * row_height,
+                total.saturating_sub(last) as f64 * row_height,
+            )
         }
+    });
+    let window = Memo::new(move |_| {
+        let (first, last, _, _) = layout.get();
+        (first, last)
     });
 
     // Reflow when a relist publishes a changed Table schema.
@@ -284,9 +319,81 @@ pub(crate) fn KindTable(
     let sort = t.sort;
     let entering = t.entering;
     let removing = t.removing;
-    let row_h = t.row_h;
     let press = t.press;
     let table_ref = t.table_ref;
+
+    #[cfg(target_arch = "wasm32")]
+    if is_events {
+        use wasm_bindgen::JsCast;
+
+        let measure_rows = move || {
+            request_animation_frame(move || {
+                let Some(Some(wrap)) = table_ref.try_get_untracked() else {
+                    return;
+                };
+                let Ok(nodes) = wrap.query_selector_all(".grid-row.row[data-row-uid]") else {
+                    return;
+                };
+                let measured = (0..nodes.length())
+                    .filter_map(|i| nodes.item(i))
+                    .filter_map(|node| node.dyn_into::<web_sys::Element>().ok())
+                    .filter_map(|row| {
+                        let classes = row.get_attribute("class").unwrap_or_default();
+                        if classes
+                            .split_ascii_whitespace()
+                            .any(|class| matches!(class, "entering" | "removing"))
+                        {
+                            return None;
+                        }
+                        let uid = row.get_attribute("data-row-uid")?;
+                        Some((uid, row.get_bounding_client_rect().height()))
+                    })
+                    .filter(|(_, height)| *height > 1.0)
+                    .collect::<Vec<_>>();
+                let changed = event_heights.with_untracked(|heights| {
+                    measured.iter().any(|(uid, height)| {
+                        heights
+                            .get(uid)
+                            .is_none_or(|known| (known - height).abs() > 0.5)
+                    })
+                });
+                if changed {
+                    event_heights.update(|heights| {
+                        heights.extend(measured);
+                    });
+                }
+            });
+        };
+
+        Effect::new(move |_| {
+            layout.track();
+            rows.track();
+            entering.track();
+            removing.track();
+            measure_rows();
+        });
+
+        Effect::new(move |_| {
+            use send_wrapper::SendWrapper;
+            use wasm_bindgen::closure::Closure;
+
+            let Some(wrap) = table_ref.get() else { return };
+            let callback = Closure::<dyn FnMut()>::new(measure_rows);
+            let callback_fn: js_sys::Function = callback
+                .as_ref()
+                .unchecked_ref::<js_sys::Function>()
+                .clone();
+            let observer =
+                web_sys::ResizeObserver::new(&callback_fn).expect("ResizeObserver constructor");
+            observer.observe(&wrap);
+            let cleanup = SendWrapper::new((observer, callback));
+            on_cleanup(move || {
+                let (observer, callback) = cleanup.take();
+                observer.disconnect();
+                drop(callback);
+            });
+        });
+    }
 
     let reset_selection = move || selected.set(std::collections::BTreeSet::new());
     let do_bulk = make_do_bulk(toast, key_sv, rows, selected, reset_selection);
@@ -644,7 +751,7 @@ pub(crate) fn KindTable(
                         {move || sizer.get().into_iter().map(|s| view! { <div class="cell">{s}</div> }).collect_view()}
                     </div>
                     <div class="vpad" style=move || {
-                        format!("grid-column:1/-1;height:{}px", window.get().0 as f64 * row_h.get())
+                        format!("grid-column:1/-1;height:{}px", layout.get().2)
                     }></div>
                     <For
                         // Schema changes remount rows so special cell renderers stay aligned.
@@ -796,9 +903,7 @@ pub(crate) fn KindTable(
                         }
                     </For>
                     <div class="vpad" style=move || {
-                        let (_, last) = window.get();
-                        let total = shown_uids.with(|v| v.len());
-                        format!("grid-column:1/-1;height:{}px", total.saturating_sub(last) as f64 * row_h.get())
+                        format!("grid-column:1/-1;height:{}px", layout.get().3)
                     }></div>
                 </div>
                 {move || {

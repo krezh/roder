@@ -9,6 +9,7 @@ use axum::extract::{Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
+use roder_core::{ResourceAction, ResourceKind};
 use roder_k8s::Backend;
 use serde::Deserialize;
 
@@ -35,6 +36,19 @@ pub async fn debug_shell(
     Extension(b): Extension<Arc<Backend>>,
     Json(request): Json<DebugShellRequest>,
 ) -> Response {
+    let pod_key = ResourceKind::make_key("", "v1", "Pod");
+    if !b
+        .can_action(
+            ResourceAction::DebugExec,
+            &pod_key,
+            Some(&request.namespace),
+            Some(&request.pod),
+            None,
+        )
+        .await
+    {
+        return StatusCode::FORBIDDEN.into_response();
+    }
     match b
         .inject_debug_container(&request.namespace, &request.pod)
         .await
@@ -80,6 +94,19 @@ pub async fn exec_ws(
     ws: axum::extract::ws::WebSocketUpgrade,
 ) -> Response {
     if !origin_allowed(&headers, &state.config.base_url) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let pod_key = ResourceKind::make_key("", "v1", "Pod");
+    if !b
+        .can_action(
+            ResourceAction::Exec,
+            &pod_key,
+            Some(&q.namespace),
+            Some(&q.pod),
+            None,
+        )
+        .await
+    {
         return StatusCode::FORBIDDEN.into_response();
     }
     ws.on_upgrade(move |socket| exec_session(socket, b, q))

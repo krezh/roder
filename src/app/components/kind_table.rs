@@ -1,9 +1,10 @@
 use leptos::prelude::*;
-use roder_core::{ResourceKind, RowStatus, Trend};
+use roder_core::{ResourceAction, ResourceKind, RowStatus, Trend};
 
 use crate::app::components::dropdown::{Dropdown, DropdownItem};
 use crate::app::components::table::{cell_value_changed, sortable_th, FlashTd};
 use crate::app::components::table_row::{NameCell, ResourceRow as ResourceRowView};
+use crate::app::controllers::detail::selection_permissions_resource;
 use crate::app::events::{make_bulk_open_logs, make_do_bulk, make_do_delete, RowMap};
 use crate::app::hooks::{
     table_column_truncation, table_window, use_sse_subscription, use_table_state,
@@ -201,7 +202,8 @@ pub(crate) fn KindTable(
     let kk = KindKind::new(&kind.group, &kind.version, &kind.kind);
     let bulk_workload = kk.is_workload();
     let bulk_job = kk.is_job();
-    let bulk_flux = kk.is_flux();
+    let bulk_flux_reconcile = kk.supports(ResourceAction::FluxReconcile);
+    let bulk_flux_suspend = kk.supports(ResourceAction::FluxSuspend);
     let bulk_certificate = kk.is_certificate();
     let bulk_helmrelease = kk.is_helmrelease();
     let bulk_has_source_ref = kk.has_source_ref();
@@ -210,6 +212,27 @@ pub(crate) fn KindTable(
 
     let rows = t.rows;
     let selected = t.selected;
+    let bulk_permissions = selection_permissions_resource(move || {
+        let key = key_sv.get_value();
+        let uids = selected.get();
+        rows.with(|rows| table_logic::bulk_targets(&key, rows, &uids))
+    });
+    let bulk_allowed = move |action| {
+        bulk_permissions
+            .get()
+            .is_some_and(|permissions| permissions.allows_all(action))
+    };
+    let bulk_label = move |action, label: &'static str| {
+        let Some(permissions) = bulk_permissions.get() else {
+            return label.to_string();
+        };
+        let (allowed, total) = permissions.count(action);
+        if total > 0 && allowed < total {
+            format!("{label} {allowed}/{total}")
+        } else {
+            label.to_string()
+        }
+    };
     let can_rerun_selected_jobs = move || {
         let selected = selected.get();
         !selected.is_empty()
@@ -530,34 +553,36 @@ pub(crate) fn KindTable(
                     <button class="act" on:click=move |_| selected.set(shown_uids.get().into_iter().collect())>"Select all"</button>
                     <button class="act" on:click=move |_| selected.set(std::collections::BTreeSet::new())>"Clear"</button>
                     {bulk_logs.then(|| view! {
-                        <button class="act" on:click=move |_| do_logs()>"Logs"</button>
+                        <button class="act" disabled=move || !bulk_allowed(ResourceAction::Logs) on:click=move |_| do_logs()>{move || bulk_label(ResourceAction::Logs, "Logs")}</button>
                     })}
                     {bulk_workload.then(|| view! {
-                        <button class="act" on:click=move |_| do_bulk("restart")>"Restart"</button>
+                        <button class="act" disabled=move || !bulk_allowed(ResourceAction::Restart) on:click=move |_| do_bulk("restart")>{move || bulk_label(ResourceAction::Restart, "Restart")}</button>
                     })}
                     {bulk_job.then(|| view! {
-                        <button class="act" disabled=move || !can_rerun_selected_jobs()
+                        <button class="act" disabled=move || !can_rerun_selected_jobs() || !bulk_allowed(ResourceAction::JobRerun)
                             title="Only completed or failed Jobs can be re-run"
-                            on:click=move |_| do_bulk("job-rerun")>"Re-run"</button>
+                            on:click=move |_| do_bulk("job-rerun")>{move || bulk_label(ResourceAction::JobRerun, "Re-run")}</button>
                     })}
-                    {bulk_flux.then(|| view! {
-                        <button class="act" on:click=move |_| do_bulk("flux-reconcile")>"Reconcile"</button>
+                    {bulk_flux_reconcile.then(|| view! {
+                        <button class="act" disabled=move || !bulk_allowed(ResourceAction::FluxReconcile) on:click=move |_| do_bulk("flux-reconcile")>{move || bulk_label(ResourceAction::FluxReconcile, "Reconcile")}</button>
                         {bulk_has_source_ref.then(|| view! {
-                            <button class="act" on:click=move |_| do_bulk("flux-reconcile-with-source")>"Reconcile w/ source"</button>
+                            <button class="act" disabled=move || !bulk_allowed(ResourceAction::FluxReconcileWithSource) on:click=move |_| do_bulk("flux-reconcile-with-source")>{move || bulk_label(ResourceAction::FluxReconcileWithSource, "Reconcile w/ source")}</button>
                         })}
                         {bulk_helmrelease.then(|| view! {
-                            <button class="act" on:click=move |_| do_bulk("flux-force")>"Force"</button>
-                            <button class="act" on:click=move |_| do_bulk("flux-reset")>"Reset"</button>
+                            <button class="act" disabled=move || !bulk_allowed(ResourceAction::FluxForce) on:click=move |_| do_bulk("flux-force")>{move || bulk_label(ResourceAction::FluxForce, "Force")}</button>
+                            <button class="act" disabled=move || !bulk_allowed(ResourceAction::FluxReset) on:click=move |_| do_bulk("flux-reset")>{move || bulk_label(ResourceAction::FluxReset, "Reset")}</button>
                         })}
+                    })}
+                    {bulk_flux_suspend.then(|| view! {
                         {move || bulk_show_suspend().then(|| view! {
-                            <button class="act" on:click=move |_| do_bulk("flux-suspend")>"Suspend"</button>
+                            <button class="act" disabled=move || !bulk_allowed(ResourceAction::FluxSuspend) on:click=move |_| do_bulk("flux-suspend")>{move || bulk_label(ResourceAction::FluxSuspend, "Suspend")}</button>
                         })}
                         {move || bulk_show_resume().then(|| view! {
-                            <button class="act" on:click=move |_| do_bulk("flux-resume")>"Resume"</button>
+                            <button class="act" disabled=move || !bulk_allowed(ResourceAction::FluxSuspend) on:click=move |_| do_bulk("flux-resume")>{move || bulk_label(ResourceAction::FluxSuspend, "Resume")}</button>
                         })}
                     })}
                     {bulk_certificate.then(|| view! {
-                        <button class="act" on:click=move |_| {
+                        <button class="act" disabled=move || !bulk_allowed(ResourceAction::CertificateRenew) on:click=move |_| {
                             let n = selected.get_untracked().len();
                             ask_confirm(
                                 confirm,
@@ -565,12 +590,12 @@ pub(crate) fn KindTable(
                                 "Renew",
                                 move || do_bulk("certificate-renew"),
                             );
-                        }>"Force renew"</button>
+                        }>{move || bulk_label(ResourceAction::CertificateRenew, "Force renew")}</button>
                     })}
-                    <button class="act danger" on:click=move |_| {
+                    <button class="act danger" disabled=move || !bulk_allowed(ResourceAction::Delete) on:click=move |_| {
                         let n = selected.get_untracked().len();
                         ask_delete(delete_confirm, format!("Delete {n} resources?"), do_delete);
-                    }>"Delete"</button>
+                    }>{move || bulk_label(ResourceAction::Delete, "Delete")}</button>
                 </div>
             </div>
             <div class="table-wrap" node_ref=table_ref>

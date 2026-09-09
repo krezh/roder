@@ -5,10 +5,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use leptos::prelude::*;
-use roder_core::{ResourceKind, RowStatus, Trend};
+use roder_core::{ResourceAction, ResourceKind, RowStatus, Trend};
 
 use crate::app::components::table::{cmp_str, sortable_th, FlashTd};
 use crate::app::components::table_row::{NameCell, ResourceRow as ResourceRowView};
+use crate::app::controllers::detail::selection_permissions_resource;
 use crate::app::events::make_do_delete_multi;
 use crate::app::hooks::{table_window, use_table_state, Coalescer};
 use crate::app::overlays::delete::{ask_delete, DeleteRequest};
@@ -424,6 +425,47 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
     let do_delete = make_do_delete_multi(toast, merged_rows, selected, move || {
         selected.set(std::collections::BTreeSet::new())
     });
+    let bulk_permissions = selection_permissions_resource(move || {
+        let selected = selected.get();
+        merged_rows.with(|rows| {
+            selected
+                .iter()
+                .filter_map(|uid| {
+                    rows.get(uid).map(|row| DetailTarget {
+                        key: row.kind.key.clone(),
+                        namespace: row.row.namespace.clone(),
+                        name: row.row.name.clone(),
+                    })
+                })
+                .collect()
+        })
+    });
+    let bulk_allowed = move |action| {
+        bulk_permissions
+            .get()
+            .is_some_and(|permissions| permissions.allows_all(action))
+    };
+    let bulk_label = move |action, label: &'static str| {
+        let Some(permissions) = bulk_permissions.get() else {
+            return label.to_string();
+        };
+        let (allowed, total) = permissions.count(action);
+        if total > 0 && allowed < total {
+            format!("{label} {allowed}/{total}")
+        } else {
+            label.to_string()
+        }
+    };
+    let selected_support_logs = move || {
+        let selected = selected.get();
+        !selected.is_empty()
+            && merged_rows.with(|rows| {
+                selected.iter().all(|uid| {
+                    rows.get(uid)
+                        .is_some_and(|row| row.kind.supports(ResourceAction::Logs))
+                })
+            })
+    };
 
     let clear_search = move |_| {
         #[cfg(target_arch = "wasm32")]
@@ -445,7 +487,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                     <span class="bulk-count">{move || format!("{} selected", selected.get().len())}</span>
                     <button class="act" on:click=move |_| selected.set(shown_uids.get().into_iter().collect())>"Select all"</button>
                     <button class="act" on:click=move |_| selected.set(std::collections::BTreeSet::new())>"Clear"</button>
-                    <button class="act" on:click=move |_| {
+                    <Show when=selected_support_logs><button class="act" disabled=move || !bulk_allowed(ResourceAction::Logs) on:click=move |_| {
                         let uids = selected.get_untracked();
                         merged_rows.with_untracked(|m| {
                             for uid in &uids {
@@ -461,11 +503,11 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                             }
                         });
                         selected.set(std::collections::BTreeSet::new());
-                    }>"Logs"</button>
-                    <button class="act danger" on:click=move |_| {
+                    }>{move || bulk_label(ResourceAction::Logs, "Logs")}</button></Show>
+                    <button class="act danger" disabled=move || !bulk_allowed(ResourceAction::Delete) on:click=move |_| {
                         let n = selected.get_untracked().len();
                         ask_delete(delete_confirm, format!("Delete {n} resources?"), do_delete);
-                    }>"Delete"</button>
+                    }>{move || bulk_label(ResourceAction::Delete, "Delete")}</button>
                 </div>
             </div>
             <div class="table-wrap" node_ref=table_ref>

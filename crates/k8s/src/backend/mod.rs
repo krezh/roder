@@ -38,7 +38,13 @@ mod permissions;
 mod sanitize;
 mod tree;
 
-type CanCacheKey = (String, String, Option<String>, Option<String>);
+type CanCacheKey = (
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
 
 /// The per-user façade over a connected cluster: the user's token-passthrough
 /// client, its own informer registry, and small per-user caches. Catalog and
@@ -54,7 +60,7 @@ pub struct Backend {
     /// RwLock allows concurrent reads when the cache is fresh.
     overview_cache: tokio::sync::RwLock<Option<(std::time::Instant, ClusterOverview)>>,
     overview_refresh: tokio::sync::Mutex<()>,
-    /// Short-TTL SelfSubjectAccessReview cache keyed (verb, key, namespace).
+    /// Short-TTL SelfSubjectAccessReview cache keyed by operation and target.
     /// RwLock so concurrent permission reads don't serialize.
     can_cache: tokio::sync::RwLock<HashMap<CanCacheKey, (std::time::Instant, bool)>>,
     /// Signature of the last-streamed attempt per (namespace, pod, container), so a

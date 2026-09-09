@@ -1,5 +1,6 @@
 use leptos::prelude::*;
 use roder_core::ObjectDetail;
+use roder_core::ResourceAction;
 
 use crate::app::controllers::detail::{
     certificate_summary, format_bytes, short_fingerprint, talos_action, talos_config_diff,
@@ -67,7 +68,8 @@ pub(crate) fn MobileRowDetail(
     let kind_kind = KindKind::new(&group, &version, &kind);
     let is_workload = kind_kind.is_workload();
     let is_scalable = kind_kind.is_scalable();
-    let is_flux = kind_kind.is_flux();
+    let is_flux = kind_kind.supports(ResourceAction::FluxReconcile)
+        || kind_kind.supports(ResourceAction::FluxSuspend);
     let is_helmrelease = kind_kind.is_helmrelease();
     let has_source_ref = kind_kind.has_source_ref();
     let is_eso = kind_kind.is_eso();
@@ -89,6 +91,7 @@ pub(crate) fn MobileRowDetail(
     let run = move |action: &'static str, extra: serde_json::Value| {
         controller.run(target_value.get_value(), action, extra, on_delete)
     };
+    let allows = move |action| permissions.get().is_some_and(|value| value.allows(action));
     let suspended = move || {
         controller
             .object
@@ -118,31 +121,35 @@ pub(crate) fn MobileRowDetail(
     view! {
         <div class="rd mobile-rd">
             <div class="actions mobile-detail-actions">
-                {is_workload.then(|| view! { <Show when=move || permissions.get().is_some_and(|p| p.patch)>
+                {is_workload.then(|| view! { <Show when=move || allows(ResourceAction::Restart)>
                     <button class="act" on:click=move |_| run("restart", serde_json::json!({}))>"Restart"</button>
-                    {is_scalable.then(|| view! { <MobileScale controller target=target_value /> })}
-                </Show> })}
-                {is_flux.then(|| view! { <Show when=move || permissions.get().is_some_and(|p| p.patch)>
+                </Show> {is_scalable.then(|| view! { <Show when=move || allows(ResourceAction::Scale)><MobileScale controller target=target_value /></Show> })} })}
+                {is_flux.then(|| view! {
+                    <Show when=move || allows(ResourceAction::FluxReconcile)>
                     <button class="act" on:click=move |_| run("flux-reconcile", serde_json::json!({}))>"Reconcile"</button>
-                    {has_source_ref.then(|| view! { <button class="act" on:click=move |_| run("flux-reconcile-with-source", serde_json::json!({}))>"Reconcile w/ source"</button> })}
+                    </Show>
+                    {has_source_ref.then(|| view! { <Show when=move || allows(ResourceAction::FluxReconcileWithSource)><button class="act" on:click=move |_| run("flux-reconcile-with-source", serde_json::json!({}))>"Reconcile w/ source"</button></Show> })}
                     {is_helmrelease.then(|| view! {
+                        <Show when=move || allows(ResourceAction::FluxForce)>
                         <button class="act" on:click=move |_| run("flux-force", serde_json::json!({}))>"Force"</button>
+                        </Show><Show when=move || allows(ResourceAction::FluxReset)>
                         <button class="act" on:click=move |_| run("flux-reset", serde_json::json!({}))>"Reset"</button>
-                    })}
+                        </Show> })}
+                    <Show when=move || allows(ResourceAction::FluxSuspend)>
                     <button class="act" on:click=move |_| if suspended() { run("flux-resume", serde_json::json!({})) } else { run("flux-suspend", serde_json::json!({})) }>
                         {move || if suspended() { "Resume" } else { "Suspend" }}
                     </button>
-                </Show> })}
-                {is_eso.then(|| view! { <Show when=move || permissions.get().is_some_and(|p| p.patch)><button class="act" on:click=move |_| run("eso-refresh", serde_json::json!({}))>"Refresh"</button></Show> })}
-                {is_certificate.then(|| view! { <Show when=move || permissions.get().is_some_and(|p| p.update_status)><button class="act" on:click=move |_| ask_confirm(confirm, "Force renewal of this Certificate?", "Renew", move || run("certificate-renew", serde_json::json!({})))>"Force renew"</button></Show> })}
-                {is_cronjob.then(|| view! { <Show when=move || permissions.get().is_some_and(|p| p.patch)><button class="act" on:click=move |_| run("cronjob-trigger", serde_json::json!({}))>"Trigger"</button></Show> })}
-                {is_job.then(|| view! { <Show when=move || permissions.get().is_some_and(|p| p.create) && job_terminal()><button class="act" on:click=move |_| run("job-rerun", serde_json::json!({}))>"Re-run"</button></Show> })}
-                {is_snapshot_policy.then(|| view! { <Show when=move || permissions.get().is_some_and(|p| p.patch)><button class="act" on:click=move |_| run("kopiur-snapshot-now", serde_json::json!({}))>"Snapshot Now"</button></Show> })}
-                {is_pod.then(|| view! { <button class="act" on:click=move |_| {
+                    </Show> })}
+                {is_eso.then(|| view! { <Show when=move || allows(ResourceAction::ExternalSecretsRefresh)><button class="act" on:click=move |_| run("eso-refresh", serde_json::json!({}))>"Refresh"</button></Show> })}
+                {is_certificate.then(|| view! { <Show when=move || allows(ResourceAction::CertificateRenew)><button class="act" on:click=move |_| ask_confirm(confirm, "Force renewal of this Certificate?", "Renew", move || run("certificate-renew", serde_json::json!({})))>"Force renew"</button></Show> })}
+                {is_cronjob.then(|| view! { <Show when=move || allows(ResourceAction::CronJobTrigger)><button class="act" on:click=move |_| run("cronjob-trigger", serde_json::json!({}))>"Trigger"</button></Show> })}
+                {is_job.then(|| view! { <Show when=move || allows(ResourceAction::JobRerun) && job_terminal()><button class="act" on:click=move |_| run("job-rerun", serde_json::json!({}))>"Re-run"</button></Show> })}
+                {is_snapshot_policy.then(|| view! { <Show when=move || allows(ResourceAction::KopiurSnapshotNow)><button class="act" on:click=move |_| run("kopiur-snapshot-now", serde_json::json!({}))>"Snapshot Now"</button></Show> })}
+                {is_pod.then(|| view! { <Show when=move || allows(ResourceAction::Exec)><button class="act" on:click=move |_| {
                     let target = target_value.get_value();
                     exec.set(Some(ExecTarget { namespace: target.namespace.unwrap_or_default(), pod: target.name, container: None, pending: false, node_shell: false, image: String::new() }));
-                }>"Shell"</button> })}
-                <Show when=move || permissions.get().is_some_and(|p| p.delete)><button class="act danger" on:click=move |_| ask_delete(delete_request, "Delete this resource?", move |force, propagation| run("delete", delete_extra(force, propagation)))>"Delete"</button></Show>
+                }>"Shell"</button></Show> })}
+                <Show when=move || allows(ResourceAction::Delete)><button class="act danger" on:click=move |_| ask_delete(delete_request, "Delete this resource?", move |force, propagation| run("delete", delete_extra(force, propagation)))>"Delete"</button></Show>
                 {move || controller.status.get().map(|result| match result { Ok(message) => view! { <span class="act-ok">{message}</span> }.into_any(), Err(error) => view! { <span class="act-err">{error}</span> }.into_any() })}
             </div>
             <nav class="rd-tabs mobile-detail-tabs" aria-label="Detail sections">
@@ -159,7 +166,7 @@ pub(crate) fn MobileRowDetail(
                     let target = target_value.get_value();
                     let content = match tab.get() {
                         DetailTab::Info => view! { <MobileInfo detail kind=kind_value.get_value() /> }.into_any(),
-                        DetailTab::Yaml => view! { <MobileYaml yaml editing=yaml_editing can_patch=permissions.get().is_some_and(|p| p.patch) run /> }.into_any(),
+                        DetailTab::Yaml => view! { <MobileYaml yaml editing=yaml_editing can_patch=permissions.get().is_some_and(|p| p.apply()) run /> }.into_any(),
                         DetailTab::Logs => {
                             let url = if is_pod { format!("/api/logs?namespace={}&pod={}", data::percent_encode(target.namespace.as_deref().unwrap_or_default()), data::percent_encode(&target.name)) } else { format!("/api/talos/dmesg?node={}", data::percent_encode(&target.name)) };
                             view! { <MobileInlineLogs url /> }.into_any()

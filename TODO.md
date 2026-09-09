@@ -11,17 +11,6 @@
 
 ## Actions And Access
 
-- Split Flux capabilities into reconcile, suspend, source reconciliation, force, and reset
-- Restrict Flux actions to supported exact resource kinds and validate them server-side
-- Restrict External Secrets refresh to supported resource kinds and validate it server-side
-- Return attempted, succeeded, forbidden, and failed counts from reconcile-all operations
-- Add batch action capability checks and show how many selected resources permit an operation
-- Hide or disable context-menu, action-sheet, and bulk actions when RBAC denies them
-- Model semantic operation permissions, including dependent resource and subresource checks
-- Check Job create permission before triggering a CronJob
-- Check Snapshot create permission before triggering a Kopiur SnapshotPolicy
-- Check source and target permissions for Flux reconcile-with-source
-- Pass no namespace to access reviews for cluster-scoped resources
 - Add watch, status update, logs, exec, eviction, and dependent-resource operations to Access Review
 - Group Access Review rows by category or operator
 

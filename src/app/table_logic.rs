@@ -6,10 +6,11 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap};
 
+use leptos::prelude::{GetUntracked, GetValue, RwSignal, StoredValue};
 use roder_core::{ResourceRow, RowStatus};
 
 use crate::app::components::table::cmp_cell;
-use crate::app::state::{DetailTarget, SortKey};
+use crate::app::state::{CtxMenu, DetailTarget, SortKey};
 use crate::app::util::format::parse_key;
 use crate::app::util::predicate::KindKind;
 
@@ -255,6 +256,26 @@ pub(crate) fn resolve_action_targets(
     }
 }
 
+pub(crate) fn resolve_current_action_targets(
+    menu: &CtxMenu,
+    table_selected: StoredValue<Option<RwSignal<BTreeSet<String>>>>,
+    table_rows: StoredValue<Option<RwSignal<HashMap<String, ResourceRow>>>>,
+    table_targets: StoredValue<Option<RwSignal<HashMap<String, DetailTarget>>>>,
+) -> ResolvedActionTargets {
+    let selected = table_selected
+        .get_value()
+        .map(|signal| signal.get_untracked());
+    let rows = table_rows
+        .get_value()
+        .map(|signal| signal.get_untracked())
+        .unwrap_or_default();
+    let targets = table_targets
+        .get_value()
+        .map(|signal| signal.get_untracked())
+        .unwrap_or_default();
+    resolve_action_targets(&menu.uid, &menu.target, selected.as_ref(), &rows, &targets)
+}
+
 /// Whether every resolved target supports a kind-specific action. Mixed-kind
 /// selections may only expose an action when it is valid for every target.
 pub(crate) fn targets_all(
@@ -274,7 +295,7 @@ mod tests {
         move_cursor, node_is_control_plane, resolve_action_targets, surfaced_cells, targets_all,
     };
     use crate::app::state::DetailTarget;
-    use roder_core::{ResourceRow, RowStatus};
+    use roder_core::{ResourceAction, ResourceRow, RowStatus};
     use std::collections::{BTreeMap, BTreeSet, HashMap};
 
     fn uids(n: usize) -> Vec<String> {
@@ -390,7 +411,9 @@ mod tests {
                 name: "backup".to_string(),
             },
         ];
-        assert!(!targets_all(&targets, |kind| kind.is_flux()));
+        assert!(!targets_all(&targets, |kind| {
+            kind.supports(ResourceAction::FluxReconcile)
+        }));
         assert!(!targets_all(&targets, |kind| kind.is_cronjob()));
     }
 

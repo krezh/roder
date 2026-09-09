@@ -6,8 +6,9 @@
 use std::collections::HashMap;
 
 use leptos::prelude::*;
-use roder_core::{ResourceKind, RowStatus, WatchEvent};
+use roder_core::{ResourceAction, ResourceKind, RowStatus, WatchEvent};
 
+use crate::app::controllers::detail::selection_permissions_resource;
 use crate::app::events::{make_bulk_open_logs, make_do_bulk, make_do_delete, RowMap};
 use crate::app::hooks::{use_table_state, Coalescer};
 use crate::app::mobile::bulk_bar::MobileBulkBar;
@@ -230,12 +231,18 @@ fn MobilePane(kind: ResourceKind, rows: RowMap, columns: RwSignal<Vec<String>>) 
     let kk = KindKind::new(&kind.group, &kind.version, &kind.kind);
     let bulk_workload = kk.is_workload();
     let bulk_job = kk.is_job();
-    let bulk_flux = kk.is_flux();
+    let bulk_flux_reconcile = kk.supports(ResourceAction::FluxReconcile);
+    let bulk_flux_suspend = kk.supports(ResourceAction::FluxSuspend);
     let bulk_helmrelease = kk.is_helmrelease();
     let bulk_has_source_ref = kk.has_source_ref();
     let bulk_certificate = kk.is_certificate();
     let bulk_logs = kk.has_logs();
     let key_sv = StoredValue::new(kind.key.clone());
+    let bulk_permissions = selection_permissions_resource(move || {
+        let key = key_sv.get_value();
+        let uids = selected.get();
+        rows.with(|rows| table_logic::bulk_targets(&key, rows, &uids))
+    });
     let can_rerun_jobs = Signal::derive(move || {
         let selected = selected.get();
         !selected.is_empty()
@@ -310,13 +317,15 @@ fn MobilePane(kind: ResourceKind, rows: RowMap, columns: RwSignal<Vec<String>>) 
             select_mode=select_mode
             all_uids=move || shown_uids.get()
             do_bulk=do_bulk
-                do_delete=do_delete
-                on_logs=on_logs
-                show_logs=Signal::derive(move || bulk_logs)
+            do_delete=do_delete
+            permissions=bulk_permissions
+            on_logs=on_logs
+            show_logs=Signal::derive(move || bulk_logs)
             bulk_workload=bulk_workload
             bulk_job=bulk_job
             can_rerun_jobs=can_rerun_jobs
-            bulk_flux=bulk_flux
+            bulk_flux_reconcile=bulk_flux_reconcile
+            bulk_flux_suspend=bulk_flux_suspend
             bulk_helmrelease=bulk_helmrelease
             bulk_has_source_ref=bulk_has_source_ref
             bulk_certificate=bulk_certificate />

@@ -3,14 +3,15 @@
 //! Triggered by the overflow button on a `MobileRowCard`.
 
 use leptos::prelude::*;
-use roder_core::{ResourceKind, RowStatus};
+use roder_core::{ResourceAction, ResourceKind, RowStatus};
 
+use crate::app::controllers::detail::fetch_selection_permissions;
 use crate::app::events::{fire_action, fire_action_with};
 use crate::app::state::{
     open_logs, Catalog, CtxMenu, DetailTarget, ExecOpen, ExecTarget, FileBrowserOpen, LogPods,
     LogTarget, TableRows, TableSelected, TableTargets, TreeOpen,
 };
-use crate::app::table_logic::{resolve_action_targets, targets_all};
+use crate::app::table_logic::{resolve_current_action_targets, targets_all};
 use crate::app::ui::{
     ask_confirm, ask_delete, delete_extra, show_toast, use_option_overlay, Confirm, DeleteRequest,
     Toast, ToastKind,
@@ -38,58 +39,35 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
     let tree_open = expect_context::<TreeOpen>().0;
 
     let (snapshot, closing, do_close) = use_option_overlay(ctx);
+    let action_permissions = LocalResource::new(move || {
+        let targets = snapshot
+            .get()
+            .map(|menu| {
+                resolve_current_action_targets(&menu, table_selected, table_rows, table_targets)
+                    .targets
+            })
+            .unwrap_or_default();
+        async move { fetch_selection_permissions(targets).await }
+    });
 
     view! {
         {move || snapshot.get().map(|m| {
             let rows_opt = table_rows.get_value();
-            let selected = table_selected.get_value().map(|signal| signal.get_untracked());
-            let empty_rows = Default::default();
-            let empty_targets = Default::default();
-            let resolved = match (rows_opt, table_targets.get_value()) {
-                (Some(rows), Some(row_targets)) => rows.with_untracked(|rows| {
-                    row_targets.with_untracked(|row_targets| {
-                        resolve_action_targets(
-                            &m.uid,
-                            &m.target,
-                            selected.as_ref(),
-                            rows,
-                            row_targets,
-                        )
-                    })
-                }),
-                (Some(rows), None) => rows.with_untracked(|rows| {
-                    resolve_action_targets(
-                        &m.uid,
-                        &m.target,
-                        selected.as_ref(),
-                        rows,
-                        &empty_targets,
-                    )
-                }),
-                (None, Some(row_targets)) => row_targets.with_untracked(|row_targets| {
-                    resolve_action_targets(
-                        &m.uid,
-                        &m.target,
-                        selected.as_ref(),
-                        &empty_rows,
-                        row_targets,
-                    )
-                }),
-                (None, None) => resolve_action_targets(
-                    &m.uid,
-                    &m.target,
-                    selected.as_ref(),
-                    &empty_rows,
-                    &empty_targets,
-                ),
-            };
+            let resolved = resolve_current_action_targets(&m, table_selected, table_rows, table_targets);
             let target_uids = resolved.uids;
             let targets = resolved.targets;
             let is_bulk = targets.len() > 1;
+            let permitted = move |action| {
+                action_permissions
+                    .get()
+                    .is_some_and(|permissions| permissions.allows_all(action))
+            };
             let is_pod = targets_all(&targets, |kind| kind.is_pod());
             let is_workload = targets_all(&targets, |kind| kind.is_workload());
             let is_scalable = targets_all(&targets, |kind| kind.is_scalable());
-            let is_flux = targets_all(&targets, |kind| kind.is_flux());
+            let can_flux_reconcile = targets_all(&targets, |kind| kind.supports(ResourceAction::FluxReconcile));
+            let can_flux_suspend = targets_all(&targets, |kind| kind.supports(ResourceAction::FluxSuspend));
+            let is_flux = can_flux_reconcile || can_flux_suspend;
             let is_helmrelease = targets_all(&targets, |kind| kind.is_helmrelease());
             let has_source_ref = targets_all(&targets, |kind| kind.has_source_ref());
             let is_eso = targets_all(&targets, |kind| kind.is_eso());
@@ -259,14 +237,14 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
                     })}
                     {(!is_bulk).then(|| view! { <button class="sheet-item" on:click=open>"Open details"</button> })}
                     {(!is_bulk).then(|| view! { <button class="sheet-item" on:click=open_tree>"Relationships"</button> })}
-                    {has_logs.then(|| view! { <button class="sheet-item" on:click=logs>"Logs"</button> })}
-                    {shell.map(|s| view! { <button class="sheet-item" on:click=s>"Shell"</button> })}
-                    {files.map(|open| view! { <button class="sheet-item" on:click=open>"Files"</button> })}
+                    {(has_logs && permitted(ResourceAction::Logs)).then(|| view! { <button class="sheet-item" on:click=logs>"Logs"</button> })}
+                    {permitted(ResourceAction::Exec).then_some(shell).flatten().map(|s| view! { <button class="sheet-item" on:click=s>"Shell"</button> })}
+                    {permitted(ResourceAction::Exec).then_some(files).flatten().map(|open| view! { <button class="sheet-item" on:click=open>"Files"</button> })}
                     {ns_item.map(|ns| view! { <button class="sheet-item" on:click=goto_ns>"Go to namespace "<span class="sheet-sub">{ns}</span></button> })}
                     {node_item.map(|node| view! { <button class="sheet-item" on:click=goto_node>"Go to node "<span class="sheet-sub">{node}</span></button> })}
                     <button class="sheet-item" on:click=copy>"Copy name"</button>
-                    {is_workload.then(|| view! { <button class="sheet-item" on:click=restart>"Restart"</button> })}
-                    {(!is_bulk && is_scalable).then(|| {
+                    {(is_workload && permitted(ResourceAction::Restart)).then(|| view! { <button class="sheet-item" on:click=restart>"Restart"</button> })}
+                    {(!is_bulk && is_scalable && permitted(ResourceAction::Scale)).then(|| {
                         let t = m.target.clone();
                         view! {
                             <div class="sheet-item sheet-scale">
@@ -286,24 +264,28 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
                             </div>
                         }
                     })}
-                    {is_cronjob.then(|| view! { <button class="sheet-item" on:click=trigger>"Trigger"</button> })}
-                    {jobs_terminal.then(|| view! { <button class="sheet-item" on:click=rerun>"Re-run"</button> })}
-                    {is_kopiur_snapshot_policy.then(|| view! { <button class="sheet-item" on:click=snapshot_now>"Snapshot Now"</button> })}
+                    {(is_cronjob && permitted(ResourceAction::CronJobTrigger)).then(|| view! { <button class="sheet-item" on:click=trigger>"Trigger"</button> })}
+                    {(jobs_terminal && permitted(ResourceAction::JobRerun)).then(|| view! { <button class="sheet-item" on:click=rerun>"Re-run"</button> })}
+                    {(is_kopiur_snapshot_policy && permitted(ResourceAction::KopiurSnapshotNow)).then(|| view! { <button class="sheet-item" on:click=snapshot_now>"Snapshot Now"</button> })}
                     {is_flux.then(|| view! {
-                        <button class="sheet-item" on:click=reconcile>"Reconcile"</button>
-                        {has_source_ref.then(|| view! {
-                            <button class="sheet-item" on:click=reconcile_with_source>"Reconcile w/ source"</button>
+                        {(can_flux_reconcile && permitted(ResourceAction::FluxReconcile)).then(|| view! {
+                            <button class="sheet-item" on:click=reconcile>"Reconcile"</button>
+                            {(has_source_ref && permitted(ResourceAction::FluxReconcileWithSource)).then(|| view! {
+                                <button class="sheet-item" on:click=reconcile_with_source>"Reconcile w/ source"</button>
+                            })}
+                            {(is_helmrelease && permitted(ResourceAction::FluxForce)).then(|| view! {
+                                <button class="sheet-item" on:click=force>"Force"</button>
+                            })}
+                            {(is_helmrelease && permitted(ResourceAction::FluxReset)).then(|| view! {
+                                <button class="sheet-item" on:click=reset>"Reset"</button>
+                            })}
                         })}
-                        {is_helmrelease.then(|| view! {
-                            <button class="sheet-item" on:click=force>"Force"</button>
-                            <button class="sheet-item" on:click=reset>"Reset"</button>
-                        })}
-                        {show_suspend.then(|| view! { <button class="sheet-item" on:click=suspend>"Suspend"</button> })}
-                        {show_resume.then(|| view! { <button class="sheet-item" on:click=resume>"Resume"</button> })}
+                        {(can_flux_suspend && show_suspend && permitted(ResourceAction::FluxSuspend)).then(|| view! { <button class="sheet-item" on:click=suspend>"Suspend"</button> })}
+                        {(can_flux_suspend && show_resume && permitted(ResourceAction::FluxSuspend)).then(|| view! { <button class="sheet-item" on:click=resume>"Resume"</button> })}
                     })}
-                    {is_eso.then(|| view! { <button class="sheet-item" on:click=refresh>"Refresh"</button> })}
-                    {is_certificate.then(|| view! { <button class="sheet-item" on:click=renew_certificate>"Force renew"</button> })}
-                    <button class="sheet-item danger" on:click=delete>"Delete"</button>
+                    {(is_eso && permitted(ResourceAction::ExternalSecretsRefresh)).then(|| view! { <button class="sheet-item" on:click=refresh>"Refresh"</button> })}
+                    {(is_certificate && permitted(ResourceAction::CertificateRenew)).then(|| view! { <button class="sheet-item" on:click=renew_certificate>"Force renew"</button> })}
+                    {permitted(ResourceAction::Delete).then(|| view! { <button class="sheet-item danger" on:click=delete>"Delete"</button> })}
                 </div>
             }
         })}

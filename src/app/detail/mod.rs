@@ -19,6 +19,7 @@ use crate::app::util::predicate::KindKind;
 use crate::app::util::yaml_hl;
 use crate::data;
 use leptos::prelude::*;
+use roder_core::ResourceAction;
 
 use self::info::info_view;
 use self::metrics::MetricsChart;
@@ -112,7 +113,8 @@ pub(crate) fn RowDetail(
     let kk = KindKind::new(&group, &version, &kind);
     let is_workload = kk.is_workload();
     let is_scalable = kk.is_scalable();
-    let is_flux = kk.is_flux();
+    let is_flux =
+        kk.supports(ResourceAction::FluxReconcile) || kk.supports(ResourceAction::FluxSuspend);
     let is_helmrelease = kk.is_helmrelease();
     let has_source_ref = kk.has_source_ref();
     let is_eso = kk.is_eso();
@@ -167,29 +169,17 @@ pub(crate) fn RowDetail(
         }
     });
 
-    let can_patch = move || {
+    let allows = move |action| {
         controller
             .permissions
             .get()
-            .is_some_and(|value| value.patch)
+            .is_some_and(|value| value.allows(action))
     };
-    let can_delete = move || {
+    let can_apply = move || {
         controller
             .permissions
             .get()
-            .is_some_and(|value| value.delete)
-    };
-    let can_create = move || {
-        controller
-            .permissions
-            .get()
-            .is_some_and(|value| value.create)
-    };
-    let can_update_status = move || {
-        controller
-            .permissions
-            .get()
-            .is_some_and(|value| value.update_status)
+            .is_some_and(|value| value.apply())
     };
     let job_terminal = move || {
         obj.get().flatten().is_some_and(|detail| {
@@ -218,21 +208,29 @@ pub(crate) fn RowDetail(
         <div class="rd">
             <div class="actions">
                 {is_workload.then(|| view! {
-                    <Show when=can_patch fallback=|| ()>
+                    <Show when=move || allows(ResourceAction::Restart) fallback=|| ()>
                         <button class="act" on:click=move |_| run("restart", serde_json::json!({}))>"Restart"</button>
-                        {is_scalable.then(|| view! { <ScaleControl run=run current=current_replicas /> })}
                     </Show>
+                    {is_scalable.then(|| view! { <Show when=move || allows(ResourceAction::Scale)><ScaleControl run=run current=current_replicas /></Show> })}
                 })}
                 {is_flux.then(|| view! {
-                    <Show when=can_patch fallback=|| ()>
+                    <Show when=move || allows(ResourceAction::FluxReconcile) fallback=|| ()>
                         <button class="act" on:click=move |_| run("flux-reconcile", serde_json::json!({}))>"Reconcile"</button>
-                        {has_source_ref.then(|| view! {
-                            <button class="act" on:click=move |_| run("flux-reconcile-with-source", serde_json::json!({}))>"Reconcile w/ source"</button>
-                        })}
-                        {is_helmrelease.then(|| view! {
+                    </Show>
+                    {has_source_ref.then(|| view! {
+                        <Show when=move || allows(ResourceAction::FluxReconcileWithSource)>
+                        <button class="act" on:click=move |_| run("flux-reconcile-with-source", serde_json::json!({}))>"Reconcile w/ source"</button>
+                        </Show>
+                    })}
+                    {is_helmrelease.then(|| view! {
+                        <Show when=move || allows(ResourceAction::FluxForce)>
                             <button class="act" on:click=move |_| run("flux-force", serde_json::json!({}))>"Force"</button>
+                        </Show>
+                        <Show when=move || allows(ResourceAction::FluxReset)>
                             <button class="act" on:click=move |_| run("flux-reset", serde_json::json!({}))>"Reset"</button>
-                        })}
+                        </Show>
+                    })}
+                    <Show when=move || allows(ResourceAction::FluxSuspend)>
                         <Show when=move || !is_suspended() fallback=|| ()>
                             <button class="act" on:click=move |_| run("flux-suspend", serde_json::json!({}))>"Suspend"</button>
                         </Show>
@@ -242,12 +240,12 @@ pub(crate) fn RowDetail(
                     </Show>
                 })}
                 {is_eso.then(|| view! {
-                    <Show when=can_patch fallback=|| ()>
+                    <Show when=move || allows(ResourceAction::ExternalSecretsRefresh) fallback=|| ()>
                         <button class="act" on:click=move |_| run("eso-refresh", serde_json::json!({}))>"Refresh"</button>
                     </Show>
                 })}
                 {is_certificate.then(|| view! {
-                    <Show when=can_update_status fallback=|| ()>
+                    <Show when=move || allows(ResourceAction::CertificateRenew) fallback=|| ()>
                         <button class="act" on:click=move |_| {
                             ask_confirm(
                                 confirm,
@@ -261,37 +259,36 @@ pub(crate) fn RowDetail(
                     </Show>
                 })}
                 {is_cronjob.then(|| view! {
-                    <Show when=can_patch fallback=|| ()>
+                    <Show when=move || allows(ResourceAction::CronJobTrigger) fallback=|| ()>
                         <button class="act" on:click=move |_| run("cronjob-trigger", serde_json::json!({}))>"Trigger"</button>
                     </Show>
                 })}
                 {is_job.then(|| view! {
-                    <Show when=move || can_create() && job_terminal() fallback=|| ()>
+                    <Show when=move || allows(ResourceAction::JobRerun) && job_terminal() fallback=|| ()>
                         <button class="act" on:click=move |_| run("job-rerun", serde_json::json!({}))>"Re-run"</button>
                     </Show>
                 })}
                 {is_kopiur_snapshot_policy.then(|| view! {
-                    <Show when=can_patch fallback=|| ()>
+                    <Show when=move || allows(ResourceAction::KopiurSnapshotNow) fallback=|| ()>
                         <button class="act" on:click=move |_| run("kopiur-snapshot-now", serde_json::json!({}))>"Snapshot Now"</button>
                     </Show>
                 })}
                 {is_pod.then(|| {
-                    let exec_ns  = ns.clone();
-                    let exec_pod = pod.clone();
-                    view! {
+                    view! { <Show when=move || allows(ResourceAction::Exec)>
                         <button class="act" on:click=move |_| {
+                            let target = tv.get_value();
                             exec_open.set(Some(ExecTarget {
-                                namespace: exec_ns.clone(),
-                                pod: exec_pod.clone(),
+                                namespace: target.namespace.unwrap_or_default(),
+                                pod: target.name,
                                 container: None,
                                 pending: false,
                                 node_shell: false,
                                 image: String::new(),
                             }));
                         }>"Shell"</button>
-                    }
+                    </Show> }
                 })}
-                {move || can_delete().then(|| view! {
+                {move || allows(ResourceAction::Delete).then(|| view! {
                     <button class="act danger" on:click=move |_| {
                         ask_delete(delete_confirm, "Delete this resource?", move |force, propagation| {
                             run("delete", delete_extra(force, propagation));
@@ -346,7 +343,7 @@ pub(crate) fn RowDetail(
                             <div class="yaml-pane">
                                 <div class="yaml-head">
                                     <h4>"YAML"</h4>
-                                    {move || can_patch().then(|| view! {
+                                    {move || can_apply().then(|| view! {
                                         <Show when=move || yaml_editing.get() fallback=|| ()>
                                             <button class="act"
                                                 on:click=move |_| run("apply", serde_json::json!({ "yaml": yaml.get() }))>

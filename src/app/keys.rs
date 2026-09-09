@@ -18,8 +18,9 @@ use std::time::Duration;
 
 use leptos::prelude::*;
 use leptos_router::hooks::use_navigate;
+use roder_core::ResourceAction;
 
-use crate::app::controllers::detail::DetailTab;
+use crate::app::controllers::detail::{fetch_selection_permissions, DetailTab};
 use crate::app::hooks::{scroll_cursor_into_view, ResourceTable};
 use crate::app::state::{
     open_logs, pinned_in_catalog_order, AccessReviewOpen, AlertsOpen, Catalog, CtxMenu,
@@ -658,22 +659,35 @@ fn use_key_dispatch() {
                     let kill = key == "k";
                     let targets = action_targets(&h);
                     if !targets.is_empty() {
-                        let n = targets.len();
-                        let verb = if kill { "Force delete" } else { "Delete" };
-                        let message = if n == 1 {
-                            format!("{verb} this resource?")
-                        } else {
-                            format!("{verb} {n} resources?")
-                        };
+                        e.prevent_default();
                         let selected = h.table.selected;
-                        ask_delete(delete_confirm, message, move |force, propagation| {
-                            crate::app::events::fire_action_with(
-                                toast,
-                                "delete",
-                                &targets,
-                                delete_extra(force || kill, propagation),
-                            );
-                            selected.set(BTreeSet::new());
+                        leptos::task::spawn_local(async move {
+                            let permissions = fetch_selection_permissions(targets.clone()).await;
+                            if !permissions.allows_all(ResourceAction::Delete) {
+                                let (allowed, total) = permissions.count(ResourceAction::Delete);
+                                show_toast(
+                                    toast,
+                                    format!("Delete permitted for {allowed} of {total} resources"),
+                                    ToastKind::Err,
+                                );
+                                return;
+                            }
+                            let n = targets.len();
+                            let verb = if kill { "Force delete" } else { "Delete" };
+                            let message = if n == 1 {
+                                format!("{verb} this resource?")
+                            } else {
+                                format!("{verb} {n} resources?")
+                            };
+                            ask_delete(delete_confirm, message, move |force, propagation| {
+                                crate::app::events::fire_action_with(
+                                    toast,
+                                    "delete",
+                                    &targets,
+                                    delete_extra(force || kill, propagation),
+                                );
+                                selected.set(BTreeSet::new());
+                            });
                         });
                     }
                 }

@@ -9,6 +9,7 @@ use axum::http::StatusCode;
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
+use roder_core::ResourceAction;
 use roder_k8s::Backend;
 use serde::Deserialize;
 use tokio_stream::StreamExt;
@@ -33,12 +34,36 @@ pub struct LogQuery {
 /// Live pod logs as SSE (follows the log stream).
 pub async fn logs(Extension(b): Extension<Arc<Backend>>, Query(q): Query<LogQuery>) -> Response {
     let (res, follow) = if let Some(pod) = q.pod.as_deref() {
+        if !b
+            .can_action(
+                ResourceAction::Logs,
+                POD_KEY,
+                Some(&q.namespace),
+                Some(pod),
+                None,
+            )
+            .await
+        {
+            return StatusCode::FORBIDDEN.into_response();
+        }
         // Follow anything not yet in a terminal phase; a pod that's still starting
         // (Pending/ContainerCreating) may produce its first log line, or crash, at
         // any moment, so it needs to be watched just like a Running one.
         let follow = b.pod_active(&q.namespace, pod).await;
         (b.logs(&q.namespace, pod, q.container, follow).await, follow)
     } else if let (Some(key), Some(name)) = (q.key.as_deref(), q.name.as_deref()) {
+        if !b
+            .can_action(
+                ResourceAction::Logs,
+                key,
+                Some(&q.namespace),
+                Some(name),
+                None,
+            )
+            .await
+        {
+            return StatusCode::FORBIDDEN.into_response();
+        }
         (b.logs_workload(key, &q.namespace, name, true).await, true)
     } else {
         return (
@@ -93,7 +118,10 @@ pub async fn metrics_history(
     Extension(b): Extension<Arc<Backend>>,
     Query(q): Query<MetricsQuery>,
 ) -> Response {
-    if !b.can("get", POD_KEY, Some(&q.namespace)).await {
+    if !b
+        .can_named("get", POD_KEY, Some(&q.namespace), &q.name)
+        .await
+    {
         return StatusCode::FORBIDDEN.into_response();
     }
     match b.pod_metrics_history(&q.namespace, &q.name).await {

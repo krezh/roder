@@ -132,6 +132,7 @@ pub enum ResourceAction {
     Drain,
     Logs,
     Exec,
+    DebugExec,
     FluxReconcile,
     FluxReconcileWithSource,
     FluxSuspend,
@@ -145,6 +146,52 @@ pub enum ResourceAction {
 }
 
 impl ResourceAction {
+    pub const ALL: [Self; 19] = [
+        Self::Delete,
+        Self::Evict,
+        Self::Scale,
+        Self::Restart,
+        Self::Cordon,
+        Self::Drain,
+        Self::Logs,
+        Self::Exec,
+        Self::DebugExec,
+        Self::FluxReconcile,
+        Self::FluxReconcileWithSource,
+        Self::FluxSuspend,
+        Self::FluxForce,
+        Self::FluxReset,
+        Self::ExternalSecretsRefresh,
+        Self::CertificateRenew,
+        Self::CronJobTrigger,
+        Self::JobRerun,
+        Self::KopiurSnapshotNow,
+    ];
+
+    pub const fn api_name(self) -> &'static str {
+        match self {
+            Self::Delete => "delete",
+            Self::Evict => "evict",
+            Self::Scale => "scale",
+            Self::Restart => "restart",
+            Self::Cordon => "cordon",
+            Self::Drain => "drain",
+            Self::Logs => "logs",
+            Self::Exec => "exec",
+            Self::DebugExec => "debug-exec",
+            Self::FluxReconcile => "flux-reconcile",
+            Self::FluxReconcileWithSource => "flux-reconcile-with-source",
+            Self::FluxSuspend => "flux-suspend",
+            Self::FluxForce => "flux-force",
+            Self::FluxReset => "flux-reset",
+            Self::ExternalSecretsRefresh => "eso-refresh",
+            Self::CertificateRenew => "certificate-renew",
+            Self::CronJobTrigger => "cronjob-trigger",
+            Self::JobRerun => "job-rerun",
+            Self::KopiurSnapshotNow => "kopiur-snapshot-now",
+        }
+    }
+
     pub fn from_api_name(name: &str) -> Option<Self> {
         Some(match name {
             "delete" => Self::Delete,
@@ -181,6 +228,7 @@ impl ResourceCapabilities {
                 ResourceAction::Evict,
                 ResourceAction::Logs,
                 ResourceAction::Exec,
+                ResourceAction::DebugExec,
             ]);
         }
         if group.is_empty() && kind == "Node" {
@@ -203,16 +251,25 @@ impl ResourceCapabilities {
         if group == "batch" && kind == "CronJob" {
             bits |= bit(ResourceAction::CronJobTrigger);
         }
-        if group.ends_with("fluxcd.io") {
-            bits |= bits_for(&[ResourceAction::FluxReconcile, ResourceAction::FluxSuspend]);
-            if matches!(kind, "Kustomization" | "HelmRelease") {
-                bits |= bit(ResourceAction::FluxReconcileWithSource);
-            }
-            if kind == "HelmRelease" {
-                bits |= bits_for(&[ResourceAction::FluxForce, ResourceAction::FluxReset]);
-            }
+        if flux_reconcile_kind(group, kind) {
+            bits |= bit(ResourceAction::FluxReconcile);
         }
-        if group == "external-secrets.io" {
+        if flux_suspend_kind(group, kind) {
+            bits |= bit(ResourceAction::FluxSuspend);
+        }
+        if matches!(
+            (group, kind),
+            ("kustomize.toolkit.fluxcd.io", "Kustomization")
+                | ("helm.toolkit.fluxcd.io", "HelmRelease")
+        ) {
+            bits |= bit(ResourceAction::FluxReconcileWithSource);
+        }
+        if group == "helm.toolkit.fluxcd.io" && kind == "HelmRelease" {
+            bits |= bits_for(&[ResourceAction::FluxForce, ResourceAction::FluxReset]);
+        }
+        if group == "external-secrets.io"
+            && matches!(kind, "ExternalSecret" | "ClusterExternalSecret")
+        {
             bits |= bit(ResourceAction::ExternalSecretsRefresh);
         }
         if group == "cert-manager.io" && kind == "Certificate" {
@@ -227,6 +284,68 @@ impl ResourceCapabilities {
 
     pub fn supports(self, action: ResourceAction) -> bool {
         self.0 & bit(action) != 0
+    }
+}
+
+fn flux_reconcile_kind(group: &str, kind: &str) -> bool {
+    matches!(
+        (group, kind),
+        ("kustomize.toolkit.fluxcd.io", "Kustomization")
+            | ("helm.toolkit.fluxcd.io", "HelmRelease")
+            | ("source.toolkit.fluxcd.io", "GitRepository")
+            | ("source.toolkit.fluxcd.io", "OCIRepository")
+            | ("source.toolkit.fluxcd.io", "HelmRepository")
+            | ("source.toolkit.fluxcd.io", "Bucket")
+            | ("source.toolkit.fluxcd.io", "HelmChart")
+            | ("image.toolkit.fluxcd.io", "ImageRepository")
+            | ("image.toolkit.fluxcd.io", "ImagePolicy")
+            | ("image.toolkit.fluxcd.io", "ImageUpdateAutomation")
+            | ("notification.toolkit.fluxcd.io", "Receiver")
+    )
+}
+
+fn flux_suspend_kind(group: &str, kind: &str) -> bool {
+    flux_reconcile_kind(group, kind)
+        || matches!(
+            (group, kind),
+            ("notification.toolkit.fluxcd.io", "Alert")
+                | ("notification.toolkit.fluxcd.io", "Provider")
+        )
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActionPermissions {
+    pub apply: bool,
+    pub actions: BTreeMap<String, bool>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActionSummary {
+    pub attempted: usize,
+    pub succeeded: usize,
+    pub forbidden: usize,
+    pub failed: usize,
+}
+
+impl ActionSummary {
+    pub fn merge(&mut self, other: Self) {
+        self.attempted += other.attempted;
+        self.succeeded += other.succeeded;
+        self.forbidden += other.forbidden;
+        self.failed += other.failed;
+    }
+}
+
+impl ActionPermissions {
+    pub fn allows(&self, action: ResourceAction) -> bool {
+        self.actions
+            .get(action.api_name())
+            .copied()
+            .unwrap_or(false)
+    }
+
+    pub fn allows_api_name(&self, name: &str) -> bool {
+        ResourceAction::from_api_name(name).is_some_and(|action| self.allows(action))
     }
 }
 
@@ -921,6 +1040,10 @@ mod tests {
         let daemon_set = capabilities("apps", "v1", "DaemonSet");
         assert!(daemon_set.supports(ResourceAction::Restart));
         assert!(!daemon_set.supports(ResourceAction::Scale));
+
+        let pod = capabilities("", "v1", "Pod");
+        assert!(pod.supports(ResourceAction::Exec));
+        assert!(pod.supports(ResourceAction::DebugExec));
     }
 
     #[test]
@@ -933,6 +1056,53 @@ mod tests {
         let helm_release = capabilities("helm.toolkit.fluxcd.io", "v2", "HelmRelease");
         assert!(helm_release.supports(ResourceAction::FluxForce));
         assert!(helm_release.supports(ResourceAction::FluxReset));
+
+        let source = capabilities("source.toolkit.fluxcd.io", "v1", "GitRepository");
+        assert!(source.supports(ResourceAction::FluxReconcile));
+        assert!(source.supports(ResourceAction::FluxSuspend));
+        assert!(!source.supports(ResourceAction::FluxReconcileWithSource));
+
+        let receiver = capabilities("notification.toolkit.fluxcd.io", "v1", "Receiver");
+        assert!(receiver.supports(ResourceAction::FluxReconcile));
+        assert!(receiver.supports(ResourceAction::FluxSuspend));
+    }
+
+    #[test]
+    fn flux_actions_require_exact_groups_and_kinds() {
+        let cases = [
+            ("source.toolkit.fluxcd.io", "GitRepository", true, true),
+            ("source.toolkit.fluxcd.io", "OCIRepository", true, true),
+            ("source.toolkit.fluxcd.io", "HelmRepository", true, true),
+            ("source.toolkit.fluxcd.io", "Bucket", true, true),
+            ("source.toolkit.fluxcd.io", "HelmChart", true, true),
+            ("kustomize.toolkit.fluxcd.io", "Kustomization", true, true),
+            ("helm.toolkit.fluxcd.io", "HelmRelease", true, true),
+            ("image.toolkit.fluxcd.io", "ImageRepository", true, true),
+            ("image.toolkit.fluxcd.io", "ImagePolicy", true, true),
+            (
+                "image.toolkit.fluxcd.io",
+                "ImageUpdateAutomation",
+                true,
+                true,
+            ),
+            ("notification.toolkit.fluxcd.io", "Receiver", true, true),
+            ("notification.toolkit.fluxcd.io", "Alert", false, true),
+            ("notification.toolkit.fluxcd.io", "Provider", false, true),
+            ("example.fluxcd.io", "HelmRelease", false, false),
+        ];
+        for (group, kind, reconcile, suspend) in cases {
+            let capabilities = capabilities(group, "v1", kind);
+            assert_eq!(
+                capabilities.supports(ResourceAction::FluxReconcile),
+                reconcile,
+                "reconcile capability for {group}/{kind}"
+            );
+            assert_eq!(
+                capabilities.supports(ResourceAction::FluxSuspend),
+                suspend,
+                "suspend capability for {group}/{kind}"
+            );
+        }
     }
 
     #[test]
@@ -942,6 +1112,14 @@ mod tests {
         assert!(!service.supports(ResourceAction::ExternalSecretsRefresh));
         assert!(!service.supports(ResourceAction::CertificateRenew));
         assert!(!service.supports(ResourceAction::KopiurSnapshotNow));
+
+        let store = capabilities("external-secrets.io", "v1", "SecretStore");
+        assert!(!store.supports(ResourceAction::ExternalSecretsRefresh));
+        let external_secret = capabilities("external-secrets.io", "v1", "ExternalSecret");
+        assert!(external_secret.supports(ResourceAction::ExternalSecretsRefresh));
+        let cluster_external_secret =
+            capabilities("external-secrets.io", "v1", "ClusterExternalSecret");
+        assert!(cluster_external_secret.supports(ResourceAction::ExternalSecretsRefresh));
     }
 
     #[test]
@@ -955,6 +1133,43 @@ mod tests {
             Some(ResourceAction::Cordon)
         );
         assert_eq!(ResourceAction::from_api_name("apply"), None);
+        assert_eq!(
+            ResourceAction::from_api_name("flux-resume")
+                .unwrap()
+                .api_name(),
+            "flux-suspend"
+        );
+    }
+
+    #[test]
+    fn action_permissions_use_canonical_names_for_aliases() {
+        let permissions = ActionPermissions {
+            apply: false,
+            actions: BTreeMap::from([("flux-suspend".into(), true)]),
+        };
+        assert!(permissions.allows_api_name("flux-suspend"));
+        assert!(permissions.allows_api_name("flux-resume"));
+        assert!(!permissions.allows_api_name("flux-reconcile"));
+    }
+
+    #[test]
+    fn action_summaries_merge_all_outcomes() {
+        let mut summary = ActionSummary {
+            attempted: 2,
+            succeeded: 1,
+            forbidden: 1,
+            failed: 0,
+        };
+        summary.merge(ActionSummary {
+            attempted: 1,
+            succeeded: 0,
+            forbidden: 0,
+            failed: 1,
+        });
+        assert_eq!(summary.attempted, 3);
+        assert_eq!(summary.succeeded, 1);
+        assert_eq!(summary.forbidden, 1);
+        assert_eq!(summary.failed, 1);
     }
 
     #[test]

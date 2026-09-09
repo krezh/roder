@@ -90,8 +90,18 @@ impl Backend {
         ns: Option<&str>,
         name: &str,
     ) -> Result<(), K8sError> {
+        let kind = self.resource_kind(key)?;
+        let annotation = match kind.kind.as_str() {
+            "ExternalSecret" => "force-sync",
+            "ClusterExternalSecret" => "external-secrets.io/force-sync",
+            _ => {
+                return Err(K8sError::Api(
+                    "refresh requires an ExternalSecret or ClusterExternalSecret".into(),
+                ))
+            }
+        };
         let patch = json!({ "metadata": { "annotations": {
-            "force-sync": now_rfc3339()
+            (annotation): now_rfc3339()
         }}});
         self.merge_patch(key, ns, name, patch).await
     }

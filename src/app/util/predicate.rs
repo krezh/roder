@@ -43,10 +43,6 @@ impl<'a> KindKind<'a> {
         self.supports(ResourceAction::CronJobTrigger)
     }
 
-    pub(crate) fn is_flux(&self) -> bool {
-        self.supports(ResourceAction::FluxReconcile)
-    }
-
     pub(crate) fn is_eso(&self) -> bool {
         self.supports(ResourceAction::ExternalSecretsRefresh)
     }

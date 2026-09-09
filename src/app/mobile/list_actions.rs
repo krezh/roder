@@ -1,4 +1,5 @@
 use leptos::prelude::*;
+use roder_core::ActionSummary;
 
 use crate::app::state::OnlyProblems;
 use crate::app::ui::{ask_sweep, show_toast, show_toast_detail, SweepRequest, Toast, ToastKind};
@@ -58,8 +59,9 @@ fn MobileSyncButton() -> impl IntoView {
     view! { <button type="button" class="mobile-sync-btn" on:click=move |_| {
         let payload = serde_json::json!({ "action": "flux-reconcile-all", "namespace": namespace.get_untracked() });
         leptos::task::spawn_local(async move { match data::post_action(&payload).await {
-            Ok(body) => { let count = body.trim().parse::<usize>().unwrap_or(0); if count == 0 { show_toast(toast, "No Flux resources reconciled", ToastKind::Err); }
-                else { show_toast(toast, format!("Reconcile requested for {count} resource(s)"), ToastKind::Ok); } }
+            Ok(body) => { let summary: ActionSummary = serde_json::from_str(&body).unwrap_or_default(); if summary.succeeded == 0 { show_toast(toast, "No Flux resources reconciled", ToastKind::Err); }
+                else if summary.forbidden + summary.failed > 0 { show_toast_detail(toast, format!("Reconciled {} of {} operation(s)", summary.succeeded, summary.attempted), Some(format!("{} forbidden, {} failed", summary.forbidden, summary.failed)), ToastKind::Err); }
+                else { show_toast(toast, format!("Reconcile requested for {} resource(s)", summary.succeeded), ToastKind::Ok); } }
             Err(error) => show_toast_detail(toast, "Sync failed", Some(error), ToastKind::Err),
         }});
     }>"Sync"</button> }

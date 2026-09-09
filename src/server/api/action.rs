@@ -92,6 +92,9 @@ pub async fn action(
     } else {
         None
     };
+    if req.action == "scale" && req.replicas.is_none() {
+        return (StatusCode::BAD_REQUEST, "missing replicas").into_response();
+    }
 
     if let Some(response) =
         talos_mutation(&state, &headers, &identity, &caller.owner, &req, b.clone()).await
@@ -99,7 +102,8 @@ pub async fn action(
         return response;
     }
 
-    if ResourceAction::from_api_name(&req.action).is_some() {
+    let resource_action = ResourceAction::from_api_name(&req.action);
+    if resource_action.is_some() {
         let Some(key) = req.key.as_deref() else {
             return (StatusCode::BAD_REQUEST, "missing key").into_response();
         };
@@ -108,6 +112,9 @@ pub async fn action(
             Err(error) => return (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
         };
         if let Err(error) = validate_resource_action(&req.action, &kind) {
+            return (StatusCode::BAD_REQUEST, error).into_response();
+        }
+        if let Err(error) = validate_flux_options(&req, &kind) {
             return (StatusCode::BAD_REQUEST, error).into_response();
         }
     }
@@ -140,7 +147,7 @@ pub async fn action(
         };
     } else if req.action == "flux-reconcile-all" {
         return match b.flux_reconcile_all(ns).await {
-            Ok(n) => (StatusCode::OK, n.to_string()).into_response(),
+            Ok(summary) => Json(summary).into_response(),
             Err(e) => bad_gateway(e),
         };
     } else if req.action == "drain" {
@@ -148,6 +155,12 @@ pub async fn action(
             return (StatusCode::BAD_REQUEST, "missing key or name").into_response();
         };
         let options = drain_options.expect("drain options validated above");
+        if !b
+            .can_action(ResourceAction::Drain, key, None, Some(name), Some(&options))
+            .await
+        {
+            return (StatusCode::FORBIDDEN, "drain is not permitted").into_response();
+        }
         if let Some(response) =
             crate::server::ha::forward_action_from_target(&state, &headers, &identity, name, &req)
                 .await
@@ -195,6 +208,15 @@ pub async fn action(
         let (Some(key), Some(name)) = (req.key.as_deref(), req.name.as_deref()) else {
             return (StatusCode::BAD_REQUEST, "missing key or name").into_response();
         };
+        if let Some(action_kind) = resource_action {
+            if !b.can_action(action_kind, key, ns, Some(name), None).await {
+                return (
+                    StatusCode::FORBIDDEN,
+                    format!("action {} is not permitted", req.action),
+                )
+                    .into_response();
+            }
+        }
         match req.action.as_str() {
             "delete" => {
                 b.delete(key, ns, name, req.force.unwrap_or(false), req.propagation)
@@ -268,6 +290,22 @@ fn validate_resource_action(action: &str, kind: &ResourceKind) -> Result<(), Str
     }
 }
 
+fn validate_flux_options(req: &ActionRequest, kind: &ResourceKind) -> Result<(), String> {
+    if !matches!(
+        req.action.as_str(),
+        "flux-reconcile" | "flux-reconcile-with-source"
+    ) {
+        return Ok(());
+    }
+    if req.force.unwrap_or(false) && !kind.supports(ResourceAction::FluxForce) {
+        return Err("force is only supported for HelmRelease reconciliation".into());
+    }
+    if req.reset.unwrap_or(false) && !kind.supports(ResourceAction::FluxReset) {
+        return Err("reset is only supported for HelmRelease reconciliation".into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,6 +365,46 @@ mod tests {
         assert!(validate_resource_action("restart", &deployment).is_ok());
         assert!(validate_resource_action("scale", &deployment).is_ok());
         assert!(validate_resource_action("flux-force", &helm_release).is_ok());
+    }
+
+    #[test]
+    fn resource_action_validation_rejects_unsupported_operator_kinds() {
+        let alert = kind(
+            "notification.toolkit.fluxcd.io/v1/Alert",
+            "notification.toolkit.fluxcd.io",
+            "v1",
+            "Alert",
+        );
+        let store = kind(
+            "external-secrets.io/v1/SecretStore",
+            "external-secrets.io",
+            "v1",
+            "SecretStore",
+        );
+        assert!(validate_resource_action("flux-reconcile", &alert).is_err());
+        assert!(validate_resource_action("flux-suspend", &alert).is_ok());
+        assert!(validate_resource_action("eso-refresh", &store).is_err());
+    }
+
+    #[test]
+    fn flux_options_cannot_bypass_specialized_capabilities() {
+        let kustomization = kind(
+            "kustomize.toolkit.fluxcd.io/v1/Kustomization",
+            "kustomize.toolkit.fluxcd.io",
+            "v1",
+            "Kustomization",
+        );
+        let helm_release = kind(
+            "helm.toolkit.fluxcd.io/v2/HelmRelease",
+            "helm.toolkit.fluxcd.io",
+            "v2",
+            "HelmRelease",
+        );
+        let mut reconcile = request("flux-reconcile");
+        reconcile.force = Some(true);
+        reconcile.reset = Some(true);
+        assert!(validate_flux_options(&reconcile, &kustomization).is_err());
+        assert!(validate_flux_options(&reconcile, &helm_release).is_ok());
     }
 
     #[tokio::test]

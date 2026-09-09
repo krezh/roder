@@ -8,12 +8,12 @@ mod log_line;
 pub(crate) use ansi::ansi_to_html;
 pub(crate) use log_line::{log_level, parse_log_line};
 
-/// Parse a resource key ("group/version/kind", group may be empty) into (group, kind).
-pub(crate) fn parse_key(key: &str) -> (String, String) {
+/// Parse a resource key (`group/version/kind`, with an empty core group).
+pub(crate) fn parse_key(key: &str) -> (String, String, String) {
     let mut parts = key.splitn(3, '/');
     match (parts.next(), parts.next(), parts.next()) {
-        (Some(g), Some(_v), Some(k)) => (g.to_string(), k.to_string()),
-        _ => (String::new(), key.to_string()),
+        (Some(g), Some(v), Some(k)) => (g.to_string(), v.to_string(), k.to_string()),
+        _ => (String::new(), String::new(), key.to_string()),
     }
 }
 

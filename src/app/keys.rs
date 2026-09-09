@@ -542,8 +542,8 @@ fn use_key_dispatch() {
             // ---- table bindings --------------------------------------------
             let Some(h) = keys.get_value() else { return };
             let kind_key = h.kind_key.get_value();
-            let (group, kind) = parse_key(&kind_key);
-            let kk = KindKind::new(&group, &kind);
+            let (group, version, kind) = parse_key(&kind_key);
+            let kk = KindKind::new(&group, &version, &kind);
 
             match key.as_str() {
                 // Motion. Paging is Ctrl+F / Ctrl+B; Ctrl+D is delete, so there
@@ -608,7 +608,7 @@ fn use_key_dispatch() {
                     }
                 }
                 "l" => {
-                    if kk.is_pod() || kk.is_workload() || kk.is_job() {
+                    if kk.has_logs() {
                         let aggregate = !kk.is_pod();
                         for t in action_targets(&h) {
                             open_logs(log_pods, LogTarget::from_detail(&t, aggregate));

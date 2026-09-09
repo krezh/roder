@@ -118,15 +118,13 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
 
             let open = { let t = m.target.clone(); move |_| { detail.set(Some(t.clone())); do_close(); } };
             let open_tree = { let t = m.target.clone(); move |_| { tree_open.set(Some(t.clone())); do_close(); } };
-            let has_logs = targets_all(&targets, |kind| {
-                kind.is_pod() || kind.is_workload() || kind.is_job()
-            });
+            let has_logs = targets_all(&targets, |kind| kind.has_logs());
             let logs = {
                 let ts = targets.clone();
                 move |_| {
                     for t in &ts {
-                        let (group, kind) = parse_key(&t.key);
-                        let aggregate = !KindKind::new(&group, &kind).is_pod();
+                        let (group, version, kind) = parse_key(&t.key);
+                        let aggregate = !KindKind::new(&group, &version, &kind).is_pod();
                         open_logs(log_pods, LogTarget::from_detail(t, aggregate));
                     }
                     if let Some(sel) = table_selected.get_value() { sel.set(Default::default()); }

@@ -63,8 +63,8 @@ pub(crate) fn MobileRowDetail(
         }
     });
 
-    let (group, kind) = parse_key(&target.key);
-    let kind_kind = KindKind::new(&group, &kind);
+    let (group, version, kind) = parse_key(&target.key);
+    let kind_kind = KindKind::new(&group, &version, &kind);
     let is_workload = kind_kind.is_workload();
     let is_scalable = kind_kind.is_scalable();
     let is_flux = kind_kind.is_flux();

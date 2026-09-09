@@ -227,13 +227,14 @@ fn MobilePane(kind: ResourceKind, rows: RowMap, columns: RwSignal<Vec<String>>) 
     });
 
     let is_pod_kind = kind.group.is_empty() && kind.kind == "Pod";
-    let kk = KindKind::new(&kind.group, &kind.kind);
+    let kk = KindKind::new(&kind.group, &kind.version, &kind.kind);
     let bulk_workload = kk.is_workload();
     let bulk_job = kk.is_job();
     let bulk_flux = kk.is_flux();
     let bulk_helmrelease = kk.is_helmrelease();
     let bulk_has_source_ref = kk.has_source_ref();
     let bulk_certificate = kk.is_certificate();
+    let bulk_logs = kk.has_logs();
     let key_sv = StoredValue::new(kind.key.clone());
     let can_rerun_jobs = Signal::derive(move || {
         let selected = selected.get();
@@ -309,9 +310,9 @@ fn MobilePane(kind: ResourceKind, rows: RowMap, columns: RwSignal<Vec<String>>) 
             select_mode=select_mode
             all_uids=move || shown_uids.get()
             do_bulk=do_bulk
-            do_delete=do_delete
-            on_logs=on_logs
-            show_logs=is_pod_kind || bulk_workload
+                do_delete=do_delete
+                on_logs=on_logs
+                show_logs=Signal::derive(move || bulk_logs)
             bulk_workload=bulk_workload
             bulk_job=bulk_job
             can_rerun_jobs=can_rerun_jobs

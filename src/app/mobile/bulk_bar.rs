@@ -21,11 +21,8 @@ pub(crate) fn MobileBulkBar(
     /// Dispatches the bulk delete with its force/propagation options (mirrors
     /// desktop's `do_delete`/`fire_action_with`).
     do_delete: impl Fn(bool, Option<roder_core::DeletePropagation>) + Copy + Send + Sync + 'static,
-    /// Opens logs for the selection. Always supplied; gated by `show_logs`
-    /// (rather than made optional) since a runtime bool can't be threaded
-    /// through an `Option<Callback<_>>` prop slot at the call site.
     on_logs: Callback<()>,
-    #[prop(default = true)] show_logs: bool,
+    #[prop(optional, into)] show_logs: Option<Signal<bool>>,
     #[prop(default = false)] bulk_workload: bool,
     #[prop(default = false)] bulk_job: bool,
     #[prop(optional, into)] can_rerun_jobs: Option<Signal<bool>>,
@@ -43,9 +40,9 @@ pub(crate) fn MobileBulkBar(
                 <span class="bulk-count">{move || format!("{} selected", selected.get().len())}</span>
                 <button class="act" on:click=move |_| selected.set(all_uids().into_iter().collect())>"All"</button>
                 <button class="act" on:click=move |_| select_mode.set(false)>"Done"</button>
-                {show_logs.then(|| view! {
+                <Show when=move || show_logs.is_some_and(|show| show.get())>
                     <button class="act" on:click=move |_| on_logs.run(())>"Logs"</button>
-                })}
+                </Show>
                 {bulk_workload.then(|| view! {
                     <button class="act" on:click=move |_| do_bulk("restart")>"Restart"</button>
                 })}

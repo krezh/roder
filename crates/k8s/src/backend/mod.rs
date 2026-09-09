@@ -276,6 +276,10 @@ impl Backend {
         self.shared.entry(key)
     }
 
+    pub fn resource_kind(&self, key: &str) -> Result<roder_core::ResourceKind, K8sError> {
+        Ok(self.entry(key)?.kind)
+    }
+
     /// Resolve a Flux sourceRef's `kind` (e.g. "GitRepository") to a catalog
     /// entry, without needing its `apiVersion` — the same way Flux's own
     /// controllers resolve sourceRef generically across `source.toolkit.fluxcd.io`.

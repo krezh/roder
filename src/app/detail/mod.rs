@@ -108,8 +108,8 @@ pub(crate) fn RowDetail(
     let tab = RwSignal::new(initial_tab);
     let yaml_editing = RwSignal::new(false);
 
-    let (group, kind) = parse_key(&target.key);
-    let kk = KindKind::new(&group, &kind);
+    let (group, version, kind) = parse_key(&target.key);
+    let kk = KindKind::new(&group, &version, &kind);
     let is_workload = kk.is_workload();
     let is_scalable = kk.is_scalable();
     let is_flux = kk.is_flux();

@@ -110,6 +110,132 @@ impl ResourceKind {
     pub fn make_key(group: &str, version: &str, kind: &str) -> String {
         format!("{group}/{version}/{kind}")
     }
+
+    pub fn capabilities(&self) -> ResourceCapabilities {
+        ResourceCapabilities::for_gvk(&self.group, &self.version, &self.kind)
+    }
+
+    pub fn supports(&self, action: ResourceAction) -> bool {
+        self.capabilities().supports(action)
+    }
+}
+
+/// A resource-scoped operation exposed by Roder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum ResourceAction {
+    Delete,
+    Evict,
+    Scale,
+    Restart,
+    Cordon,
+    Drain,
+    Logs,
+    Exec,
+    FluxReconcile,
+    FluxReconcileWithSource,
+    FluxSuspend,
+    FluxForce,
+    FluxReset,
+    ExternalSecretsRefresh,
+    CertificateRenew,
+    CronJobTrigger,
+    JobRerun,
+    KopiurSnapshotNow,
+}
+
+impl ResourceAction {
+    pub fn from_api_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "delete" => Self::Delete,
+            "evict" => Self::Evict,
+            "scale" => Self::Scale,
+            "restart" => Self::Restart,
+            "cordon" | "uncordon" => Self::Cordon,
+            "drain" => Self::Drain,
+            "flux-reconcile" => Self::FluxReconcile,
+            "flux-reconcile-with-source" => Self::FluxReconcileWithSource,
+            "flux-suspend" | "flux-resume" => Self::FluxSuspend,
+            "flux-force" => Self::FluxForce,
+            "flux-reset" => Self::FluxReset,
+            "eso-refresh" => Self::ExternalSecretsRefresh,
+            "certificate-renew" => Self::CertificateRenew,
+            "cronjob-trigger" => Self::CronJobTrigger,
+            "job-rerun" => Self::JobRerun,
+            "kopiur-snapshot-now" => Self::KopiurSnapshotNow,
+            _ => return None,
+        })
+    }
+}
+
+/// Static operations supported by one GroupVersionKind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResourceCapabilities(u32);
+
+impl ResourceCapabilities {
+    pub fn for_gvk(group: &str, _version: &str, kind: &str) -> Self {
+        let mut bits = bit(ResourceAction::Delete);
+
+        if group.is_empty() && kind == "Pod" {
+            bits |= bits_for(&[
+                ResourceAction::Evict,
+                ResourceAction::Logs,
+                ResourceAction::Exec,
+            ]);
+        }
+        if group.is_empty() && kind == "Node" {
+            bits |= bits_for(&[ResourceAction::Cordon, ResourceAction::Drain]);
+        }
+        if group == "apps"
+            && matches!(
+                kind,
+                "Deployment" | "StatefulSet" | "DaemonSet" | "ReplicaSet"
+            )
+        {
+            bits |= bits_for(&[ResourceAction::Restart, ResourceAction::Logs]);
+        }
+        if group == "apps" && matches!(kind, "Deployment" | "StatefulSet" | "ReplicaSet") {
+            bits |= bit(ResourceAction::Scale);
+        }
+        if group == "batch" && kind == "Job" {
+            bits |= bits_for(&[ResourceAction::JobRerun, ResourceAction::Logs]);
+        }
+        if group == "batch" && kind == "CronJob" {
+            bits |= bit(ResourceAction::CronJobTrigger);
+        }
+        if group.ends_with("fluxcd.io") {
+            bits |= bits_for(&[ResourceAction::FluxReconcile, ResourceAction::FluxSuspend]);
+            if matches!(kind, "Kustomization" | "HelmRelease") {
+                bits |= bit(ResourceAction::FluxReconcileWithSource);
+            }
+            if kind == "HelmRelease" {
+                bits |= bits_for(&[ResourceAction::FluxForce, ResourceAction::FluxReset]);
+            }
+        }
+        if group == "external-secrets.io" {
+            bits |= bit(ResourceAction::ExternalSecretsRefresh);
+        }
+        if group == "cert-manager.io" && kind == "Certificate" {
+            bits |= bit(ResourceAction::CertificateRenew);
+        }
+        if group == "kopiur.home-operations.com" && kind == "SnapshotPolicy" {
+            bits |= bit(ResourceAction::KopiurSnapshotNow);
+        }
+
+        Self(bits)
+    }
+
+    pub fn supports(self, action: ResourceAction) -> bool {
+        self.0 & bit(action) != 0
+    }
+}
+
+fn bit(action: ResourceAction) -> u32 {
+    1 << action as u8
+}
+
+fn bits_for(actions: &[ResourceAction]) -> u32 {
+    actions.iter().fold(0, |bits, action| bits | bit(*action))
 }
 
 /// Health/severity of a row, used for coloring.
@@ -781,6 +907,55 @@ pub const MAX_ALERT_SILENCE_SECS: u64 = 365 * 24 * 60 * 60;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn capabilities(group: &str, version: &str, kind: &str) -> ResourceCapabilities {
+        ResourceCapabilities::for_gvk(group, version, kind)
+    }
+
+    #[test]
+    fn workload_capabilities_distinguish_scaling() {
+        let deployment = capabilities("apps", "v1", "Deployment");
+        assert!(deployment.supports(ResourceAction::Restart));
+        assert!(deployment.supports(ResourceAction::Scale));
+
+        let daemon_set = capabilities("apps", "v1", "DaemonSet");
+        assert!(daemon_set.supports(ResourceAction::Restart));
+        assert!(!daemon_set.supports(ResourceAction::Scale));
+    }
+
+    #[test]
+    fn flux_capabilities_distinguish_specialized_operations() {
+        let kustomization = capabilities("kustomize.toolkit.fluxcd.io", "v1", "Kustomization");
+        assert!(kustomization.supports(ResourceAction::FluxReconcile));
+        assert!(kustomization.supports(ResourceAction::FluxReconcileWithSource));
+        assert!(!kustomization.supports(ResourceAction::FluxForce));
+
+        let helm_release = capabilities("helm.toolkit.fluxcd.io", "v2", "HelmRelease");
+        assert!(helm_release.supports(ResourceAction::FluxForce));
+        assert!(helm_release.supports(ResourceAction::FluxReset));
+    }
+
+    #[test]
+    fn operator_actions_do_not_leak_to_other_kinds() {
+        let service = capabilities("", "v1", "Service");
+        assert!(service.supports(ResourceAction::Delete));
+        assert!(!service.supports(ResourceAction::ExternalSecretsRefresh));
+        assert!(!service.supports(ResourceAction::CertificateRenew));
+        assert!(!service.supports(ResourceAction::KopiurSnapshotNow));
+    }
+
+    #[test]
+    fn api_action_names_map_to_semantic_capabilities() {
+        assert_eq!(
+            ResourceAction::from_api_name("flux-resume"),
+            Some(ResourceAction::FluxSuspend)
+        );
+        assert_eq!(
+            ResourceAction::from_api_name("uncordon"),
+            Some(ResourceAction::Cordon)
+        );
+        assert_eq!(ResourceAction::from_api_name("apply"), None);
+    }
 
     #[test]
     fn format_age_seconds() {

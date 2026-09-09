@@ -8,6 +8,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
+use roder_core::{ResourceAction, ResourceKind};
 use roder_k8s::Backend;
 use serde::{Deserialize, Serialize};
 
@@ -96,6 +97,19 @@ pub async fn action(
         talos_mutation(&state, &headers, &identity, &caller.owner, &req, b.clone()).await
     {
         return response;
+    }
+
+    if ResourceAction::from_api_name(&req.action).is_some() {
+        let Some(key) = req.key.as_deref() else {
+            return (StatusCode::BAD_REQUEST, "missing key").into_response();
+        };
+        let kind = match b.resource_kind(key) {
+            Ok(kind) => kind,
+            Err(error) => return (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
+        };
+        if let Err(error) = validate_resource_action(&req.action, &kind) {
+            return (StatusCode::BAD_REQUEST, error).into_response();
+        }
     }
 
     // `apply` and sanitize actions don't operate on a named resource.
@@ -243,6 +257,17 @@ pub async fn action(
     }
 }
 
+fn validate_resource_action(action: &str, kind: &ResourceKind) -> Result<(), String> {
+    let Some(action_kind) = ResourceAction::from_api_name(action) else {
+        return Ok(());
+    };
+    if kind.supports(action_kind) {
+        Ok(())
+    } else {
+        Err(format!("action {action} is not supported for {}", kind.key))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,6 +293,40 @@ mod tests {
             job: None,
             executor: None,
         }
+    }
+
+    fn kind(key: &str, group: &str, version: &str, kind: &str) -> ResourceKind {
+        ResourceKind {
+            key: key.into(),
+            group: group.into(),
+            version: version.into(),
+            kind: kind.into(),
+            plural: String::new(),
+            namespaced: true,
+            category: roder_core::Category::Custom(String::new()),
+        }
+    }
+
+    #[test]
+    fn resource_action_validation_rejects_mismatched_kinds() {
+        let service = kind("/v1/Service", "", "v1", "Service");
+        assert!(validate_resource_action("restart", &service).is_err());
+        assert!(validate_resource_action("eso-refresh", &service).is_err());
+        assert!(validate_resource_action("delete", &service).is_ok());
+    }
+
+    #[test]
+    fn resource_action_validation_accepts_registered_gvks() {
+        let deployment = kind("apps/v1/Deployment", "apps", "v1", "Deployment");
+        let helm_release = kind(
+            "helm.toolkit.fluxcd.io/v2/HelmRelease",
+            "helm.toolkit.fluxcd.io",
+            "v2",
+            "HelmRelease",
+        );
+        assert!(validate_resource_action("restart", &deployment).is_ok());
+        assert!(validate_resource_action("scale", &deployment).is_ok());
+        assert!(validate_resource_action("flux-force", &helm_release).is_ok());
     }
 
     #[tokio::test]

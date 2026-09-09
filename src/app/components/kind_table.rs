@@ -198,13 +198,14 @@ pub(crate) fn KindTable(
             .map(|(i, _)| i)
             .collect::<std::collections::HashSet<usize>>()
     });
-    let kk = KindKind::new(&kind.group, &kind.kind);
+    let kk = KindKind::new(&kind.group, &kind.version, &kind.kind);
     let bulk_workload = kk.is_workload();
     let bulk_job = kk.is_job();
     let bulk_flux = kk.is_flux();
     let bulk_certificate = kk.is_certificate();
     let bulk_helmrelease = kk.is_helmrelease();
     let bulk_has_source_ref = kk.has_source_ref();
+    let bulk_logs = kk.has_logs();
     let key_sv = StoredValue::new(kind.key.clone());
 
     let rows = t.rows;
@@ -528,7 +529,7 @@ pub(crate) fn KindTable(
                     <span class="bulk-count">{move || format!("{} selected", selected.get().len())}</span>
                     <button class="act" on:click=move |_| selected.set(shown_uids.get().into_iter().collect())>"Select all"</button>
                     <button class="act" on:click=move |_| selected.set(std::collections::BTreeSet::new())>"Clear"</button>
-                    {(is_pod_kind || bulk_workload).then(|| view! {
+                    {bulk_logs.then(|| view! {
                         <button class="act" on:click=move |_| do_logs()>"Logs"</button>
                     })}
                     {bulk_workload.then(|| view! {

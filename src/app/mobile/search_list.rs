@@ -187,6 +187,16 @@ pub(crate) fn MobileSearchList() -> impl IntoView {
 
     let selected = t.selected;
     let select_mode = use_select_mode(selected);
+    let show_logs = Signal::derive(move || {
+        let selected = selected.get();
+        !selected.is_empty()
+            && merged_rows.with(|rows| {
+                selected.iter().all(|uid| {
+                    rows.get(uid)
+                        .is_some_and(|row| row.kind.supports(roder_core::ResourceAction::Logs))
+                })
+            })
+    });
 
     let do_delete =
         make_do_delete_multi(toast, merged_rows, selected, move || select_mode.set(false));
@@ -279,7 +289,8 @@ pub(crate) fn MobileSearchList() -> impl IntoView {
                 all_uids=move || shown_uids.get()
                 do_bulk=move |_: &'static str| {}
                 do_delete=do_delete
-                on_logs=on_logs />
+                on_logs=on_logs
+                show_logs=show_logs />
         </div>
     }
 }

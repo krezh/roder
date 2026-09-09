@@ -11,7 +11,6 @@
 
 ## Actions And Access
 
-- Introduce a central GVK capability registry shared by desktop, mobile, bulk actions, and backend validation
 - Split Flux capabilities into reconcile, suspend, source reconciliation, force, and reset
 - Restrict Flux actions to supported exact resource kinds and validate them server-side
 - Restrict External Secrets refresh to supported resource kinds and validate it server-side

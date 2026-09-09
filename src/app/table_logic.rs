@@ -263,8 +263,8 @@ pub(crate) fn targets_all(
 ) -> bool {
     !targets.is_empty()
         && targets.iter().all(|target| {
-            let (group, kind) = parse_key(&target.key);
-            predicate(KindKind::new(&group, &kind))
+            let (group, version, kind) = parse_key(&target.key);
+            predicate(KindKind::new(&group, &version, &kind))
         })
 }
 

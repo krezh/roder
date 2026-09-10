@@ -281,6 +281,7 @@ button.node {
   &.controller-pending { --controller-color: var(--pending); }
   &.controller-warn { --controller-color: var(--warn); }
   &.controller-error { --controller-color: var(--error); }
+  &.controller-neutral { --controller-color: var(--muted); }
 }
 .controller-status { background: var(--controller-color); }
 .controller-main {

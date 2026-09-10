@@ -223,6 +223,17 @@ jobs:
           cluster_name: roder-e2e
           wait: 90s
 
+      - name: Install representative operator resources
+        run: |
+          kubectl apply -f tests/fixtures/operator-crds.yaml
+          kubectl wait --for=condition=Established --timeout=60s \
+            crd/cephclusters.ceph.rook.io \
+            crd/cephblockpools.ceph.rook.io \
+            crd/clusters.postgresql.cnpg.io \
+            crd/backups.postgresql.cnpg.io \
+            crd/scheduledbackups.postgresql.cnpg.io
+          kubectl apply -f tests/fixtures/operator-resources.yaml
+
       # roder is a sibling container, not inside kind's network namespace, so
       # it needs the *internal* kubeconfig (Docker DNS name on the shared
       # `kind` network) — not the host-mapped-localhost one kind-action sets
@@ -264,6 +275,7 @@ jobs:
       - name: Browser smoke test
         env:
           RODER_E2E_BASE_URL: http://127.0.0.1:8080/
+          RODER_E2E_OPERATOR_FIXTURES: "1"
           CHROME: ${{ steps.setup-chrome.outputs.chrome-path }}
         run: cargo test --test browser_smoke -- --nocapture
 

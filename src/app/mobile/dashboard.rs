@@ -1,6 +1,7 @@
 use leptos::prelude::*;
 use roder_core::{
-    ClusterOverview, NodeSummary, OverviewWarning, ResourceHealthRollup, ResourceKind,
+    ClusterOverview, ControllerHealthSignal, NodeSummary, OverviewWarning, ResourceHealthRollup,
+    ResourceKind, RowStatus,
 };
 
 use crate::app::state::{Catalog, DetailTarget, Tick};
@@ -84,37 +85,42 @@ fn mobile_dashboard_sections(
 ) -> impl IntoView {
     let nodes = overview.nodes.clone();
     let warnings = overview.warnings.clone();
+    let controller_groups = overview.controller_groups.clone();
     let ready = nodes.iter().filter(|node| node.ready).count();
     let controller_failing: usize = overview
-        .flux_resources
+        .controller_groups
         .iter()
-        .chain(&overview.external_secret_resources)
-        .chain(&overview.kopiur_resources)
-        .chain(&overview.tuppr_resources)
+        .flat_map(|group| &group.resources)
         .map(|item| item.health.failing as usize)
-        .sum();
+        .sum::<usize>()
+        + overview
+            .controller_groups
+            .iter()
+            .flat_map(|group| &group.signals)
+            .filter(|signal| signal.status == RowStatus::Error)
+            .count();
     let controller_suspended: usize = overview
-        .flux_resources
+        .controller_groups
         .iter()
-        .chain(&overview.external_secret_resources)
-        .chain(&overview.kopiur_resources)
-        .chain(&overview.tuppr_resources)
+        .flat_map(|group| &group.resources)
         .map(|item| item.health.suspended as usize)
         .sum();
     let controller_warning: usize = overview
-        .flux_resources
+        .controller_groups
         .iter()
-        .chain(&overview.external_secret_resources)
-        .chain(&overview.kopiur_resources)
-        .chain(&overview.tuppr_resources)
+        .flat_map(|group| &group.resources)
         .map(|item| (item.health.warning + item.health.unknown) as usize)
-        .sum();
+        .sum::<usize>()
+        + overview
+            .controller_groups
+            .iter()
+            .flat_map(|group| &group.signals)
+            .filter(|signal| matches!(signal.status, RowStatus::Pending | RowStatus::Warn))
+            .count();
     let controller_unreadable = overview
-        .flux_resources
+        .controller_groups
         .iter()
-        .chain(&overview.external_secret_resources)
-        .chain(&overview.kopiur_resources)
-        .chain(&overview.tuppr_resources)
+        .flat_map(|group| &group.resources)
         .filter(|item| item.error.is_some())
         .count();
     let failing = overview.pod_failed as usize
@@ -177,10 +183,9 @@ fn mobile_dashboard_sections(
             </button>
             <button class="mobile-dashboard-card mobile-inventory" on:click=move |_| select_kind(catalog, selected, "Namespace")><small>"Inventory"</small><h2>"Namespaces"</h2><strong>{overview.namespace_count}</strong><span>"Kubernetes "{overview.kubernetes_version}</span></button>
         </section>
-        {mobile_controller_group("Flux", overview.flux_resources, catalog, selected)}
-        {mobile_controller_group("External Secrets", overview.external_secret_resources, catalog, selected)}
-        {mobile_controller_group("Kopiur", overview.kopiur_resources, catalog, selected)}
-        {mobile_controller_group("Tuppr", overview.tuppr_resources, catalog, selected)}
+        {controller_groups.into_iter().map(|group| {
+            mobile_controller_group(group.name, group.resources, group.signals, catalog, selected, tick)
+        }).collect_view()}
         <section class="mobile-dashboard-section"><header><div><small>"Infrastructure"</small><h2>"Nodes"</h2></div><span>{ready}" of "{nodes.len()}" ready"</span></header>
             <div class="mobile-node-list">{nodes.into_iter().map(|node| mobile_node(node, node_kind.clone(), selected, detail)).collect_view()}</div>
         </section>
@@ -196,13 +201,16 @@ fn mobile_usage_meter(label: &'static str, value: f64, available: bool) -> impl 
 }
 
 fn mobile_controller_group(
-    title: &'static str,
+    title: String,
     resources: Vec<ResourceHealthRollup>,
+    signals: Vec<ControllerHealthSignal>,
     catalog: RwSignal<Vec<ResourceKind>>,
     selected: RwSignal<Option<ResourceKind>>,
+    tick: RwSignal<u32>,
 ) -> impl IntoView {
-    (!resources.is_empty()).then(|| view! { <section class="mobile-dashboard-section mobile-controller-section"><header><div><small>"Controllers"</small><h2>{title}</h2></div></header><div class="mobile-controller-grid">
+    (!resources.is_empty() || !signals.is_empty()).then(|| view! { <section class="mobile-dashboard-section mobile-controller-section"><header><div><small>"Controllers"</small><h2>{title}</h2></div></header><div class="mobile-controller-grid">
         {resources.into_iter().map(|resource| mobile_rollup(resource, catalog, selected)).collect_view()}
+        {signals.into_iter().map(|signal| mobile_signal(signal, tick)).collect_view()}
     </div></section> })
 }
 
@@ -220,12 +228,15 @@ fn mobile_rollup(
     let health = resource.health;
     let error = resource.error.unwrap_or_default();
     let unreadable = !error.is_empty();
+    let only_unclassified = health.total > 0 && health.unknown + health.unreported == health.total;
     let state = if unreadable || health.failing > 0 {
         "error"
     } else if health.reconciling > 0 {
         "pending"
     } else if health.suspended > 0 || health.warning > 0 || health.unknown > 0 {
         "warning"
+    } else if health.unreported > 0 {
+        "neutral"
     } else {
         "ok"
     };
@@ -241,12 +252,35 @@ fn mobile_rollup(
             format!("{label}s")
         }
     };
-    view! { <button class=format!("mobile-controller-card {state}") title=error on:click=move |_| select_kind(catalog, selected, &target)><i></i><span><strong>{label}</strong><b>{health.ready}" / "{health.total}</b><small>"ready"</small></span><em>
+    view! { <button class=format!("mobile-controller-card {state}") title=error on:click=move |_| select_kind(catalog, selected, &target)><i></i><span><strong>{label}</strong><b>{if only_unclassified { health.total.to_string() } else { format!("{} / {}", health.ready, health.total) }}</b><small>{if only_unclassified { "resources" } else { "ready" }}</small></span><em>
         {(health.reconciling > 0).then(|| view! { <span>{health.reconciling}" reconciling"</span> })}{(health.suspended > 0).then(|| view! { <span>{health.suspended}" suspended"</span> })}
         {(health.warning > 0).then(|| view! { <span>{health.warning}" warning"</span> })}{(health.failing > 0).then(|| view! { <span>{health.failing}" failing"</span> })}
-        {(health.unknown > 0).then(|| view! { <span>{health.unknown}" unknown"</span> })}{unreadable.then(|| view! { <span>"unreadable"</span> })}
-        {(health.reconciling == 0 && health.suspended == 0 && health.warning == 0 && health.failing == 0 && health.unknown == 0 && !unreadable).then(|| view! { <span>"All reconciled"</span> })}
+        {(health.unknown > 0).then(|| view! { <span>{health.unknown}" health status unrecognized"</span> })}{unreadable.then(|| view! { <span>"unreadable"</span> })}
+        {(health.unreported > 0).then(|| view! { <span>{health.unreported}" health status not reported"</span> })}
+        {(health.reconciling == 0 && health.suspended == 0 && health.warning == 0 && health.failing == 0 && health.unknown == 0 && health.unreported == 0 && !unreadable).then(|| view! { <span>"All reconciled"</span> })}
     </em></button> }
+}
+
+fn mobile_signal(signal: ControllerHealthSignal, tick: RwSignal<u32>) -> impl IntoView {
+    let state = match signal.status {
+        RowStatus::Error => "error",
+        RowStatus::Pending => "pending",
+        RowStatus::Warn => "warning",
+        RowStatus::Unknown => "warning",
+        RowStatus::Ok | RowStatus::Done => "ok",
+    };
+    let timestamp = signal.timestamp;
+    let fallback = signal.value;
+    view! { <article class=format!("mobile-controller-card {state}") title=signal.message><i></i><span>
+        <strong>{signal.label}</strong>
+        <b>{move || {
+            tick.get();
+            timestamp
+                .as_ref()
+                .map(|value| data::humanize_age(&Some(value.clone())))
+                .unwrap_or_else(|| fallback.clone())
+        }}</b>
+    </span></article> }
 }
 
 fn mobile_node(

@@ -28,6 +28,7 @@ enum Direction {
 #[derive(Clone)]
 struct ResourceRef {
     group: String,
+    version: String,
     kind: String,
     name: String,
     namespace: Option<String>,
@@ -40,8 +41,9 @@ struct ResourceRef {
 impl ResourceRef {
     fn identity(&self) -> String {
         format!(
-            "{}/{}/{}/{}",
+            "{}/{}/{}/{}/{}",
             self.group,
+            self.version,
             self.kind,
             self.namespace.as_deref().unwrap_or_default(),
             self.name
@@ -65,6 +67,169 @@ impl ResourceRef {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RelationshipProvider {
+    FluxKustomization,
+    FluxHelmRelease,
+    OwnedChildren,
+    WorkloadPods,
+    ServiceTargets,
+    CnpgCluster,
+    CnpgClusterReference,
+    CnpgScheduledBackup,
+    RookStorageClass,
+    RookCephCluster,
+}
+
+#[derive(Clone, Copy)]
+struct ProviderRegistration {
+    group: &'static str,
+    version: Option<&'static str>,
+    kind: &'static str,
+    provider: RelationshipProvider,
+}
+
+const RELATIONSHIP_PROVIDERS: &[ProviderRegistration] = &[
+    ProviderRegistration {
+        group: "kustomize.toolkit.fluxcd.io",
+        version: None,
+        kind: "Kustomization",
+        provider: RelationshipProvider::FluxKustomization,
+    },
+    ProviderRegistration {
+        group: "helm.toolkit.fluxcd.io",
+        version: None,
+        kind: "HelmRelease",
+        provider: RelationshipProvider::FluxHelmRelease,
+    },
+    ProviderRegistration {
+        group: "apps",
+        version: Some("v1"),
+        kind: "Deployment",
+        provider: RelationshipProvider::OwnedChildren,
+    },
+    ProviderRegistration {
+        group: "apps",
+        version: Some("v1"),
+        kind: "Deployment",
+        provider: RelationshipProvider::WorkloadPods,
+    },
+    ProviderRegistration {
+        group: "apps",
+        version: Some("v1"),
+        kind: "ReplicaSet",
+        provider: RelationshipProvider::OwnedChildren,
+    },
+    ProviderRegistration {
+        group: "apps",
+        version: Some("v1"),
+        kind: "ReplicaSet",
+        provider: RelationshipProvider::WorkloadPods,
+    },
+    ProviderRegistration {
+        group: "apps",
+        version: Some("v1"),
+        kind: "StatefulSet",
+        provider: RelationshipProvider::OwnedChildren,
+    },
+    ProviderRegistration {
+        group: "apps",
+        version: Some("v1"),
+        kind: "StatefulSet",
+        provider: RelationshipProvider::WorkloadPods,
+    },
+    ProviderRegistration {
+        group: "apps",
+        version: Some("v1"),
+        kind: "DaemonSet",
+        provider: RelationshipProvider::OwnedChildren,
+    },
+    ProviderRegistration {
+        group: "apps",
+        version: Some("v1"),
+        kind: "DaemonSet",
+        provider: RelationshipProvider::WorkloadPods,
+    },
+    ProviderRegistration {
+        group: "batch",
+        version: Some("v1"),
+        kind: "CronJob",
+        provider: RelationshipProvider::OwnedChildren,
+    },
+    ProviderRegistration {
+        group: "batch",
+        version: Some("v1"),
+        kind: "Job",
+        provider: RelationshipProvider::OwnedChildren,
+    },
+    ProviderRegistration {
+        group: "batch",
+        version: Some("v1"),
+        kind: "Job",
+        provider: RelationshipProvider::WorkloadPods,
+    },
+    ProviderRegistration {
+        group: "",
+        version: Some("v1"),
+        kind: "Service",
+        provider: RelationshipProvider::ServiceTargets,
+    },
+    ProviderRegistration {
+        group: "postgresql.cnpg.io",
+        version: None,
+        kind: "Cluster",
+        provider: RelationshipProvider::CnpgCluster,
+    },
+    ProviderRegistration {
+        group: "postgresql.cnpg.io",
+        version: None,
+        kind: "Backup",
+        provider: RelationshipProvider::CnpgClusterReference,
+    },
+    ProviderRegistration {
+        group: "postgresql.cnpg.io",
+        version: None,
+        kind: "Database",
+        provider: RelationshipProvider::CnpgClusterReference,
+    },
+    ProviderRegistration {
+        group: "postgresql.cnpg.io",
+        version: None,
+        kind: "DatabaseRole",
+        provider: RelationshipProvider::CnpgClusterReference,
+    },
+    ProviderRegistration {
+        group: "postgresql.cnpg.io",
+        version: None,
+        kind: "Pooler",
+        provider: RelationshipProvider::CnpgClusterReference,
+    },
+    ProviderRegistration {
+        group: "postgresql.cnpg.io",
+        version: None,
+        kind: "ScheduledBackup",
+        provider: RelationshipProvider::CnpgClusterReference,
+    },
+    ProviderRegistration {
+        group: "postgresql.cnpg.io",
+        version: None,
+        kind: "ScheduledBackup",
+        provider: RelationshipProvider::CnpgScheduledBackup,
+    },
+    ProviderRegistration {
+        group: "storage.k8s.io",
+        version: Some("v1"),
+        kind: "StorageClass",
+        provider: RelationshipProvider::RookStorageClass,
+    },
+    ProviderRegistration {
+        group: "ceph.rook.io",
+        version: None,
+        kind: "CephCluster",
+        provider: RelationshipProvider::RookCephCluster,
+    },
+];
+
 impl Backend {
     pub async fn resource_tree(
         &self,
@@ -75,6 +240,7 @@ impl Backend {
         let entry = self.entry(key)?;
         let root = ResourceRef {
             group: entry.kind.group.clone(),
+            version: entry.kind.version.clone(),
             kind: entry.kind.kind.clone(),
             name: name.to_string(),
             namespace: ns.map(str::to_string),
@@ -243,19 +409,17 @@ impl Backend {
         let mut children = Vec::new();
         let mut errors = Vec::new();
 
-        if is_flux_owner(&resource.group, &resource.kind) {
-            let relation = if resource.kind == "Kustomization" {
-                match self.kustomization_children(data) {
-                    Ok(refs) => {
-                        children.extend(refs);
-                        None
+        for provider in relationship_providers(resource) {
+            match provider {
+                RelationshipProvider::FluxKustomization => {
+                    match self.kustomization_children(data) {
+                        Ok(mut refs) => children.append(&mut refs),
+                        Err(error) => errors.push(error),
                     }
-                    Err(error) => Some(error),
                 }
-            } else {
-                match self.helm_release_children(data, semaphore).await {
-                    Ok(refs) => {
-                        children.extend(refs.into_iter().map(|child| {
+                RelationshipProvider::FluxHelmRelease => {
+                    match self.helm_release_children(data, semaphore).await {
+                        Ok(refs) => children.extend(refs.into_iter().map(|child| {
                             self.resolve_resource(
                                 child.group,
                                 child.version,
@@ -264,83 +428,94 @@ impl Backend {
                                 child.namespace,
                                 Some(ResourceTreeRelation::HelmManifest),
                             )
-                        }));
-                        None
+                        })),
+                        Err(error) => errors.push(error),
                     }
-                    Err(error) => Some(error),
                 }
-            };
-            if let Some(error) = relation {
-                errors.push(error);
-            }
-        }
-
-        if let Some((group, kind)) = owned_child_kind(&resource.group, &resource.kind) {
-            match with_api_permit(
-                semaphore,
-                self.list_owned_children(resource, object, group, kind),
-            )
-            .await
-            {
-                Ok(mut owned) => children.append(&mut owned),
-                Err(error) => errors.push(format!("owned resources: {error}")),
-            }
-        }
-
-        if is_workload(&resource.group, &resource.kind) {
-            match super::logs::workload_label_selector(data) {
-                Ok(selector) => match with_api_permit(
-                    semaphore,
-                    self.list_selected(
-                        "",
-                        "Pod",
-                        resource.namespace.as_deref(),
-                        &selector,
-                        ResourceTreeRelation::SelectedPod,
-                    ),
-                )
-                .await
-                {
-                    Ok(mut pods) => children.append(&mut pods),
-                    Err(error) => errors.push(format!("selected pods: {error}")),
-                },
-                Err(error) => errors.push(error),
-            }
-        }
-
-        if resource.group.is_empty() && resource.kind == "Service" {
-            if let Some(selector) = service_selector(data) {
-                match with_api_permit(
-                    semaphore,
-                    self.list_selected(
-                        "",
-                        "Pod",
-                        resource.namespace.as_deref(),
-                        &selector,
-                        ResourceTreeRelation::SelectedPod,
-                    ),
-                )
-                .await
-                {
-                    Ok(mut pods) => children.append(&mut pods),
-                    Err(error) => errors.push(format!("selected pods: {error}")),
+                RelationshipProvider::OwnedChildren => {
+                    let Some((group, kind)) = owned_child_kind(&resource.group, &resource.kind)
+                    else {
+                        continue;
+                    };
+                    match with_api_permit(
+                        semaphore,
+                        self.list_owned_children(resource, object, group, kind),
+                    )
+                    .await
+                    {
+                        Ok(mut owned) => children.append(&mut owned),
+                        Err(error) => errors.push(format!("owned resources: {error}")),
+                    }
                 }
-            }
-            let selector = format!("kubernetes.io/service-name={}", resource.name);
-            match with_api_permit(
-                semaphore,
-                self.list_selected(
-                    "discovery.k8s.io",
-                    "EndpointSlice",
-                    resource.namespace.as_deref(),
-                    &selector,
-                    ResourceTreeRelation::EndpointSlice,
-                ),
-            )
-            .await
-            {
-                Ok(mut slices) => children.append(&mut slices),
-                Err(error) => errors.push(format!("endpoint slices: {error}")),
+                RelationshipProvider::WorkloadPods => {
+                    match super::logs::workload_label_selector(data) {
+                        Ok(selector) => match with_api_permit(
+                            semaphore,
+                            self.list_selected(
+                                "",
+                                "Pod",
+                                resource.namespace.as_deref(),
+                                &selector,
+                                ResourceTreeRelation::SelectedPod,
+                            ),
+                        )
+                        .await
+                        {
+                            Ok(mut pods) => children.append(&mut pods),
+                            Err(error) => errors.push(format!("selected pods: {error}")),
+                        },
+                        Err(error) => errors.push(error),
+                    }
+                }
+                RelationshipProvider::ServiceTargets => {
+                    let (mut refs, mut provider_errors) =
+                        self.service_relationships(resource, data, semaphore).await;
+                    children.append(&mut refs);
+                    errors.append(&mut provider_errors);
+                }
+                RelationshipProvider::CnpgCluster => {
+                    let (mut refs, mut provider_errors) =
+                        self.cnpg_cluster_relationships(resource, semaphore).await;
+                    children.append(&mut refs);
+                    errors.append(&mut provider_errors);
+                }
+                RelationshipProvider::CnpgClusterReference => {
+                    if let Some(cluster) =
+                        data.pointer("/spec/cluster/name").and_then(Value::as_str)
+                    {
+                        children.push(self.resolve_resource(
+                            "postgresql.cnpg.io".into(),
+                            String::new(),
+                            "Cluster".into(),
+                            cluster.into(),
+                            resource.namespace.clone(),
+                            Some(ResourceTreeRelation::ReferencedResource),
+                        ));
+                    }
+                }
+                RelationshipProvider::CnpgScheduledBackup => {
+                    match with_api_permit(
+                        semaphore,
+                        self.list_generated_cnpg_backups(resource, object),
+                    )
+                    .await
+                    {
+                        Ok(mut refs) => children.append(&mut refs),
+                        Err(error) => errors.push(format!("generated backups: {error}")),
+                    }
+                }
+                RelationshipProvider::RookStorageClass => {
+                    let (mut refs, mut provider_errors) =
+                        self.rook_storage_relationships(data, semaphore).await;
+                    children.append(&mut refs);
+                    errors.append(&mut provider_errors);
+                }
+                RelationshipProvider::RookCephCluster => {
+                    let (mut refs, mut provider_errors) =
+                        self.rook_cluster_relationships(resource, semaphore).await;
+                    children.append(&mut refs);
+                    errors.append(&mut provider_errors);
+                }
             }
         }
 
@@ -378,6 +553,7 @@ impl Backend {
             .filter_map(|child| child.metadata.name)
             .map(|name| ResourceRef {
                 group: entry.kind.group.clone(),
+                version: entry.kind.version.clone(),
                 kind: entry.kind.kind.clone(),
                 name,
                 namespace: parent.namespace.clone().filter(|_| entry.kind.namespaced),
@@ -411,6 +587,7 @@ impl Backend {
             .filter_map(|object| object.metadata.name)
             .map(|name| ResourceRef {
                 group: entry.kind.group.clone(),
+                version: entry.kind.version.clone(),
                 kind: entry.kind.kind.clone(),
                 name,
                 namespace: namespace
@@ -422,6 +599,282 @@ impl Backend {
                 expandable: false,
             })
             .collect())
+    }
+
+    async fn list_matching(
+        &self,
+        group: &str,
+        kind: &str,
+        namespace: Option<&str>,
+        relation: ResourceTreeRelation,
+        matches: impl Fn(&DynamicObject) -> bool,
+    ) -> Result<Vec<ResourceRef>, K8sError> {
+        let Some(entry) = self.catalog_entry(group, None, kind) else {
+            return Ok(Vec::new());
+        };
+        let api = self.dyn_api(&entry.kind.key, namespace)?;
+        let list = api.list(&ListParams::default()).await.map_err(api_err)?;
+        Ok(list
+            .items
+            .into_iter()
+            .filter(matches)
+            .filter_map(|object| object.metadata.name)
+            .map(|name| ResourceRef {
+                group: entry.kind.group.clone(),
+                version: entry.kind.version.clone(),
+                kind: entry.kind.kind.clone(),
+                name,
+                namespace: namespace
+                    .map(str::to_string)
+                    .filter(|_| entry.kind.namespaced),
+                key: Some(entry.kind.key.clone()),
+                category: Some(entry.kind.category.clone()),
+                relation: Some(relation),
+                expandable: false,
+            })
+            .collect())
+    }
+
+    async fn service_relationships(
+        &self,
+        resource: &ResourceRef,
+        data: &Value,
+        semaphore: &tokio::sync::Semaphore,
+    ) -> (Vec<ResourceRef>, Vec<String>) {
+        let mut children = Vec::new();
+        let mut errors = Vec::new();
+        if let Some(selector) = service_selector(data) {
+            match with_api_permit(
+                semaphore,
+                self.list_selected(
+                    "",
+                    "Pod",
+                    resource.namespace.as_deref(),
+                    &selector,
+                    ResourceTreeRelation::SelectedPod,
+                ),
+            )
+            .await
+            {
+                Ok(mut pods) => children.append(&mut pods),
+                Err(error) => errors.push(format!("selected pods: {error}")),
+            }
+        }
+        let selector = format!("kubernetes.io/service-name={}", resource.name);
+        match with_api_permit(
+            semaphore,
+            self.list_selected(
+                "discovery.k8s.io",
+                "EndpointSlice",
+                resource.namespace.as_deref(),
+                &selector,
+                ResourceTreeRelation::EndpointSlice,
+            ),
+        )
+        .await
+        {
+            Ok(mut slices) => children.append(&mut slices),
+            Err(error) => errors.push(format!("endpoint slices: {error}")),
+        }
+        (children, errors)
+    }
+
+    async fn cnpg_cluster_relationships(
+        &self,
+        resource: &ResourceRef,
+        semaphore: &tokio::sync::Semaphore,
+    ) -> (Vec<ResourceRef>, Vec<String>) {
+        let mut children = Vec::new();
+        let mut errors = Vec::new();
+        let selector = format!("cnpg.io/cluster={}", resource.name);
+        for (group, kind) in [("", "Pod"), ("", "PersistentVolumeClaim"), ("", "Service")] {
+            match with_api_permit(
+                semaphore,
+                self.list_selected(
+                    group,
+                    kind,
+                    resource.namespace.as_deref(),
+                    &selector,
+                    ResourceTreeRelation::ClusterResource,
+                ),
+            )
+            .await
+            {
+                Ok(mut refs) => children.append(&mut refs),
+                Err(error) => errors.push(format!("{kind} resources: {error}")),
+            }
+        }
+        for kind in ["Backup", "Database", "DatabaseRole", "Pooler"] {
+            match with_api_permit(
+                semaphore,
+                self.list_matching(
+                    "postgresql.cnpg.io",
+                    kind,
+                    resource.namespace.as_deref(),
+                    ResourceTreeRelation::ClusterResource,
+                    |object| {
+                        object
+                            .data
+                            .pointer("/spec/cluster/name")
+                            .and_then(Value::as_str)
+                            == Some(resource.name.as_str())
+                    },
+                ),
+            )
+            .await
+            {
+                Ok(mut refs) => children.append(&mut refs),
+                Err(error) => errors.push(format!("{kind} resources: {error}")),
+            }
+        }
+        (children, errors)
+    }
+
+    async fn list_generated_cnpg_backups(
+        &self,
+        resource: &ResourceRef,
+        object: &DynamicObject,
+    ) -> Result<Vec<ResourceRef>, K8sError> {
+        let uid = object.metadata.uid.as_deref().unwrap_or_default();
+        self.list_matching(
+            "postgresql.cnpg.io",
+            "Backup",
+            resource.namespace.as_deref(),
+            ResourceTreeRelation::GeneratedResource,
+            |backup| {
+                backup
+                    .metadata
+                    .owner_references
+                    .as_deref()
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|owner| !uid.is_empty() && owner.uid == uid)
+                    || backup
+                        .metadata
+                        .labels
+                        .as_ref()
+                        .and_then(|labels| labels.get("cnpg.io/scheduled-backup"))
+                        .is_some_and(|name| name == &resource.name)
+            },
+        )
+        .await
+    }
+
+    async fn rook_storage_relationships(
+        &self,
+        data: &Value,
+        semaphore: &tokio::sync::Semaphore,
+    ) -> (Vec<ResourceRef>, Vec<String>) {
+        let provisioner = data
+            .pointer("/provisioner")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if !provisioner.contains("rook-ceph") && !provisioner.ends_with(".ceph.com") {
+            return (Vec::new(), Vec::new());
+        }
+        let Some(namespace) = data
+            .pointer("/parameters/clusterID")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        else {
+            return (Vec::new(), Vec::new());
+        };
+        let mut children = Vec::new();
+        if let Some(pool) = data
+            .pointer("/parameters/pool")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        {
+            children.push(self.resolve_resource(
+                "ceph.rook.io".into(),
+                String::new(),
+                "CephBlockPool".into(),
+                pool.into(),
+                Some(namespace.into()),
+                Some(ResourceTreeRelation::StorageBackend),
+            ));
+        }
+        if let Some(filesystem) = data
+            .pointer("/parameters/fsName")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        {
+            children.push(self.resolve_resource(
+                "ceph.rook.io".into(),
+                String::new(),
+                "CephFilesystem".into(),
+                filesystem.into(),
+                Some(namespace.into()),
+                Some(ResourceTreeRelation::StorageBackend),
+            ));
+        }
+        let mut errors = Vec::new();
+        match with_api_permit(
+            semaphore,
+            self.list_matching(
+                "ceph.rook.io",
+                "CephCluster",
+                Some(namespace),
+                ResourceTreeRelation::StorageBackend,
+                |_| true,
+            ),
+        )
+        .await
+        {
+            Ok(mut refs) => children.append(&mut refs),
+            Err(error) => errors.push(format!("CephCluster resources: {error}")),
+        }
+        (children, errors)
+    }
+
+    async fn rook_cluster_relationships(
+        &self,
+        resource: &ResourceRef,
+        semaphore: &tokio::sync::Semaphore,
+    ) -> (Vec<ResourceRef>, Vec<String>) {
+        let mut children = Vec::new();
+        let mut errors = Vec::new();
+        for kind in ["CephBlockPool", "CephFilesystem", "CephObjectStore"] {
+            match with_api_permit(
+                semaphore,
+                self.list_matching(
+                    "ceph.rook.io",
+                    kind,
+                    resource.namespace.as_deref(),
+                    ResourceTreeRelation::ClusterResource,
+                    |_| true,
+                ),
+            )
+            .await
+            {
+                Ok(mut refs) => children.append(&mut refs),
+                Err(error) => errors.push(format!("{kind} resources: {error}")),
+            }
+        }
+        let namespace = resource.namespace.as_deref().unwrap_or_default();
+        for (kind, selector) in [
+            ("Deployment", format!("rook_cluster={namespace}")),
+            ("StatefulSet", format!("rook_cluster={namespace}")),
+            ("DaemonSet", format!("rook_cluster={namespace}")),
+            ("Deployment", "app=rook-ceph-operator".to_string()),
+        ] {
+            match with_api_permit(
+                semaphore,
+                self.list_selected(
+                    "apps",
+                    kind,
+                    resource.namespace.as_deref(),
+                    &selector,
+                    ResourceTreeRelation::ClusterResource,
+                ),
+            )
+            .await
+            {
+                Ok(mut refs) => children.append(&mut refs),
+                Err(error) => errors.push(format!("Rook {kind} resources: {error}")),
+            }
+        }
+        (children, errors)
     }
 
     fn kustomization_children(&self, data: &Value) -> Result<Vec<ResourceRef>, String> {
@@ -463,6 +916,7 @@ impl Backend {
         let expandable = reference_is_expandable(relation, &group, &kind);
         ResourceRef {
             group,
+            version,
             kind,
             name,
             namespace: match &entry {
@@ -528,6 +982,21 @@ fn split_api_version(api_version: &str) -> (String, String) {
         || (String::new(), api_version.to_string()),
         |(group, version)| (group.to_string(), version.to_string()),
     )
+}
+
+fn relationship_providers(
+    resource: &ResourceRef,
+) -> impl Iterator<Item = RelationshipProvider> + '_ {
+    RELATIONSHIP_PROVIDERS
+        .iter()
+        .filter(|registration| {
+            registration.group == resource.group
+                && registration.kind == resource.kind
+                && registration
+                    .version
+                    .is_none_or(|version| version == resource.version)
+        })
+        .map(|registration| registration.provider)
 }
 
 fn is_flux_owner(group: &str, kind: &str) -> bool {
@@ -686,6 +1155,7 @@ mod tests {
     fn relationship_deduplication_preserves_distinct_edges() {
         let make = |relation| ResourceRef {
             group: String::new(),
+            version: "v1".into(),
             kind: "Pod".into(),
             name: "api-1".into(),
             namespace: Some("default".into()),
@@ -719,5 +1189,46 @@ mod tests {
         with_api_permit(&semaphore, async {}).await;
         with_api_permit(&semaphore, async {}).await;
         assert_eq!(semaphore.available_permits(), 1);
+    }
+
+    #[test]
+    fn relationship_registry_is_gvk_keyed_and_supports_multiple_providers() {
+        let resource = ResourceRef {
+            group: "postgresql.cnpg.io".into(),
+            version: "v1".into(),
+            kind: "ScheduledBackup".into(),
+            name: "daily".into(),
+            namespace: Some("database".into()),
+            key: Some("postgresql.cnpg.io/v1/ScheduledBackup".into()),
+            category: Some(Category::CloudNativePg),
+            relation: None,
+            expandable: true,
+        };
+
+        assert_eq!(
+            relationship_providers(&resource).collect::<Vec<_>>(),
+            [
+                RelationshipProvider::CnpgClusterReference,
+                RelationshipProvider::CnpgScheduledBackup,
+            ]
+        );
+    }
+
+    #[test]
+    fn storage_class_registry_requires_the_registered_version() {
+        let mut resource = ResourceRef {
+            group: "storage.k8s.io".into(),
+            version: "v1".into(),
+            kind: "StorageClass".into(),
+            name: "ceph".into(),
+            namespace: None,
+            key: Some("storage.k8s.io/v1/StorageClass".into()),
+            category: Some(Category::Storage),
+            relation: None,
+            expandable: true,
+        };
+        assert_eq!(relationship_providers(&resource).count(), 1);
+        resource.version = "v1beta1".into();
+        assert_eq!(relationship_providers(&resource).count(), 0);
     }
 }

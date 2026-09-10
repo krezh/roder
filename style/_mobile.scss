@@ -2354,6 +2354,7 @@
     > i { grid-row: 1 / 3; background: var(--ok); }
     &.warning > i, &.pending > i { background: var(--warn); }
     &.error > i { background: var(--error); }
+    &.neutral > i { background: var(--muted); }
     > span { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
     > span strong { grid-row: 1 / 3; }
     > span b, > span small { grid-column: 2; text-align: right; }

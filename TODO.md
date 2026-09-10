@@ -6,24 +6,13 @@
 
 ## Dashboard
 
-- Replace hard-coded controller fields with generic controller health groups
-- Add cert-manager health rollups
-- Add Rook health rollups using Ceph health semantics
-- Add CloudNativePG cluster, archival, and backup freshness rollups
-- Show backup age as an RPO signal
 - Add Prometheus and Alertmanager readiness rollups
 
 ## Resource Relationships
 
-- Introduce a GVK-keyed relationship provider registry
 - Add Pod to PVC to PV to StorageClass relationships
 - Add VolumeAttachment to PV and Node relationships
-- Link Rook-backed StorageClasses to CephBlockPools and CephClusters
-- Add CephCluster to pool, filesystem, object-store, and operator workload relationships
 - Add ObjectBucketClaim to ObjectBucket, Secret, and ConfigMap relationships
-- Add CloudNativePG Cluster to Pods, PVCs, Services, Backups, Databases, DatabaseRoles, and Poolers
-- Add CloudNativePG ScheduledBackup to generated Backup relationships
-- Link CloudNativePG Backup, Database, DatabaseRole, and Pooler resources to their Cluster
 - Add cert-manager Certificate to target Secret and issuer relationships
 - Add cert-manager CertificateRequest to issuer, Order, and Challenge relationships
 - Add ExternalSecret to store and generated Secret relationships
@@ -113,6 +102,4 @@
 
 - Add table-driven discovery-family tests
 - Add unit tests for generic status, core, Flux, External Secrets, Gateway API, and RBAC projectors
-- Add layout integration tests for Rook, CloudNativePG, Kopiur, Tuppr, and monitoring resources
-- Install representative operator CRDs in integration tests
-- Exercise operator discovery and projected columns in browser tests
+- Add layout integration tests for Kopiur, Tuppr, and monitoring resources

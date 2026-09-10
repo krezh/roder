@@ -1075,6 +1075,130 @@ mod tests {
     }
 
     #[test]
+    fn rook_cluster_layout_combines_server_and_semantic_health_columns() {
+        let definitions = [
+            column("Name", 0),
+            column("Phase", 0),
+            column("Health", 0),
+            column("Age", 0),
+        ];
+        let layout = table_layout("ceph.rook.io", "CephCluster", true, &definitions);
+        assert_eq!(
+            layout.columns,
+            [
+                "Namespace",
+                "Name",
+                "Phase",
+                "Health",
+                "Version",
+                "Message",
+                "Age"
+            ]
+        );
+
+        let table_row = TableRow {
+            cells: vec![json!("rook-ceph"), json!("Ready"), json!("HEALTH_WARN"), json!("2h")],
+            object: Some(
+                serde_json::from_value(json!({
+                    "apiVersion": "ceph.rook.io/v1",
+                    "kind": "CephCluster",
+                    "metadata": {"name": "rook-ceph", "namespace": "storage", "uid": "rook-1", "creationTimestamp": "2026-09-01T00:00:00Z"},
+                    "status": {"phase": "Ready", "ceph": {"health": "HEALTH_WARN"}, "version": {"version": "19.2.3"}, "message": "degraded redundancy"}
+                }))
+                .unwrap(),
+            ),
+            ..Default::default()
+        };
+        let row = project_table_row(
+            "ceph.rook.io",
+            "CephCluster",
+            &layout,
+            &table_row,
+            None,
+            None,
+        )
+        .unwrap()
+        .0;
+
+        assert_eq!(row.status, RowStatus::Warn);
+        assert_eq!(
+            row.cells[0..6],
+            [
+                "storage",
+                "rook-ceph",
+                "Ready",
+                "HEALTH_WARN",
+                "19.2.3",
+                "degraded redundancy"
+            ]
+        );
+    }
+
+    #[test]
+    fn cnpg_cluster_layout_projects_topology_and_replica_health() {
+        let definitions = [
+            column("Name", 0),
+            column("Instances", 0),
+            column("Ready", 0),
+            column("Phase", 0),
+            column("Age", 0),
+        ];
+        let layout = table_layout("postgresql.cnpg.io", "Cluster", true, &definitions);
+        assert_eq!(
+            layout.columns,
+            [
+                "Namespace",
+                "Name",
+                "Instances",
+                "Ready",
+                "Primary",
+                "Phase",
+                "Image",
+                "Age"
+            ]
+        );
+
+        let table_row = TableRow {
+            cells: vec![json!("app"), json!(3), json!(2), json!("Cluster in healthy state"), json!("4h")],
+            object: Some(
+                serde_json::from_value(json!({
+                    "apiVersion": "postgresql.cnpg.io/v1",
+                    "kind": "Cluster",
+                    "metadata": {"name": "app", "namespace": "database", "uid": "cnpg-1", "creationTimestamp": "2026-09-01T00:00:00Z"},
+                    "spec": {"instances": 3, "imageName": "ghcr.io/cloudnative-pg/postgresql:18"},
+                    "status": {"readyInstances": 2, "currentPrimary": "app-1", "phase": "Cluster in healthy state"}
+                }))
+                .unwrap(),
+            ),
+            ..Default::default()
+        };
+        let row = project_table_row(
+            "postgresql.cnpg.io",
+            "Cluster",
+            &layout,
+            &table_row,
+            None,
+            None,
+        )
+        .unwrap()
+        .0;
+
+        assert_eq!(row.status, RowStatus::Pending);
+        assert_eq!(
+            row.cells[0..7],
+            [
+                "database",
+                "app",
+                "3",
+                "2/3",
+                "app-1",
+                "Cluster in healthy state",
+                "ghcr.io/cloudnative-pg/postgresql:18"
+            ]
+        );
+    }
+
+    #[test]
     fn external_secret_gets_projected_columns_and_age_when_server_omits_age() {
         let definitions = [
             column("Name", 0),

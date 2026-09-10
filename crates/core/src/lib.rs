@@ -504,6 +504,10 @@ pub enum ResourceTreeRelation {
     EndpointSlice,
     FluxInventory,
     HelmManifest,
+    ReferencedResource,
+    ClusterResource,
+    GeneratedResource,
+    StorageBackend,
 }
 
 impl ResourceTreeRelation {
@@ -515,6 +519,10 @@ impl ResourceTreeRelation {
             Self::EndpointSlice => "Endpoint slice",
             Self::FluxInventory => "Flux inventory",
             Self::HelmManifest => "Helm manifest",
+            Self::ReferencedResource => "Referenced resource",
+            Self::ClusterResource => "Cluster resource",
+            Self::GeneratedResource => "Generated resource",
+            Self::StorageBackend => "Storage backend",
         }
     }
 }
@@ -566,13 +574,26 @@ pub struct ClusterOverview {
     pub pod_failed: u32,
     pub warnings: Vec<OverviewWarning>,
     #[serde(default)]
-    pub flux_resources: Vec<ResourceHealthRollup>,
+    pub controller_groups: Vec<ControllerHealthGroup>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ControllerHealthGroup {
+    pub name: String,
+    pub resources: Vec<ResourceHealthRollup>,
     #[serde(default)]
-    pub external_secret_resources: Vec<ResourceHealthRollup>,
+    pub signals: Vec<ControllerHealthSignal>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ControllerHealthSignal {
+    pub label: String,
+    pub value: String,
+    pub status: RowStatus,
     #[serde(default)]
-    pub kopiur_resources: Vec<ResourceHealthRollup>,
+    pub timestamp: Option<String>,
     #[serde(default)]
-    pub tuppr_resources: Vec<ResourceHealthRollup>,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -981,6 +1002,8 @@ pub struct HealthRollup {
     pub failing: u32,
     #[serde(default)]
     pub unknown: u32,
+    #[serde(default)]
+    pub unreported: u32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

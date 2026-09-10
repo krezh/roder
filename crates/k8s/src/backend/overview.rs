@@ -1,12 +1,15 @@
 //! Dashboard overview: node/pod/namespace counts, recent warning events, and
-//! Flux/ESO health rollups, cached briefly so frequent page (re)connects reuse
+//! controller health rollups, cached briefly so frequent page (re)connects reuse
 //! one snapshot instead of each re-listing the cluster.
+
+use std::collections::BTreeMap;
 
 use futures::future::join_all;
 use k8s_openapi::api::core::v1::{Event, Namespace, Node, Pod};
 use kube::api::{Api, DynamicObject, ListParams};
 use roder_core::{
-    Category, ClusterOverview, HealthRollup, NodeSummary, OverviewWarning, ResourceHealthRollup,
+    Category, ClusterOverview, ControllerHealthGroup, ControllerHealthSignal, HealthRollup,
+    NodeSummary, OverviewWarning, ResourceHealthRollup, RowStatus,
 };
 
 use crate::metrics::{node_usage, parse_cpu, parse_mem};
@@ -117,18 +120,44 @@ impl Backend {
         // Recent warning events.
         let warnings = self.recent_warnings().await.unwrap_or_default();
 
-        let (flux_resources, external_secret_resources, kopiur_resources, tuppr_resources) = tokio::join!(
-            self.resource_rollups(Category::Flux, None),
-            self.resource_rollups(Category::ExternalSecrets, None),
-            self.resource_rollups(
+        let groups = [
+            ("Flux", Category::Flux, None),
+            ("External Secrets", Category::ExternalSecrets, None),
+            ("cert-manager", Category::CertManager, None),
+            ("Rook Ceph", Category::Rook, None),
+            ("CloudNativePG", Category::CloudNativePg, None),
+            (
+                "Kopiur",
                 Category::Custom("home-operations.com".to_string()),
                 Some("kopiur.home-operations.com"),
             ),
-            self.resource_rollups(
+            (
+                "Tuppr",
                 Category::Custom("home-operations.com".to_string()),
                 Some("tuppr.home-operations.com"),
             ),
+        ];
+        let (mut controller_groups, cnpg_signals) = tokio::join!(
+            join_all(
+                groups
+                    .into_iter()
+                    .map(|(name, category, group)| async move {
+                        ControllerHealthGroup {
+                            name: name.to_string(),
+                            resources: self.resource_rollups(category, group).await,
+                            signals: Vec::new(),
+                        }
+                    })
+            ),
+            self.cnpg_signals(),
         );
+        if let Some(group) = controller_groups
+            .iter_mut()
+            .find(|group| group.name == "CloudNativePG")
+        {
+            group.signals = cnpg_signals;
+        }
+        controller_groups.retain(|group| !group.resources.is_empty() || !group.signals.is_empty());
 
         Ok(ClusterOverview {
             kubernetes_version,
@@ -139,10 +168,7 @@ impl Backend {
             pod_pending,
             pod_failed,
             warnings,
-            flux_resources,
-            external_secret_resources,
-            kopiur_resources,
-            tuppr_resources,
+            controller_groups,
         })
     }
 
@@ -224,6 +250,193 @@ impl Backend {
             .filter(|resource| resource.health.total > 0 || resource.error.is_some())
             .collect()
     }
+
+    async fn cnpg_signals(&self) -> Vec<ControllerHealthSignal> {
+        let (clusters, backups, schedules) = tokio::join!(
+            self.list_kind_objects("postgresql.cnpg.io", "Cluster"),
+            self.list_kind_objects("postgresql.cnpg.io", "Backup"),
+            self.list_kind_objects("postgresql.cnpg.io", "ScheduledBackup"),
+        );
+        summarize_cnpg_signals(
+            &clusters.unwrap_or_default(),
+            &backups.unwrap_or_default(),
+            &schedules.unwrap_or_default(),
+        )
+    }
+
+    async fn list_kind_objects(
+        &self,
+        group: &str,
+        kind: &str,
+    ) -> Result<Vec<DynamicObject>, K8sError> {
+        let catalog_store = self.shared.catalog();
+        let catalog = catalog_store.load();
+        let Some(entry) = catalog
+            .entries
+            .iter()
+            .find(|entry| entry.kind.group == group && entry.kind.kind == kind)
+            .cloned()
+        else {
+            return Ok(Vec::new());
+        };
+        Api::<DynamicObject>::all_with(self.client(), &entry.api_resource)
+            .list(&ListParams::default())
+            .await
+            .map(|list| list.items)
+            .map_err(api_err)
+    }
+}
+
+fn summarize_cnpg_signals(
+    clusters: &[DynamicObject],
+    backups: &[DynamicObject],
+    schedules: &[DynamicObject],
+) -> Vec<ControllerHealthSignal> {
+    let mut latest_backups = BTreeMap::<(String, String), (time::OffsetDateTime, String)>::new();
+    for backup in backups {
+        let phase = backup
+            .data
+            .pointer("/status/phase")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        if !matches!(
+            phase.to_ascii_lowercase().as_str(),
+            "completed" | "succeeded"
+        ) {
+            continue;
+        }
+        let Some(cluster) = backup
+            .data
+            .pointer("/spec/cluster/name")
+            .and_then(serde_json::Value::as_str)
+        else {
+            continue;
+        };
+        let Some(timestamp) = backup
+            .data
+            .pointer("/status/stoppedAt")
+            .and_then(serde_json::Value::as_str)
+        else {
+            continue;
+        };
+        let Some(parsed) = parse_timestamp(timestamp) else {
+            continue;
+        };
+        let key = (
+            backup.metadata.namespace.clone().unwrap_or_default(),
+            cluster.to_string(),
+        );
+        if latest_backups
+            .get(&key)
+            .is_none_or(|(current, _)| parsed > *current)
+        {
+            latest_backups.insert(key, (parsed, timestamp.to_string()));
+        }
+    }
+
+    let mut latest_schedules = BTreeMap::<(String, String), time::OffsetDateTime>::new();
+    for schedule in schedules {
+        let Some(cluster) = schedule
+            .data
+            .pointer("/spec/cluster/name")
+            .and_then(serde_json::Value::as_str)
+        else {
+            continue;
+        };
+        let Some(timestamp) = schedule
+            .data
+            .pointer("/status/lastScheduleTime")
+            .and_then(serde_json::Value::as_str)
+            .and_then(parse_timestamp)
+        else {
+            continue;
+        };
+        let key = (
+            schedule.metadata.namespace.clone().unwrap_or_default(),
+            cluster.to_string(),
+        );
+        latest_schedules
+            .entry(key)
+            .and_modify(|current| *current = (*current).max(timestamp))
+            .or_insert(timestamp);
+    }
+
+    let mut signals = Vec::new();
+    for cluster in clusters {
+        let namespace = cluster.metadata.namespace.clone().unwrap_or_default();
+        let name = cluster.metadata.name.clone().unwrap_or_default();
+        let key = (namespace, name.clone());
+        let archival = cluster
+            .data
+            .pointer("/status/conditions")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|conditions| {
+                conditions.iter().find(|condition| {
+                    condition.get("type").and_then(serde_json::Value::as_str)
+                        == Some("ContinuousArchiving")
+                })
+            });
+        if let Some(archival) = archival {
+            let archival_status = match archival.get("status").and_then(serde_json::Value::as_str) {
+                Some("True") => RowStatus::Ok,
+                Some("False") => RowStatus::Error,
+                Some(_) | None => RowStatus::Pending,
+            };
+            let archival_message = archival
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            signals.push(ControllerHealthSignal {
+                label: format!("{name} archival"),
+                value: match archival_status {
+                    RowStatus::Ok => "Healthy",
+                    RowStatus::Error => "Failing",
+                    _ => "Pending",
+                }
+                .to_string(),
+                status: archival_status,
+                timestamp: None,
+                message: archival_message,
+            });
+        }
+
+        let backup = latest_backups.get(&key);
+        let scheduled = latest_schedules.get(&key);
+        if backup.is_none() && scheduled.is_none() {
+            continue;
+        }
+        let status = match (backup, scheduled) {
+            (None, Some(_)) => RowStatus::Error,
+            (Some((completed, _)), Some(last_run)) if completed < last_run => RowStatus::Warn,
+            (Some(_), _) => RowStatus::Ok,
+            (None, None) => unreachable!("unconfigured backup signals are skipped"),
+        };
+        let message = match (backup, scheduled, status) {
+            (None, Some(_), _) => "No successful backup after a scheduled run",
+            (None, None, _) => unreachable!("unconfigured backup signals are skipped"),
+            (Some(_), Some(_), RowStatus::Warn) => {
+                "The latest scheduled run has no completed backup"
+            }
+            _ => "Latest successful recovery point",
+        };
+        signals.push(ControllerHealthSignal {
+            label: format!("{name} backup RPO"),
+            value: backup
+                .map(|_| "Recovery point age")
+                .unwrap_or("No recovery point")
+                .to_string(),
+            status,
+            timestamp: backup.map(|(_, timestamp)| timestamp.clone()),
+            message: message.to_string(),
+        });
+    }
+    signals.sort_by(|left, right| left.label.cmp(&right.label));
+    signals
+}
+
+fn parse_timestamp(value: &str) -> Option<time::OffsetDateTime> {
+    time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339).ok()
 }
 
 fn summarize_resources(
@@ -270,7 +483,16 @@ fn record_status(
         roder_core::RowStatus::Pending => rollup.reconciling += 1,
         roder_core::RowStatus::Warn => rollup.warning += 1,
         roder_core::RowStatus::Error => rollup.failing += 1,
-        roder_core::RowStatus::Unknown => rollup.unknown += 1,
+        roder_core::RowStatus::Unknown if status_is_reported(object) => rollup.unknown += 1,
+        roder_core::RowStatus::Unknown => rollup.unreported += 1,
+    }
+}
+
+fn status_is_reported(object: &DynamicObject) -> bool {
+    match object.data.get("status") {
+        Some(serde_json::Value::Object(status)) => !status.is_empty(),
+        Some(serde_json::Value::Null) | None => false,
+        Some(_) => true,
     }
 }
 
@@ -291,6 +513,14 @@ mod tests {
             namespaced: true,
             category: Category::Custom(group.into()),
         }
+    }
+
+    fn object(group: &str, kind: &str, name: &str, data: serde_json::Value) -> DynamicObject {
+        let api_resource = ApiResource::from_gvk(&GroupVersionKind::gvk(group, "v1", kind));
+        let mut object = DynamicObject::new(name, &api_resource);
+        object.metadata.namespace = Some("database".into());
+        object.data = data;
+        object
     }
 
     #[test]
@@ -325,7 +555,7 @@ mod tests {
     }
 
     #[test]
-    fn rollup_records_unknown_instead_of_treating_it_as_healthy() {
+    fn rollup_records_missing_status_as_unreported() {
         let api_resource =
             ApiResource::from_gvk(&GroupVersionKind::gvk("example.io", "v1", "Widget"));
         let mut object = DynamicObject::new("widget", &api_resource);
@@ -339,8 +569,59 @@ mod tests {
             resource_status("example.io", "Widget", &object),
             RowStatus::Unknown
         );
-        assert_eq!(rollup.unknown, 1);
+        assert_eq!(rollup.unreported, 1);
+        assert_eq!(rollup.unknown, 0);
         assert_eq!(rollup.ready, 0);
+    }
+
+    #[test]
+    fn rollup_keeps_an_unrecognized_reported_status_as_unknown() {
+        let api_resource =
+            ApiResource::from_gvk(&GroupVersionKind::gvk("example.io", "v1", "Widget"));
+        let mut object = DynamicObject::new("widget", &api_resource);
+        object.data = serde_json::json!({"status": {"phase": "Unexpected"}});
+        let kind = resource_kind("example.io", "Widget");
+        let mut rollup = HealthRollup::default();
+
+        record_status(&mut rollup, &kind, &object);
+
+        assert_eq!(rollup.unknown, 1);
+        assert_eq!(rollup.unreported, 0);
+    }
+
+    #[test]
+    fn rollup_recognizes_synced_conditions_and_applied_flags() {
+        let cases = [
+            (
+                resource_kind("trust.cert-manager.io", "Bundle"),
+                object(
+                    "trust.cert-manager.io",
+                    "Bundle",
+                    "roots",
+                    serde_json::json!({"status": {"conditions": [{
+                        "type": "Synced",
+                        "status": "True"
+                    }]}}),
+                ),
+            ),
+            (
+                resource_kind("postgresql.cnpg.io", "Database"),
+                object(
+                    "postgresql.cnpg.io",
+                    "Database",
+                    "app",
+                    serde_json::json!({"status": {"applied": true}}),
+                ),
+            ),
+        ];
+
+        for (kind, object) in cases {
+            let mut rollup = HealthRollup::default();
+            record_status(&mut rollup, &kind, &object);
+            assert_eq!(rollup.ready, 1, "{}", kind.kind);
+            assert_eq!(rollup.unknown, 0, "{}", kind.kind);
+            assert_eq!(rollup.unreported, 0, "{}", kind.kind);
+        }
     }
 
     #[test]
@@ -353,5 +634,74 @@ mod tests {
         assert_eq!(rollup.key, "example.io/v1/Widget");
         assert_eq!(rollup.health.total, 0);
         assert_eq!(rollup.error.as_deref(), Some("403 Forbidden"));
+    }
+
+    #[test]
+    fn cnpg_signals_report_archival_failure_and_stale_recovery_point() {
+        let clusters = [object(
+            "postgresql.cnpg.io",
+            "Cluster",
+            "app",
+            serde_json::json!({"status": {"conditions": [{
+                "type": "ContinuousArchiving",
+                "status": "False",
+                "message": "WAL upload failed"
+            }]}}),
+        )];
+        let backups = [object(
+            "postgresql.cnpg.io",
+            "Backup",
+            "older",
+            serde_json::json!({
+                "spec": {"cluster": {"name": "app"}},
+                "status": {"phase": "completed", "stoppedAt": "2026-09-01T02:00:00Z"}
+            }),
+        )];
+        let schedules = [object(
+            "postgresql.cnpg.io",
+            "ScheduledBackup",
+            "daily",
+            serde_json::json!({
+                "spec": {"cluster": {"name": "app"}},
+                "status": {"lastScheduleTime": "2026-09-02T02:00:00Z"}
+            }),
+        )];
+
+        let signals = summarize_cnpg_signals(&clusters, &backups, &schedules);
+
+        assert_eq!(signals.len(), 2);
+        assert_eq!(signals[0].label, "app archival");
+        assert_eq!(signals[0].status, RowStatus::Error);
+        assert_eq!(signals[0].message, "WAL upload failed");
+        assert_eq!(signals[1].label, "app backup RPO");
+        assert_eq!(signals[1].status, RowStatus::Warn);
+        assert_eq!(
+            signals[1].timestamp.as_deref(),
+            Some("2026-09-01T02:00:00Z")
+        );
+    }
+
+    #[test]
+    fn cnpg_signal_fails_when_a_schedule_has_never_produced_a_backup() {
+        let clusters = [object(
+            "postgresql.cnpg.io",
+            "Cluster",
+            "app",
+            serde_json::json!({}),
+        )];
+        let schedules = [object(
+            "postgresql.cnpg.io",
+            "ScheduledBackup",
+            "daily",
+            serde_json::json!({
+                "spec": {"cluster": {"name": "app"}},
+                "status": {"lastScheduleTime": "2026-09-02T02:00:00Z"}
+            }),
+        )];
+
+        let signals = summarize_cnpg_signals(&clusters, &[], &schedules);
+
+        assert_eq!(signals[0].status, RowStatus::Error);
+        assert_eq!(signals[0].value, "No recovery point");
     }
 }

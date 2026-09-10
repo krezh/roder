@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: roder-operators
+---
+apiVersion: ceph.rook.io/v1
+kind: CephCluster
+metadata:
+  name: fixture
+  namespace: roder-operators
+spec: {}
+---
+apiVersion: ceph.rook.io/v1
+kind: CephBlockPool
+metadata:
+  name: replicated
+  namespace: roder-operators
+spec: {}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: fixture
+  namespace: roder-operators
+spec:
+  instances: 3
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Backup
+metadata:
+  name: fixture
+  namespace: roder-operators
+spec:
+  cluster:
+    name: fixture
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: fixture
+  namespace: roder-operators
+spec:
+  cluster:
+    name: fixture
+  schedule: "0 0 2 * * *"

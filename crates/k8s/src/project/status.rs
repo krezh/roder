@@ -34,9 +34,23 @@ pub(crate) fn generic_status(data: &Value) -> RowStatus {
             return RowStatus::Pending;
         }
     }
-    for type_ in ["Ready", "Healthy", "Available"] {
+    for type_ in ["Ready", "Healthy", "Available", "Applied", "Synced"] {
         if let Some(status) = condition_status(data, type_) {
             return cond_to_status(Some(&status));
+        }
+    }
+
+    let status = data.get("status");
+    for field in ["applied", "synced"] {
+        if let Some(value) = status
+            .and_then(|status| status.get(field))
+            .and_then(Value::as_bool)
+        {
+            return if value {
+                RowStatus::Ok
+            } else {
+                RowStatus::Error
+            };
         }
     }
 
@@ -159,6 +173,16 @@ mod tests {
             ),
             (json!({"status": {"phase": "Invalid"}}), RowStatus::Error),
             (json!({"status": {"phase": "Healthy"}}), RowStatus::Ok),
+            (
+                json!({"status": {"conditions": [{"type": "Synced", "status": "True"}]}}),
+                RowStatus::Ok,
+            ),
+            (
+                json!({"status": {"conditions": [{"type": "Applied", "status": "False"}]}}),
+                RowStatus::Error,
+            ),
+            (json!({"status": {"applied": true}}), RowStatus::Ok),
+            (json!({"status": {"applied": false}}), RowStatus::Error),
             (json!({"status": {"phase": "Mystery"}}), RowStatus::Unknown),
             (
                 json!({"status": {"conditions": [

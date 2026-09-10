@@ -2,7 +2,8 @@
 
 use leptos::prelude::*;
 use roder_core::{
-    ClusterOverview, NodeSummary, OverviewWarning, ResourceHealthRollup, ResourceKind, RowStatus,
+    ClusterOverview, ControllerHealthSignal, NodeSummary, OverviewWarning, ResourceHealthRollup,
+    ResourceKind, RowStatus,
 };
 
 use crate::app::components::table::StatusDot;
@@ -125,6 +126,7 @@ fn dashboard_view(
 ) -> impl IntoView {
     let nodes = o.nodes.clone();
     let warnings = o.warnings.clone();
+    let controller_groups = o.controller_groups.clone();
     let (cpu_p, mem_p) = cluster_usage_pct(&nodes);
     let cpu_available = nodes
         .iter()
@@ -135,35 +137,37 @@ fn dashboard_view(
     let ready_nodes = nodes.iter().filter(|node| node.ready).count();
     let unready_nodes = nodes.len().saturating_sub(ready_nodes);
     let controller_failing: usize = o
-        .flux_resources
+        .controller_groups
         .iter()
-        .chain(&o.external_secret_resources)
-        .chain(&o.kopiur_resources)
-        .chain(&o.tuppr_resources)
+        .flat_map(|group| &group.resources)
         .map(|resource| resource.health.failing as usize)
-        .sum();
+        .sum::<usize>()
+        + o.controller_groups
+            .iter()
+            .flat_map(|group| &group.signals)
+            .filter(|signal| signal.status == RowStatus::Error)
+            .count();
     let controller_suspended: usize = o
-        .flux_resources
+        .controller_groups
         .iter()
-        .chain(&o.external_secret_resources)
-        .chain(&o.kopiur_resources)
-        .chain(&o.tuppr_resources)
+        .flat_map(|group| &group.resources)
         .map(|resource| resource.health.suspended as usize)
         .sum();
     let controller_warning: usize = o
-        .flux_resources
+        .controller_groups
         .iter()
-        .chain(&o.external_secret_resources)
-        .chain(&o.kopiur_resources)
-        .chain(&o.tuppr_resources)
+        .flat_map(|group| &group.resources)
         .map(|resource| (resource.health.warning + resource.health.unknown) as usize)
-        .sum();
+        .sum::<usize>()
+        + o.controller_groups
+            .iter()
+            .flat_map(|group| &group.signals)
+            .filter(|signal| matches!(signal.status, RowStatus::Pending | RowStatus::Warn))
+            .count();
     let controller_unreadable = o
-        .flux_resources
+        .controller_groups
         .iter()
-        .chain(&o.external_secret_resources)
-        .chain(&o.kopiur_resources)
-        .chain(&o.tuppr_resources)
+        .flat_map(|group| &group.resources)
         .filter(|resource| resource.error.is_some())
         .count();
     let failing =
@@ -264,56 +268,25 @@ fn dashboard_view(
             </button>
         </div>
 
-        {(!o.flux_resources.is_empty()
-            || !o.external_secret_resources.is_empty()
-            || !o.kopiur_resources.is_empty()
-            || !o.tuppr_resources.is_empty())
-            .then(|| view! {
+        {(!controller_groups.is_empty()).then(|| view! {
                 <section class="dashboard-section" aria-labelledby="controllers-heading">
                     <div class="section-heading">
                         <span id="controllers-heading" class="section-kicker">"Controllers"</span>
                     </div>
                     <div class="controller-groups">
-                        {(!o.flux_resources.is_empty()).then(|| view! {
+                        {controller_groups.into_iter().map(|group| view! {
                             <div class="controller-group">
-                                <h2>"Flux"</h2>
+                                <h2>{group.name}</h2>
                                 <div class="controller-grid">
-                                    {o.flux_resources.clone().into_iter().map(|resource| {
+                                    {group.resources.into_iter().map(|resource| {
                                         rollup_card(resource, catalog, selected_kind)
+                                    }).collect_view()}
+                                    {group.signals.into_iter().map(|signal| {
+                                        signal_card(signal, tick)
                                     }).collect_view()}
                                 </div>
                             </div>
-                        })}
-                        {(!o.external_secret_resources.is_empty()).then(|| view! {
-                            <div class="controller-group">
-                                <h2>"External Secrets"</h2>
-                                <div class="controller-grid">
-                                    {o.external_secret_resources.clone().into_iter().map(|resource| {
-                                        rollup_card(resource, catalog, selected_kind)
-                                    }).collect_view()}
-                                </div>
-                            </div>
-                        })}
-                        {(!o.kopiur_resources.is_empty()).then(|| view! {
-                            <div class="controller-group">
-                                <h2>"Kopiur"</h2>
-                                <div class="controller-grid">
-                                    {o.kopiur_resources.clone().into_iter().map(|resource| {
-                                        rollup_card(resource, catalog, selected_kind)
-                                    }).collect_view()}
-                                </div>
-                            </div>
-                        })}
-                        {(!o.tuppr_resources.is_empty()).then(|| view! {
-                            <div class="controller-group">
-                                <h2>"Tuppr"</h2>
-                                <div class="controller-grid">
-                                    {o.tuppr_resources.clone().into_iter().map(|resource| {
-                                        rollup_card(resource, catalog, selected_kind)
-                                    }).collect_view()}
-                                </div>
-                            </div>
-                        })}
+                        }).collect_view()}
                     </div>
                 </section>
             })}
@@ -445,12 +418,15 @@ fn rollup_card(
     let rollup = resource.health;
     let error = resource.error.unwrap_or_default();
     let unreadable = !error.is_empty();
+    let only_unclassified = rollup.total > 0 && rollup.unknown + rollup.unreported == rollup.total;
     let state = if unreadable || rollup.failing > 0 {
         "controller-error"
     } else if rollup.reconciling > 0 {
         "controller-pending"
     } else if rollup.suspended > 0 || rollup.warning > 0 || rollup.unknown > 0 {
         "controller-warn"
+    } else if rollup.unreported > 0 {
+        "controller-neutral"
     } else {
         "controller-ok"
     };
@@ -463,8 +439,12 @@ fn rollup_card(
                 <div class="card-heading">
                     <h3>{label}</h3>
                 </div>
-                <strong>{rollup.ready}" / "{rollup.total}</strong>
-                <span>"ready"</span>
+                <strong>{if only_unclassified {
+                    rollup.total.to_string()
+                } else {
+                    format!("{} / {}", rollup.ready, rollup.total)
+                }}</strong>
+                <span>{if only_unclassified { "resources" } else { "ready" }}</span>
             </div>
             <div class="controller-counts">
                 {(rollup.reconciling > 0).then(|| view! {
@@ -480,16 +460,46 @@ fn rollup_card(
                     <span class="error">{rollup.failing}" failing"</span>
                 })}
                 {(rollup.unknown > 0).then(|| view! {
-                    <span class="unknown">{rollup.unknown}" status unknown"</span>
+                    <span class="warn">{rollup.unknown}" health status unrecognized"</span>
+                })}
+                {(rollup.unreported > 0).then(|| view! {
+                    <span class="unknown">{rollup.unreported}" health status not reported"</span>
                 })}
                 {unreadable.then(|| view! {
                     <span class="error">"unreadable"</span>
                 })}
-                {(rollup.reconciling == 0 && rollup.suspended == 0 && rollup.warning == 0 && rollup.failing == 0 && rollup.unknown == 0 && !unreadable).then(|| view! {
+                {(rollup.reconciling == 0 && rollup.suspended == 0 && rollup.warning == 0 && rollup.failing == 0 && rollup.unknown == 0 && rollup.unreported == 0 && !unreadable).then(|| view! {
                     <span class="ok">"All reconciled"</span>
                 })}
             </div>
         </button>
+    }
+}
+
+fn signal_card(signal: ControllerHealthSignal, tick: RwSignal<u32>) -> impl IntoView {
+    let state = match signal.status {
+        RowStatus::Error => "controller-error",
+        RowStatus::Pending => "controller-pending",
+        RowStatus::Warn => "controller-warn",
+        RowStatus::Unknown => "controller-warn",
+        RowStatus::Ok | RowStatus::Done => "controller-ok",
+    };
+    let timestamp = signal.timestamp;
+    let fallback = signal.value;
+    view! {
+        <article class=format!("card controller-card controller-signal {state}") title=signal.message>
+            <div class="controller-status" aria-hidden="true"></div>
+            <div class="controller-main">
+                <div class="card-heading"><h3>{signal.label}</h3></div>
+                <strong>{move || {
+                    tick.get();
+                    timestamp
+                        .as_ref()
+                        .map(|value| data::humanize_age(&Some(value.clone())))
+                        .unwrap_or_else(|| fallback.clone())
+                }}</strong>
+            </div>
+        </article>
     }
 }
 

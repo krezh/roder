@@ -4,7 +4,11 @@
 use roder_core::RowStatus;
 use serde_json::Value;
 
-use super::accessors::{int_at, str_at};
+use super::accessors::str_at;
+pub(crate) use roder_core::{
+    condition_is, current_condition as condition, current_condition_from as condition_from,
+    job_lifecycle, status_generation_is_stale, JobLifecycle,
+};
 
 pub(crate) fn generic_status(data: &Value) -> RowStatus {
     if status_generation_is_stale(data) {
@@ -77,30 +81,6 @@ pub(crate) fn condition_status(data: &Value, type_: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-pub(crate) fn condition_is(data: &Value, type_: &str, status: &str) -> bool {
-    condition(data, type_)
-        .and_then(|condition| condition.get("status"))
-        .and_then(Value::as_str)
-        == Some(status)
-}
-
-fn condition<'a>(data: &'a Value, type_: &str) -> Option<&'a Value> {
-    if status_generation_is_stale(data) {
-        return None;
-    }
-    let generation = int_at(data, &["metadata", "generation"]);
-    data.pointer("/status/conditions")?
-        .as_array()?
-        .iter()
-        .rev()
-        .find(|condition| {
-            condition.get("type").and_then(Value::as_str) == Some(type_)
-                && generation
-                    .zip(condition.get("observedGeneration").and_then(Value::as_i64))
-                    .is_none_or(|(generation, observed)| generation == observed)
-        })
-}
-
 pub(crate) fn condition_reason(data: &Value, type_: &str) -> Option<String> {
     condition(data, type_)?
         .get("reason")
@@ -115,12 +95,6 @@ pub(crate) fn condition_message(data: &Value, type_: &str) -> Option<String> {
         .and_then(Value::as_str)
         .filter(|message| !message.is_empty())
         .map(str::to_string)
-}
-
-pub(crate) fn status_generation_is_stale(data: &Value) -> bool {
-    int_at(data, &["metadata", "generation"])
-        .zip(int_at(data, &["status", "observedGeneration"]))
-        .is_some_and(|(generation, observed)| observed < generation)
 }
 
 /// The Ready condition's reason (e.g. "ReconciliationSucceeded"), falling back to
@@ -160,6 +134,19 @@ mod tests {
 
         assert_eq!(condition_status(&data, "Ready").as_deref(), Some("False"));
         assert_eq!(condition_reason(&data, "Ready").as_deref(), Some("Current"));
+    }
+
+    #[test]
+    fn condition_helpers_prefer_current_generation_over_unversioned_entries() {
+        let data = json!({
+            "metadata": {"generation": 4},
+            "status": {"conditions": [
+                {"type": "Ready", "status": "True", "observedGeneration": 4},
+                {"type": "Ready", "status": "False"}
+            ]}
+        });
+
+        assert_eq!(condition_status(&data, "Ready").as_deref(), Some("True"));
     }
 
     #[test]

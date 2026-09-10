@@ -101,21 +101,11 @@ pub(crate) fn MobileRowDetail(
             .unwrap_or(false)
     };
     let job_terminal = move || {
-        controller.object.get().flatten().is_some_and(|detail| {
-            detail
-                .object
-                .pointer("/status/conditions")
-                .and_then(serde_json::Value::as_array)
-                .is_some_and(|conditions| {
-                    conditions.iter().any(|condition| {
-                        matches!(
-                            condition.get("type").and_then(serde_json::Value::as_str),
-                            Some("Complete" | "Failed")
-                        ) && condition.get("status").and_then(serde_json::Value::as_str)
-                            == Some("True")
-                    })
-                })
-        })
+        controller
+            .object
+            .get()
+            .flatten()
+            .is_some_and(|detail| roder_core::job_lifecycle(&detail.object).is_terminal())
     };
 
     view! {

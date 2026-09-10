@@ -5,8 +5,8 @@ use k8s_openapi::api::authorization::v1::{
 };
 use kube::api::{Api, PostParams};
 use roder_core::{
-    AccessRow, ActionPermissions, DrainOptions, ResourceAction, ResourceKind,
-    ACCESS_REVIEW_OPERATIONS,
+    AccessRow, ActionPermissions, DrainOptions, ResourceAction, ResourceKind, SanitizeAction,
+    SweepOptions, ACCESS_REVIEW_OPERATIONS,
 };
 
 use super::Backend;
@@ -166,6 +166,17 @@ impl Backend {
                     && target_subresource("patch", "ephemeralcontainers").await
                     && target_subresource("create", "exec").await
             }
+            ResourceAction::NodeShell => {
+                let pods = ResourceKind::make_key("", "v1", "Pod");
+                let namespace = Some(super::exec::NODE_SHELL_NAMESPACE);
+                target("get").await
+                    && self.can("create", &pods, namespace).await
+                    && self.can("get", &pods, namespace).await
+                    && self.can("delete", &pods, namespace).await
+                    && self
+                        .can_subresource("create", &pods, namespace, "exec")
+                        .await
+            }
             ResourceAction::FluxReconcileWithSource => {
                 if !target("get").await || !target("patch").await {
                     return false;
@@ -196,6 +207,27 @@ impl Backend {
                 self.can("create", &snapshot, ns).await
             }
         }
+    }
+
+    pub async fn can_sanitize(
+        &self,
+        namespace: Option<&str>,
+        options: SweepOptions,
+        action: SanitizeAction,
+    ) -> bool {
+        let verb_allowed = |key: String| async move {
+            self.can("list", &key, namespace).await
+                && (action == SanitizeAction::Preview || self.can("delete", &key, namespace).await)
+        };
+        if options.includes_pods() && !verb_allowed(ResourceKind::make_key("", "v1", "Pod")).await {
+            return false;
+        }
+        if options.includes_jobs()
+            && !verb_allowed(ResourceKind::make_key("batch", "v1", "Job")).await
+        {
+            return false;
+        }
+        true
     }
 
     async fn can_logs(

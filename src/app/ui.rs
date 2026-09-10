@@ -49,6 +49,58 @@ pub(crate) struct SweepRequest {
     pub(crate) on_confirm: Arc<dyn Fn(roder_core::SweepOptions) + Send + Sync>,
 }
 
+pub(crate) fn sweep_result(summary: &roder_core::CleanupSummary) -> (String, Option<String>) {
+    let deleted = summary.pods_deleted + summary.jobs_deleted;
+    let title = if deleted == 0 {
+        "Nothing swept".to_string()
+    } else {
+        format!(
+            "Swept {} pod(s), {} job(s)",
+            summary.pods_deleted, summary.jobs_deleted
+        )
+    };
+    let errors = summary
+        .forbidden
+        .iter()
+        .chain(&summary.failed)
+        .cloned()
+        .collect::<Vec<_>>();
+    (title, (!errors.is_empty()).then(|| errors.join("\n")))
+}
+
+pub(crate) fn run_sweep(
+    toast: RwSignal<Option<Toast>>,
+    namespace: Option<String>,
+    options: roder_core::SweepOptions,
+) {
+    let payload = serde_json::json!({
+        "action": "sanitize",
+        "namespace": namespace,
+        "sweep_options": options,
+    });
+    leptos::task::spawn_local(async move {
+        match crate::data::post_action(&payload).await {
+            Ok(body) => match serde_json::from_str::<roder_core::CleanupSummary>(&body) {
+                Ok(summary) => {
+                    let (message, detail) = sweep_result(&summary);
+                    if detail.is_some() {
+                        show_toast_detail(toast, message, detail, ToastKind::Err);
+                    } else {
+                        show_toast(toast, message, ToastKind::Ok);
+                    }
+                }
+                Err(error) => show_toast_detail(
+                    toast,
+                    "Sweep failed",
+                    Some(format!("Invalid server response: {error}")),
+                    ToastKind::Err,
+                ),
+            },
+            Err(error) => show_toast_detail(toast, "Sweep failed", Some(error), ToastKind::Err),
+        }
+    });
+}
+
 pub(crate) fn ask_sweep(
     signal: RwSignal<Option<SweepRequest>>,
     namespace: Option<String>,
@@ -562,5 +614,23 @@ mod tests {
             fuzzy_match("dep", "Deployment").unwrap().1
                 > fuzzy_match("dep", "DebugEndpoint").unwrap().1
         );
+    }
+
+    #[test]
+    fn highlight_groups_matched_and_unmatched_segments() {
+        assert_eq!(
+            highlight("Deployment", &[0, 1, 3]),
+            vec![
+                ("De".into(), true),
+                ("p".into(), false),
+                ("l".into(), true),
+                ("oyment".into(), false),
+            ]
+        );
+    }
+
+    #[test]
+    fn fuzzy_match_rejects_out_of_order_characters() {
+        assert!(fuzzy_match("pod", "Deployment").is_none());
     }
 }

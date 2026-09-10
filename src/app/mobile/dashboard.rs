@@ -1,13 +1,15 @@
 use leptos::prelude::*;
 use roder_core::{
     ClusterOverview, ControllerHealthSignal, NodeSummary, OverviewWarning, ResourceHealthRollup,
-    ResourceKind, RowStatus,
+    ResourceKind,
 };
 
-use crate::app::state::{Catalog, DetailTarget, Tick};
-use crate::app::util::format::{
-    camel_label, cluster_usage_pct, fmt_cores, fmt_mem, pct, talos_version,
+use crate::app::overview::{
+    cluster_health, controller_rollup, controller_signal_state, core_kind, kind_for_target,
+    ControllerState, HealthState, OverviewState,
 };
+use crate::app::state::{Catalog, DetailTarget, Tick};
+use crate::app::util::format::{cluster_usage_pct, fmt_cores, fmt_mem, pct, talos_version};
 use crate::data;
 
 fn select_kind(
@@ -15,11 +17,7 @@ fn select_kind(
     selected: RwSignal<Option<ResourceKind>>,
     key_or_kind: &str,
 ) {
-    if let Some(kind) = catalog
-        .get_untracked()
-        .into_iter()
-        .find(|kind| kind.key == key_or_kind || kind.kind == key_or_kind)
-    {
+    if let Some(kind) = kind_for_target(&catalog.get_untracked(), key_or_kind) {
         selected.set(Some(kind));
     }
 }
@@ -30,47 +28,15 @@ pub(crate) fn MobileDashboard() -> impl IntoView {
     let selected = expect_context::<RwSignal<Option<ResourceKind>>>();
     let detail = expect_context::<RwSignal<Option<DetailTarget>>>();
     let tick = expect_context::<Tick>().0;
-    let overview = RwSignal::new(None::<ClusterOverview>);
-    let error = RwSignal::new(None::<String>);
-    Effect::new(move |_| {
-        if let Some(value) =
-            data::storage_get("roder.overview").and_then(|value| serde_json::from_str(&value).ok())
-        {
-            overview.set(Some(value));
-        }
-    });
-    let resource =
-        LocalResource::new(|| async { data::fetch_json::<ClusterOverview>("/api/overview").await });
-    Effect::new(move |_| {
-        if let Some(result) = resource.get() {
-            match result {
-                Ok(value) => {
-                    if let Ok(json) = serde_json::to_string(&value) {
-                        data::storage_set("roder.overview", &json);
-                    }
-                    overview.set(Some(value));
-                    error.set(None);
-                }
-                Err(value) => error.set(Some(value)),
-            }
-        }
-    });
-    Effect::new(move |_| {
-        if let Ok(handle) = set_interval_with_handle(
-            move || resource.refetch(),
-            std::time::Duration::from_secs(15),
-        ) {
-            on_cleanup(move || handle.clear());
-        }
-    });
+    let overview = expect_context::<OverviewState>();
     view! { <div class="mobile-dashboard">
         <header class="mobile-dashboard-head"><div><small>"Cluster"</small><h1>"Overview"</h1></div><div>
-            {move || error.get().map(|_| view! { <span>"Last known data"</span> })}
-            <button disabled=move || resource.get().is_none() on:click=move |_| resource.refetch()>{move || if resource.get().is_none() { "Refreshing" } else { "Refresh" }}</button>
+            {move || overview.error.get().map(|_| view! { <span>"Last known data"</span> })}
+            <button disabled=move || overview.refreshing() on:click=move |_| overview.refresh()>{move || if overview.refreshing() { "Refreshing" } else { "Refresh" }}</button>
         </div></header>
-        {move || match overview.get() {
+        {move || match overview.data.get() {
             Some(value) => mobile_dashboard_sections(value, catalog, selected, detail, tick).into_any(),
-            None if error.get().is_some() => view! { <div class="mobile-dashboard-error" role="alert"><b>"!"</b><h2>"Cluster overview unavailable"</h2><p>{error.get()}</p><button on:click=move |_| resource.refetch()>"Try again"</button></div> }.into_any(),
+            None if overview.error.get().is_some() => view! { <div class="mobile-dashboard-error" role="alert"><b>"!"</b><h2>"Cluster overview unavailable"</h2><p>{overview.error.get()}</p><button on:click=move |_| overview.refresh()>"Try again"</button></div> }.into_any(),
             None => view! { <div class="mobile-dashboard-loading" aria-label="Loading cluster overview"><i></i><i></i><i></i></div> }.into_any(),
         }}
     </div> }
@@ -86,73 +52,11 @@ fn mobile_dashboard_sections(
     let nodes = overview.nodes.clone();
     let warnings = overview.warnings.clone();
     let controller_groups = overview.controller_groups.clone();
-    let ready = nodes.iter().filter(|node| node.ready).count();
-    let controller_failing: usize = overview
-        .controller_groups
-        .iter()
-        .flat_map(|group| &group.resources)
-        .map(|item| item.health.failing as usize)
-        .sum::<usize>()
-        + overview
-            .controller_groups
-            .iter()
-            .flat_map(|group| &group.signals)
-            .filter(|signal| signal.status == RowStatus::Error)
-            .count();
-    let controller_suspended: usize = overview
-        .controller_groups
-        .iter()
-        .flat_map(|group| &group.resources)
-        .map(|item| item.health.suspended as usize)
-        .sum();
-    let controller_warning: usize = overview
-        .controller_groups
-        .iter()
-        .flat_map(|group| &group.resources)
-        .map(|item| (item.health.warning + item.health.unknown) as usize)
-        .sum::<usize>()
-        + overview
-            .controller_groups
-            .iter()
-            .flat_map(|group| &group.signals)
-            .filter(|signal| matches!(signal.status, RowStatus::Pending | RowStatus::Warn))
-            .count();
-    let controller_unreadable = overview
-        .controller_groups
-        .iter()
-        .flat_map(|group| &group.resources)
-        .filter(|item| item.error.is_some())
-        .count();
-    let failing = overview.pod_failed as usize
-        + controller_failing
-        + controller_unreadable
-        + nodes.len().saturating_sub(ready);
-    let caution =
-        overview.pod_pending as usize + controller_suspended + controller_warning + warnings.len();
-    let (health, label, summary) = if failing > 0 {
-        (
-            "error",
-            "Attention needed",
-            format!(
-                "{failing} failing signal{} across the cluster",
-                if failing == 1 { "" } else { "s" }
-            ),
-        )
-    } else if caution > 0 {
-        (
-            "warning",
-            "Review recommended",
-            format!(
-                "{caution} warning signal{} to review",
-                if caution == 1 { "" } else { "s" }
-            ),
-        )
-    } else {
-        (
-            "ok",
-            "Cluster healthy",
-            "All tracked systems are operating normally".into(),
-        )
+    let health_summary = cluster_health(&overview);
+    let health = match health_summary.state {
+        HealthState::Ok => "ok",
+        HealthState::Warning => "warning",
+        HealthState::Error => "error",
     };
     let (cpu, memory) = cluster_usage_pct(&nodes);
     let cpu_available = nodes
@@ -161,17 +65,12 @@ fn mobile_dashboard_sections(
     let memory_available = nodes
         .iter()
         .any(|node| node.mem_used.is_some() && node.mem_bytes.is_some());
-    let node_kind = catalog
-        .get_untracked()
-        .into_iter()
-        .find(|kind| kind.group.is_empty() && kind.kind == "Node");
-    let event_kind = catalog
-        .get_untracked()
-        .into_iter()
-        .find(|kind| kind.group.is_empty() && kind.kind == "Event");
+    let catalog_snapshot = catalog.get_untracked();
+    let node_kind = core_kind(&catalog_snapshot, "Node");
+    let event_kind = core_kind(&catalog_snapshot, "Event");
     view! {
-        <section class=format!("mobile-cluster-health {health}")><i></i><div><small>{label}</small><strong>{summary}</strong></div>
-            <dl><div><dt>"Nodes"</dt><dd>{ready}"/"{nodes.len()}</dd></div><div><dt>"Pods"</dt><dd>{overview.pod_running}"/"{overview.pod_total}</dd></div><div><dt>"Warnings"</dt><dd>{warnings.len()}</dd></div></dl>
+        <section class=format!("mobile-cluster-health {health}")><i></i><div><small>{health_summary.label}</small><strong>{health_summary.summary}</strong></div>
+            <dl><div><dt>"Nodes"</dt><dd>{health_summary.ready_nodes}"/"{nodes.len()}</dd></div><div><dt>"Pods"</dt><dd>{overview.pod_running}"/"{overview.pod_total}</dd></div><div><dt>"Warnings"</dt><dd>{warnings.len()}</dd></div></dl>
         </section>
         <section class="mobile-dashboard-grid">
             <article class="mobile-dashboard-card mobile-capacity"><header><div><small>"Capacity"</small><h2>"Cluster usage"</h2></div><span>{nodes.len()}" nodes"</span></header>
@@ -186,7 +85,7 @@ fn mobile_dashboard_sections(
         {controller_groups.into_iter().map(|group| {
             mobile_controller_group(group.name, group.resources, group.signals, catalog, selected, tick)
         }).collect_view()}
-        <section class="mobile-dashboard-section"><header><div><small>"Infrastructure"</small><h2>"Nodes"</h2></div><span>{ready}" of "{nodes.len()}" ready"</span></header>
+        <section class="mobile-dashboard-section"><header><div><small>"Infrastructure"</small><h2>"Nodes"</h2></div><span>{health_summary.ready_nodes}" of "{nodes.len()}" ready"</span></header>
             <div class="mobile-node-list">{nodes.into_iter().map(|node| mobile_node(node, node_kind.clone(), selected, detail)).collect_view()}</div>
         </section>
         {(!warnings.is_empty()).then(|| view! { <section class="mobile-dashboard-section mobile-warning-section"><header><div><small>"Event stream"</small><h2>"Recent warnings"</h2></div>
@@ -219,39 +118,20 @@ fn mobile_rollup(
     catalog: RwSignal<Vec<ResourceKind>>,
     selected: RwSignal<Option<ResourceKind>>,
 ) -> impl IntoView {
-    let kind = resource.kind;
-    let target = if resource.key.is_empty() {
-        kind.clone()
-    } else {
-        resource.key
-    };
+    let derived = controller_rollup(&resource);
+    let target = derived.target;
     let health = resource.health;
     let error = resource.error.unwrap_or_default();
-    let unreadable = !error.is_empty();
-    let only_unclassified = health.total > 0 && health.unknown + health.unreported == health.total;
-    let state = if unreadable || health.failing > 0 {
-        "error"
-    } else if health.reconciling > 0 {
-        "pending"
-    } else if health.suspended > 0 || health.warning > 0 || health.unknown > 0 {
-        "warning"
-    } else if health.unreported > 0 {
-        "neutral"
-    } else {
-        "ok"
+    let unreadable = derived.unreadable;
+    let only_unclassified = derived.only_unclassified;
+    let state = match derived.state {
+        ControllerState::Ok => "ok",
+        ControllerState::Neutral => "neutral",
+        ControllerState::Warning => "warning",
+        ControllerState::Pending => "pending",
+        ControllerState::Error => "error",
     };
-    let label = {
-        let label = camel_label(&kind);
-        if let Some(stem) = label.strip_suffix("Policy") {
-            format!("{stem}Policies")
-        } else if let Some(stem) = label.strip_suffix("Repository") {
-            format!("{stem}Repositories")
-        } else if let Some(stem) = label.strip_suffix("Class") {
-            format!("{stem}Classes")
-        } else {
-            format!("{label}s")
-        }
-    };
+    let label = derived.label;
     view! { <button class=format!("mobile-controller-card {state}") data-tip=error on:click=move |_| select_kind(catalog, selected, &target)><i></i><span><strong>{label}</strong><b>{if only_unclassified { health.total.to_string() } else { format!("{} / {}", health.ready, health.total) }}</b><small>{if only_unclassified { "resources" } else { "ready" }}</small></span><em>
         {(health.reconciling > 0).then(|| view! { <span>{health.reconciling}" reconciling"</span> })}{(health.suspended > 0).then(|| view! { <span>{health.suspended}" suspended"</span> })}
         {(health.warning > 0).then(|| view! { <span>{health.warning}" warning"</span> })}{(health.failing > 0).then(|| view! { <span>{health.failing}" failing"</span> })}
@@ -262,12 +142,12 @@ fn mobile_rollup(
 }
 
 fn mobile_signal(signal: ControllerHealthSignal, tick: RwSignal<u32>) -> impl IntoView {
-    let state = match signal.status {
-        RowStatus::Error => "error",
-        RowStatus::Pending => "pending",
-        RowStatus::Warn => "warning",
-        RowStatus::Unknown => "warning",
-        RowStatus::Ok | RowStatus::Done => "ok",
+    let state = match controller_signal_state(signal.status) {
+        ControllerState::Ok => "ok",
+        ControllerState::Neutral => "neutral",
+        ControllerState::Warning => "warning",
+        ControllerState::Pending => "pending",
+        ControllerState::Error => "error",
     };
     let timestamp = signal.timestamp;
     let fallback = signal.value;

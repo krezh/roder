@@ -46,3 +46,7 @@ pub(crate) fn ts_string<T: serde::Serialize>(t: &T) -> Option<String> {
         .ok()
         .and_then(|v| v.as_str().map(|s| s.to_string()))
 }
+
+pub(crate) fn parse_timestamp(value: &str) -> Option<time::OffsetDateTime> {
+    time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339).ok()
+}

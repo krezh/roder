@@ -5,6 +5,7 @@ use serde_json::Value;
 
 use super::accessors::{int_at, str_at};
 use super::status::{condition_is, condition_reason};
+use super::{job_lifecycle, JobLifecycle};
 
 pub(crate) fn replicaset_cells(data: &Value) -> (Vec<String>, RowStatus) {
     let desired = desired_replicas(data);
@@ -139,23 +140,13 @@ pub(crate) fn daemonset_cells(data: &Value) -> (Vec<String>, RowStatus) {
 pub(crate) fn job_cells(data: &Value) -> (Vec<String>, RowStatus) {
     let succeeded = int_at(data, &["status", "succeeded"]).unwrap_or(0);
     let desired = int_at(data, &["spec", "completions"]);
-    let suspended = data
-        .pointer("/spec/suspend")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-        || condition_is(data, "Suspended", "True");
-    let (status, phase) =
-        if condition_is(data, "Failed", "True") || condition_is(data, "FailureTarget", "True") {
-            (RowStatus::Error, "Failed")
-        } else if condition_is(data, "Complete", "True") {
-            (RowStatus::Done, "Complete")
-        } else if suspended {
-            (RowStatus::Warn, "Suspended")
-        } else if condition_is(data, "SuccessCriteriaMet", "True") {
-            (RowStatus::Pending, "Completing")
-        } else {
-            (RowStatus::Pending, "Running")
-        };
+    let (status, phase) = match job_lifecycle(data) {
+        JobLifecycle::Failed | JobLifecycle::Failing => (RowStatus::Error, "Failed"),
+        JobLifecycle::Complete => (RowStatus::Done, "Complete"),
+        JobLifecycle::Suspended => (RowStatus::Warn, "Suspended"),
+        JobLifecycle::Completing => (RowStatus::Pending, "Completing"),
+        JobLifecycle::Running => (RowStatus::Pending, "Running"),
+    };
     let completions_str = desired.map_or_else(
         || succeeded.to_string(),
         |desired| format!("{succeeded}/{desired}"),

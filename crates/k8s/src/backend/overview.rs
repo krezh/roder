@@ -13,7 +13,7 @@ use roder_core::{
 };
 
 use crate::metrics::{node_usage, parse_cpu, parse_mem};
-use crate::project::{resource_status, ts_string};
+use crate::project::{condition, parse_timestamp, resource_status, ts_string};
 
 use super::{api_err, Backend};
 use crate::client::K8sError;
@@ -125,7 +125,6 @@ impl Backend {
             ("External Secrets", Category::ExternalSecrets, None),
             ("cert-manager", Category::CertManager, None),
             ("Rook Ceph", Category::Rook, None),
-            ("CloudNativePG", Category::CloudNativePg, None),
             (
                 "Kopiur",
                 Category::Custom("home-operations.com".to_string()),
@@ -137,7 +136,7 @@ impl Backend {
                 Some("tuppr.home-operations.com"),
             ),
         ];
-        let (mut controller_groups, cnpg_signals) = tokio::join!(
+        let (mut controller_groups, cnpg_group) = tokio::join!(
             join_all(
                 groups
                     .into_iter()
@@ -149,14 +148,9 @@ impl Backend {
                         }
                     })
             ),
-            self.cnpg_signals(),
+            self.cnpg_group(),
         );
-        if let Some(group) = controller_groups
-            .iter_mut()
-            .find(|group| group.name == "CloudNativePG")
-        {
-            group.signals = cnpg_signals;
-        }
+        controller_groups.insert(4, cnpg_group);
         controller_groups.retain(|group| !group.resources.is_empty() || !group.signals.is_empty());
 
         Ok(ClusterOverview {
@@ -216,7 +210,10 @@ impl Backend {
         Ok(events)
     }
 
-    async fn rollup(&self, entry: crate::discovery::CatalogEntry) -> ResourceHealthRollup {
+    async fn resource_snapshot(
+        &self,
+        entry: crate::discovery::CatalogEntry,
+    ) -> (roder_core::ResourceKind, Result<Vec<DynamicObject>, String>) {
         let client = self.client();
         let api: Api<DynamicObject> = Api::all_with(client, &entry.api_resource);
         let result = api
@@ -224,14 +221,14 @@ impl Backend {
             .await
             .map(|list| list.items)
             .map_err(|error| error.to_string());
-        summarize_resources(entry.kind, result)
+        (entry.kind, result)
     }
 
-    async fn resource_rollups(
+    async fn resource_snapshots(
         &self,
         category: Category,
         group: Option<&str>,
-    ) -> Vec<ResourceHealthRollup> {
+    ) -> Vec<(roder_core::ResourceKind, Result<Vec<DynamicObject>, String>)> {
         let catalog_store = self.shared.catalog();
         let catalog = catalog_store.load();
         let entries = catalog
@@ -244,47 +241,57 @@ impl Backend {
             .cloned()
             .collect::<Vec<_>>();
 
-        join_all(entries.into_iter().map(|entry| self.rollup(entry)))
+        join_all(
+            entries
+                .into_iter()
+                .map(|entry| self.resource_snapshot(entry)),
+        )
+        .await
+    }
+
+    async fn resource_rollups(
+        &self,
+        category: Category,
+        group: Option<&str>,
+    ) -> Vec<ResourceHealthRollup> {
+        self.resource_snapshots(category, group)
             .await
             .into_iter()
+            .map(|(kind, objects)| summarize_resources(kind, objects))
             .filter(|resource| resource.health.total > 0 || resource.error.is_some())
             .collect()
     }
 
-    async fn cnpg_signals(&self) -> Vec<ControllerHealthSignal> {
-        let (clusters, backups, schedules) = tokio::join!(
-            self.list_kind_objects("postgresql.cnpg.io", "Cluster"),
-            self.list_kind_objects("postgresql.cnpg.io", "Backup"),
-            self.list_kind_objects("postgresql.cnpg.io", "ScheduledBackup"),
+    async fn cnpg_group(&self) -> ControllerHealthGroup {
+        let snapshots = self.resource_snapshots(Category::CloudNativePg, None).await;
+        let signals = summarize_cnpg_signals(
+            snapshot_objects(&snapshots, "Cluster"),
+            snapshot_objects(&snapshots, "Backup"),
+            snapshot_objects(&snapshots, "ScheduledBackup"),
         );
-        summarize_cnpg_signals(
-            &clusters.unwrap_or_default(),
-            &backups.unwrap_or_default(),
-            &schedules.unwrap_or_default(),
-        )
+        let resources = snapshots
+            .into_iter()
+            .map(|(kind, objects)| summarize_resources(kind, objects))
+            .filter(|resource| resource.health.total > 0 || resource.error.is_some())
+            .collect();
+        ControllerHealthGroup {
+            name: "CloudNativePG".to_string(),
+            resources,
+            signals,
+        }
     }
+}
 
-    async fn list_kind_objects(
-        &self,
-        group: &str,
-        kind: &str,
-    ) -> Result<Vec<DynamicObject>, K8sError> {
-        let catalog_store = self.shared.catalog();
-        let catalog = catalog_store.load();
-        let Some(entry) = catalog
-            .entries
-            .iter()
-            .find(|entry| entry.kind.group == group && entry.kind.kind == kind)
-            .cloned()
-        else {
-            return Ok(Vec::new());
-        };
-        Api::<DynamicObject>::all_with(self.client(), &entry.api_resource)
-            .list(&ListParams::default())
-            .await
-            .map(|list| list.items)
-            .map_err(api_err)
-    }
+fn snapshot_objects<'a>(
+    snapshots: &'a [(roder_core::ResourceKind, Result<Vec<DynamicObject>, String>)],
+    kind: &str,
+) -> &'a [DynamicObject] {
+    snapshots
+        .iter()
+        .find(|(resource, _)| resource.kind == kind)
+        .and_then(|(_, objects)| objects.as_ref().ok())
+        .map(Vec::as_slice)
+        .unwrap_or_default()
 }
 
 fn summarize_cnpg_signals(
@@ -366,16 +373,8 @@ fn summarize_cnpg_signals(
         let namespace = cluster.metadata.namespace.clone().unwrap_or_default();
         let name = cluster.metadata.name.clone().unwrap_or_default();
         let key = (namespace, name.clone());
-        let archival = cluster
-            .data
-            .pointer("/status/conditions")
-            .and_then(serde_json::Value::as_array)
-            .and_then(|conditions| {
-                conditions.iter().find(|condition| {
-                    condition.get("type").and_then(serde_json::Value::as_str)
-                        == Some("ContinuousArchiving")
-                })
-            });
+        let cluster_data = serde_json::to_value(cluster).unwrap_or_else(|_| cluster.data.clone());
+        let archival = condition(&cluster_data, "ContinuousArchiving");
         if let Some(archival) = archival {
             let archival_status = match archival.get("status").and_then(serde_json::Value::as_str) {
                 Some("True") => RowStatus::Ok,
@@ -433,10 +432,6 @@ fn summarize_cnpg_signals(
     }
     signals.sort_by(|left, right| left.label.cmp(&right.label));
     signals
-}
-
-fn parse_timestamp(value: &str) -> Option<time::OffsetDateTime> {
-    time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339).ok()
 }
 
 fn summarize_resources(

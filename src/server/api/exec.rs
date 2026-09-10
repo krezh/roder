@@ -13,6 +13,8 @@ use roder_core::{ResourceAction, ResourceKind};
 use roder_k8s::Backend;
 use serde::Deserialize;
 
+use super::bad_gateway;
+
 #[derive(Deserialize)]
 pub struct ExecQuery {
     namespace: String,
@@ -74,6 +76,19 @@ pub async fn node_shell_create(
     Extension(b): Extension<Arc<Backend>>,
     Json(request): Json<NodeShellRequest>,
 ) -> Response {
+    let node_key = ResourceKind::make_key("", "v1", "Node");
+    if !b
+        .can_action(
+            ResourceAction::NodeShell,
+            &node_key,
+            None,
+            Some(&request.node),
+            None,
+        )
+        .await
+    {
+        return StatusCode::FORBIDDEN.into_response();
+    }
     match b.create_node_shell(&request.node).await {
         Ok((namespace, pod, image)) => Json(serde_json::json!({
             "namespace": namespace,
@@ -81,7 +96,7 @@ pub async fn node_shell_create(
             "image": image,
         }))
         .into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Err(e) => bad_gateway(e),
     }
 }
 

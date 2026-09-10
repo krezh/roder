@@ -3,8 +3,8 @@
 use roder_core::RowStatus;
 use serde_json::Value;
 
-use super::accessors::str_at;
-use super::status::{cond_to_status, condition_status, ready_label};
+use super::accessors::{int_at, str_at};
+use super::status::{cond_to_status, condition_from, condition_status, ready_label};
 
 pub(crate) fn httproute_cells(data: &Value) -> (Vec<String>, RowStatus) {
     // Newline-joined list values: the table shows a compact comma form, the
@@ -48,16 +48,25 @@ fn httproute_status(data: &Value) -> (String, RowStatus) {
     else {
         return (String::new(), RowStatus::Unknown);
     };
+    let generation = int_at(data, &["metadata", "generation"]);
     let mut accepted = false;
-    for p in parents {
-        let Some(conds) = p.get("conditions").and_then(|c| c.as_array()) else {
+    for parent in parents {
+        let Some(conditions) = parent.get("conditions").and_then(Value::as_array) else {
             continue;
         };
-        for c in conds {
-            let typ = c.get("type").and_then(|v| v.as_str()).unwrap_or("");
-            let status = c.get("status").and_then(|v| v.as_str()).unwrap_or("");
-            let message = c.get("message").and_then(|v| v.as_str()).unwrap_or("");
-            if matches!(typ, "Accepted" | "ResolvedRefs") && status != "True" {
+        for type_ in ["Accepted", "ResolvedRefs"] {
+            let Some(condition) = condition_from(conditions, generation, type_) else {
+                continue;
+            };
+            let status = condition
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let message = condition
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if status != "True" {
                 let row_status = if status == "False" {
                     RowStatus::Error
                 } else {
@@ -65,7 +74,7 @@ fn httproute_status(data: &Value) -> (String, RowStatus) {
                 };
                 return (message.to_string(), row_status);
             }
-            if typ == "Accepted" && status == "True" {
+            if type_ == "Accepted" {
                 accepted = true;
             }
         }

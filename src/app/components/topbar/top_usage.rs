@@ -4,69 +4,20 @@
 use leptos::prelude::*;
 use roder_core::ResourceKind;
 
+use crate::app::overview::{core_kind, OverviewState};
 use crate::app::state::Catalog;
 use crate::app::util::format::{cluster_usage_pct, pct};
-use crate::data;
 
 #[component]
 pub(crate) fn TopUsage() -> impl IntoView {
     let selected_kind = expect_context::<RwSignal<Option<ResourceKind>>>();
     let catalog = expect_context::<Catalog>().0;
 
-    let overview = RwSignal::new(None::<roder_core::ClusterOverview>);
-    // True when the most recent fetch failed — the displayed numbers (if any)
-    // are then last-known-good rather than current.
-    let stale = RwSignal::new(false);
-    // Seed from the last-known overview so cluster usage doesn't flash empty on
-    // refresh while the first `/api/overview` round-trip is in flight.
-    Effect::new(move |_| {
-        if let Some(cached) = data::storage_get("roder.overview")
-            .and_then(|s| serde_json::from_str::<roder_core::ClusterOverview>(&s).ok())
-        {
-            overview.set(Some(cached));
-        }
-    });
-
-    let apply = move |res: Result<roder_core::ClusterOverview, String>| match res {
-        Ok(o) => {
-            if let Ok(json) = serde_json::to_string(&o) {
-                data::storage_set("roder.overview", &json);
-            }
-            overview.set(Some(o));
-            stale.set(false);
-        }
-        Err(_) => stale.set(true),
-    };
-
-    let ov = LocalResource::new(|| async {
-        data::fetch_json::<roder_core::ClusterOverview>("/api/overview").await
-    });
-    Effect::new(move |_| {
-        if let Some(res) = ov.get() {
-            apply(res);
-        }
-    });
-
-    // Poll for fresh cluster usage on the same cadence as the backend's overview
-    // cache TTL (8s, see overview.rs), so CPU/mem/node counts stay live instead
-    // of freezing at whatever they were when the page first loaded.
-    Effect::new(move |_| {
-        if let Ok(handle) = set_interval_with_handle(
-            move || {
-                #[cfg(target_arch = "wasm32")]
-                leptos::task::spawn_local(async move {
-                    apply(data::fetch_json::<roder_core::ClusterOverview>("/api/overview").await);
-                });
-            },
-            std::time::Duration::from_secs(10),
-        ) {
-            on_cleanup(move || handle.clear());
-        }
-    });
+    let overview = expect_context::<OverviewState>();
 
     view! {
-            {move || match overview.get() {
-                None if stale.get() => view! {
+            {move || match overview.data.get() {
+                None if overview.stale.get() => view! {
                     <div class="topusage tu-error">"Usage unavailable"</div>
                 }.into_any(),
                 None => ().into_any(),
@@ -79,17 +30,14 @@ pub(crate) fn TopUsage() -> impl IntoView {
                 let ready = nodes.iter().filter(|n| n.ready).count();
                 let nodes_ok = ready == total;
                 let go_nodes = move |_| {
-                    if let Some(nk) = catalog.get_untracked()
-                        .into_iter()
-                        .find(|k| k.group.is_empty() && k.kind == "Node")
-                    {
+                    if let Some(nk) = core_kind(&catalog.get_untracked(), "Node") {
                         selected_kind.set(Some(nk));
                     }
                 };
                 view! {
                     <div
                         class="topusage"
-                        class:tu-stale=move || stale.get()
+                        class:tu-stale=move || overview.stale.get()
                         aria-label=format!(
                             "Cluster usage: CPU {cpu_p:.0}%, memory {mem_p:.0}%, {ready} of {total} nodes ready"
                         )
@@ -123,7 +71,7 @@ pub(crate) fn TopUsage() -> impl IntoView {
                             <span class="tu-node-dot" aria-hidden="true"></span>
                             <b>{ready}"/"{total}</b>
                         </button>
-                        {move || stale.get().then(|| view! {
+                        {move || overview.stale.get().then(|| view! {
                             <span class="tu-warn" aria-label="Usage data is stale"
                                 data-tip="Failed to refresh — showing last known values">"!"
                             </span>

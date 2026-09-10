@@ -2,8 +2,8 @@
 
 use leptos::prelude::*;
 
-use crate::app::overlays::palette::{fuzzy_match, highlight};
 use crate::app::state::NsPaletteOpen;
+use crate::app::ui::{filter_namespaces, highlight};
 
 #[component]
 pub(crate) fn NsPalette() -> impl IntoView {
@@ -25,47 +25,12 @@ pub(crate) fn NsPalette() -> impl IntoView {
         }
     });
 
-    // Build the list: "All namespaces" sentinel + actual namespaces, filtered+scored by query.
-    // Each entry is (ns, display_label, highlight_positions).
     let matches = Memo::new(move |_| {
-        let q = query.get();
-        let mut list: Vec<Option<String>> = vec![None]; // None = "All namespaces"
-        if let Some(Ok(nss)) = namespaces.get() {
-            for ns in nss {
-                list.push(Some(ns));
-            }
-        }
-        if q.is_empty() {
-            if let Some(current) = selected_ns.get() {
-                if let Some(index) = list.iter().position(|ns| ns.as_ref() == Some(&current)) {
-                    let active = list.remove(index);
-                    list.insert(1, active);
-                }
-            }
-        }
-        let mut scored: Vec<(Option<String>, String, Vec<usize>, i32)> = list
-            .into_iter()
-            .filter_map(|ns| {
-                let label = ns.as_deref().unwrap_or("All namespaces").to_string();
-                if q.is_empty() {
-                    return Some((ns, label, vec![], 0));
-                }
-                fuzzy_match(&q, &label).map(|(pos, score)| (ns, label, pos, score))
-            })
-            .collect();
-        scored.sort_by(|a, b| {
-            // Keep "All namespaces" (None) pinned to top when query is empty,
-            // otherwise sort by descending score.
-            if q.is_empty() {
-                std::cmp::Ordering::Equal
-            } else {
-                b.3.cmp(&a.3)
-            }
-        });
-        scored
-            .into_iter()
-            .map(|(ns, label, pos, _)| (ns, label, pos))
-            .collect::<Vec<_>>()
+        filter_namespaces(
+            namespaces.get().and_then(Result::ok).unwrap_or_default(),
+            selected_ns.get(),
+            &query.get(),
+        )
     });
 
     let list_ref = super::palette::use_palette_scroll(cursor);

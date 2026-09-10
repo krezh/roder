@@ -14,31 +14,37 @@ impl Backend {
         namespace: Option<&str>,
         options: SweepOptions,
     ) -> Result<(Vec<Pod>, Vec<Job>), K8sError> {
-        let pod_api: Api<Pod> = match namespace {
-            Some(ns) => Api::namespaced(self.client(), ns),
-            None => Api::all(self.client()),
+        let pods = if options.includes_pods() {
+            let api: Api<Pod> = match namespace {
+                Some(ns) => Api::namespaced(self.client(), ns),
+                None => Api::all(self.client()),
+            };
+            api.list(&ListParams::default())
+                .await
+                .map_err(api_err)?
+                .items
+                .into_iter()
+                .filter(|pod| should_sweep_pod(pod, options))
+                .collect()
+        } else {
+            Vec::new()
         };
-        let pods = pod_api
-            .list(&ListParams::default())
-            .await
-            .map_err(api_err)?
-            .items
-            .into_iter()
-            .filter(|pod| should_sweep_pod(pod, options))
-            .collect();
 
-        let job_api: Api<Job> = match namespace {
-            Some(ns) => Api::namespaced(self.client(), ns),
-            None => Api::all(self.client()),
+        let jobs = if options.includes_jobs() {
+            let api: Api<Job> = match namespace {
+                Some(ns) => Api::namespaced(self.client(), ns),
+                None => Api::all(self.client()),
+            };
+            api.list(&ListParams::default())
+                .await
+                .map_err(api_err)?
+                .items
+                .into_iter()
+                .filter(|job| should_sweep_job(job, options))
+                .collect()
+        } else {
+            Vec::new()
         };
-        let jobs = job_api
-            .list(&ListParams::default())
-            .await
-            .map_err(api_err)?
-            .items
-            .into_iter()
-            .filter(|job| should_sweep_job(job, options))
-            .collect();
         Ok((pods, jobs))
     }
 
@@ -56,43 +62,53 @@ impl Backend {
     }
 
     /// Delete the selected categories of pods and finished Jobs.
-    /// Best-effort: individual delete failures are silently skipped.
     pub async fn sanitize(
         &self,
         namespace: Option<String>,
         options: SweepOptions,
     ) -> Result<CleanupSummary, K8sError> {
         let (pods, jobs) = self.sweep_candidates(namespace.as_deref(), options).await?;
-        let mut pods_deleted = 0usize;
+        let mut summary = CleanupSummary::default();
         for pod in &pods {
             let name = pod.metadata.name.as_deref().unwrap_or_default();
             let ns = pod.metadata.namespace.as_deref().unwrap_or_default();
-            if Api::<Pod>::namespaced(self.client(), ns)
+            match Api::<Pod>::namespaced(self.client(), ns)
                 .delete(name, &DeleteParams::default())
                 .await
-                .is_ok()
             {
-                pods_deleted += 1;
+                Ok(_) => summary.pods_deleted += 1,
+                Err(error) => record_delete_error(&mut summary, "Pod", ns, name, error),
             }
         }
 
-        let mut jobs_deleted = 0usize;
         for job in &jobs {
             let name = job.metadata.name.as_deref().unwrap_or_default();
             let ns = job.metadata.namespace.as_deref().unwrap_or_default();
-            if Api::<Job>::namespaced(self.client(), ns)
+            match Api::<Job>::namespaced(self.client(), ns)
                 .delete(name, &DeleteParams::default())
                 .await
-                .is_ok()
             {
-                jobs_deleted += 1;
+                Ok(_) => summary.jobs_deleted += 1,
+                Err(error) => record_delete_error(&mut summary, "Job", ns, name, error),
             }
         }
 
-        Ok(CleanupSummary {
-            pods_deleted,
-            jobs_deleted,
-        })
+        Ok(summary)
+    }
+}
+
+fn record_delete_error(
+    summary: &mut CleanupSummary,
+    kind: &str,
+    namespace: &str,
+    name: &str,
+    error: kube::Error,
+) {
+    let message = format!("{kind} {namespace}/{name}: {error}");
+    if matches!(&error, kube::Error::Api(response) if response.code == 403) {
+        summary.forbidden.push(message);
+    } else {
+        summary.failed.push(message);
     }
 }
 
@@ -143,19 +159,14 @@ fn should_sweep_pod(pod: &Pod, options: SweepOptions) -> bool {
 }
 
 fn should_sweep_job(job: &Job, options: SweepOptions) -> bool {
-    job.status
-        .as_ref()
-        .and_then(|s| s.conditions.as_deref())
-        .unwrap_or(&[])
-        .iter()
-        .any(|condition| {
-            condition.status == "True"
-                && match condition.type_.as_str() {
-                    "Complete" => options.completed_jobs,
-                    "Failed" => options.failed_jobs,
-                    _ => false,
-                }
-        })
+    let Ok(data) = serde_json::to_value(job) else {
+        return false;
+    };
+    match crate::project::job_lifecycle(&data) {
+        crate::project::JobLifecycle::Complete => options.completed_jobs,
+        crate::project::JobLifecycle::Failed => options.failed_jobs,
+        _ => false,
+    }
 }
 
 #[cfg(test)]

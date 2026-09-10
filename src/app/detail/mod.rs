@@ -6,7 +6,10 @@ pub(crate) mod metrics;
 pub(crate) mod pods;
 
 use crate::app::components::table::ScaleControl;
-use crate::app::controllers::detail::{DetailTab as Tab, ResourceDetailController};
+use crate::app::controllers::detail::{
+    format_bytes, short_fingerprint, talos_action, talos_config_diff, talos_node, DetailTab as Tab,
+    ResourceDetailController,
+};
 use crate::app::logs::LogsView;
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::overlays::delete::{ask_delete, delete_extra, DeleteRequest};
@@ -182,22 +185,9 @@ pub(crate) fn RowDetail(
             .is_some_and(|value| value.apply())
     };
     let job_terminal = move || {
-        obj.get().flatten().is_some_and(|detail| {
-            detail
-                .object
-                .get("status")
-                .and_then(|status| status.get("conditions"))
-                .and_then(serde_json::Value::as_array)
-                .is_some_and(|conditions| {
-                    conditions.iter().any(|condition| {
-                        matches!(
-                            condition.get("type").and_then(serde_json::Value::as_str),
-                            Some("Complete" | "Failed")
-                        ) && condition.get("status").and_then(serde_json::Value::as_str)
-                            == Some("True")
-                    })
-                })
-        })
+        obj.get()
+            .flatten()
+            .is_some_and(|detail| roder_core::job_lifecycle(&detail.object).is_terminal())
     };
 
     let run = move |action: &'static str, extra: serde_json::Value| {
@@ -389,35 +379,8 @@ fn TalosNodeView(node: String, key: String, actions: bool, config: bool) -> impl
     let pending_action = RwSignal::new(None::<String>);
     let drain_first = RwSignal::new(true);
     let load_config_diff = RwSignal::new(false);
-    let status_node = node.clone();
-    let status = LocalResource::new(move || {
-        let node = status_node.clone();
-        async move {
-            data::fetch_json::<roder_core::TalosNode>(&format!(
-                "/api/talos/node?node={}",
-                data::percent_encode(&node)
-            ))
-            .await
-        }
-    });
-    let config_diff = LocalResource::new({
-        let node = node.clone();
-        move || {
-            let node = node.clone();
-            let should_load = load_config_diff.get();
-            async move {
-                if !should_load {
-                    return Ok(None);
-                }
-                data::fetch_json::<roder_core::TalosConfigDiff>(&format!(
-                    "/api/talos/config-diff?node={}",
-                    data::percent_encode(&node)
-                ))
-                .await
-                .map(Some)
-            }
-        }
-    });
+    let status = talos_node(node.clone());
+    let config_diff = talos_config_diff(node.clone(), load_config_diff);
     let refresh = Callback::new(move |_| status.refetch());
 
     view! {
@@ -681,64 +644,21 @@ fn talos_service_action(
     pending: RwSignal<Option<String>>,
     refresh: Callback<()>,
 ) {
-    leptos::task::spawn_local(async move {
-        status.set(None);
-        pending.set(Some(format!("{action}:{service}")));
-        let result = data::post_action(&serde_json::json!({
-            "action": format!("talos-service-{action}"),
-            "name": node,
-            "service": service,
-        }))
-        .await
-        .map(|_| format!("service {action} requested"));
-        if result.is_ok() {
-            refresh.run(());
-        }
-        status.set(Some(result));
-        pending.set(None);
-    });
+    talos_action(
+        node,
+        format!("talos-service-{action}"),
+        Some(service),
+        status,
+        pending,
+        Some(refresh),
+    );
 }
 
-/// Drives a plain (non-drain-first) Talos reboot/shutdown. The drain-first
-/// path no longer goes through here — it opens the drain dialog
-/// (`overlays::drain::DrainOverlay`) instead, which POSTs the same
-/// `talos-{action}` action itself with `drain: true`.
 fn talos_power_action(
     node: String,
     action: &'static str,
     status: RwSignal<Option<Result<String, String>>>,
     pending: RwSignal<Option<String>>,
 ) {
-    leptos::task::spawn_local(async move {
-        status.set(None);
-        pending.set(Some(action.into()));
-        let result = data::post_action(&serde_json::json!({
-            "action": format!("talos-{action}"),
-            "name": node,
-        }))
-        .await;
-        status.set(Some(result.map(|_| {
-            if action == "reboot" {
-                "node returned Ready".into()
-            } else {
-                format!("{action} requested")
-            }
-        })));
-        pending.set(None);
-    });
-}
-
-fn format_bytes(bytes: u64) -> String {
-    const UNITS: &[&str] = &["B", "KiB", "MiB", "GiB", "TiB"];
-    let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1024.0 && unit + 1 < UNITS.len() {
-        value /= 1024.0;
-        unit += 1;
-    }
-    format!("{value:.1} {}", UNITS[unit])
-}
-
-fn short_fingerprint(fingerprint: &str) -> String {
-    fingerprint.chars().take(12).collect()
+    talos_action(node, format!("talos-{action}"), None, status, pending, None);
 }

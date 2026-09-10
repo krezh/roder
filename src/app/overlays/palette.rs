@@ -5,6 +5,7 @@ use roder_core::ResourceKind;
 
 use crate::app::components::icons::TreeKindIcon;
 use crate::app::state::{Catalog, PaletteOpen};
+use crate::app::ui::{filter_kinds, highlight};
 
 pub(crate) fn use_palette_scroll(cursor: RwSignal<usize>) -> NodeRef<leptos::html::Ul> {
     let list_ref = NodeRef::<leptos::html::Ul>::new();
@@ -34,98 +35,6 @@ pub(crate) fn use_palette_scroll(cursor: RwSignal<usize>) -> NodeRef<leptos::htm
         }
     });
     list_ref
-}
-
-pub(crate) fn fuzzy_match(pattern: &str, text: &str) -> Option<(Vec<usize>, i32)> {
-    let pattern = pattern.to_lowercase();
-    let text_lower = text.to_lowercase();
-    let pat: Vec<char> = pattern.chars().collect();
-    let txt: Vec<char> = text_lower.chars().collect();
-
-    if pat.is_empty() {
-        return Some((vec![], 0));
-    }
-
-    let mut positions = Vec::new();
-    let mut pi = 0;
-    let mut score = 0i32;
-    let mut last: Option<usize> = None;
-
-    for (idx, &ch) in txt.iter().enumerate() {
-        if pi < pat.len() && ch == pat[pi] {
-            positions.push(idx);
-            if last.is_some_and(|l| idx == l + 1) {
-                score += 10;
-            }
-            if idx == 0 || matches!(txt[idx - 1], '_' | '-' | ' ') {
-                score += 15;
-            }
-            if text.chars().nth(idx) == Some(pat[pi]) {
-                score += 5;
-            }
-            score += 1;
-            last = Some(idx);
-            pi += 1;
-        }
-    }
-
-    if pi == pat.len() {
-        Some((positions, score))
-    } else {
-        None
-    }
-}
-
-pub(crate) fn highlight(text: &str, positions: &[usize]) -> Vec<(String, bool)> {
-    if positions.is_empty() {
-        return vec![(text.to_string(), false)];
-    }
-    let chars: Vec<char> = text.chars().collect();
-    let pos: std::collections::HashSet<usize> = positions.iter().copied().collect();
-    let mut out: Vec<(String, bool)> = Vec::new();
-    let mut buf = String::new();
-    let mut cur_match = pos.contains(&0);
-
-    for (i, ch) in chars.iter().enumerate() {
-        let m = pos.contains(&i);
-        if m != cur_match {
-            out.push((buf.clone(), cur_match));
-            buf.clear();
-            cur_match = m;
-        }
-        buf.push(*ch);
-    }
-    if !buf.is_empty() {
-        out.push((buf, cur_match));
-    }
-    out
-}
-
-fn filter_kinds(catalog: &[ResourceKind], query: &str) -> Vec<(ResourceKind, Vec<usize>)> {
-    let mut v: Vec<(ResourceKind, Vec<usize>, i32)> = catalog
-        .iter()
-        .filter_map(|k| {
-            if query.is_empty() {
-                return Some((k.clone(), vec![], 0));
-            }
-            let pm = fuzzy_match(query, &k.plural);
-            let km = fuzzy_match(query, &k.kind.to_lowercase());
-            match (pm, km) {
-                (None, None) => None,
-                (Some((p, s)), None) | (None, Some((p, s))) => Some((k.clone(), p, s)),
-                (Some((pa, sa)), Some((pb, sb))) => {
-                    if sa >= sb {
-                        Some((k.clone(), pa, sa))
-                    } else {
-                        Some((k.clone(), pb, sb))
-                    }
-                }
-            }
-        })
-        .collect();
-    v.sort_by_key(|(_, _, s)| std::cmp::Reverse(*s));
-    v.truncate(60);
-    v.into_iter().map(|(k, p, _)| (k, p)).collect()
 }
 
 #[component]

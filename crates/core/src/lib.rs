@@ -133,6 +133,7 @@ pub enum ResourceAction {
     Logs,
     Exec,
     DebugExec,
+    NodeShell,
     FluxReconcile,
     FluxReconcileWithSource,
     FluxSuspend,
@@ -146,7 +147,7 @@ pub enum ResourceAction {
 }
 
 impl ResourceAction {
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 20] = [
         Self::Delete,
         Self::Evict,
         Self::Scale,
@@ -156,6 +157,7 @@ impl ResourceAction {
         Self::Logs,
         Self::Exec,
         Self::DebugExec,
+        Self::NodeShell,
         Self::FluxReconcile,
         Self::FluxReconcileWithSource,
         Self::FluxSuspend,
@@ -179,6 +181,7 @@ impl ResourceAction {
             Self::Logs => "logs",
             Self::Exec => "exec",
             Self::DebugExec => "debug-exec",
+            Self::NodeShell => "node-shell",
             Self::FluxReconcile => "flux-reconcile",
             Self::FluxReconcileWithSource => "flux-reconcile-with-source",
             Self::FluxSuspend => "flux-suspend",
@@ -215,6 +218,99 @@ impl ResourceAction {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JobLifecycle {
+    Complete,
+    Failed,
+    Failing,
+    Suspended,
+    Completing,
+    Running,
+}
+
+impl JobLifecycle {
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Complete | Self::Failed)
+    }
+}
+
+pub fn job_lifecycle(data: &serde_json::Value) -> JobLifecycle {
+    if condition_is(data, "Failed", "True") {
+        JobLifecycle::Failed
+    } else if condition_is(data, "FailureTarget", "True") {
+        JobLifecycle::Failing
+    } else if condition_is(data, "Complete", "True") {
+        JobLifecycle::Complete
+    } else if data
+        .pointer("/spec/suspend")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+        || condition_is(data, "Suspended", "True")
+    {
+        JobLifecycle::Suspended
+    } else if condition_is(data, "SuccessCriteriaMet", "True") {
+        JobLifecycle::Completing
+    } else {
+        JobLifecycle::Running
+    }
+}
+
+pub fn current_condition<'a>(
+    data: &'a serde_json::Value,
+    type_: &str,
+) -> Option<&'a serde_json::Value> {
+    let generation = data
+        .pointer("/metadata/generation")
+        .and_then(serde_json::Value::as_i64);
+    let conditions = data.pointer("/status/conditions")?.as_array()?;
+    let condition = current_condition_from(conditions, generation, type_)?;
+    if condition.get("observedGeneration").is_none() && status_generation_is_stale(data) {
+        None
+    } else {
+        Some(condition)
+    }
+}
+
+pub fn current_condition_from<'a>(
+    conditions: &'a [serde_json::Value],
+    generation: Option<i64>,
+    type_: &str,
+) -> Option<&'a serde_json::Value> {
+    let matching = || {
+        conditions.iter().rev().filter(|condition| {
+            condition.get("type").and_then(serde_json::Value::as_str) == Some(type_)
+        })
+    };
+    let Some(generation) = generation else {
+        return matching().next();
+    };
+    matching()
+        .find(|condition| {
+            condition
+                .get("observedGeneration")
+                .and_then(serde_json::Value::as_i64)
+                == Some(generation)
+        })
+        .or_else(|| matching().find(|condition| condition.get("observedGeneration").is_none()))
+}
+
+pub fn condition_is(data: &serde_json::Value, type_: &str, status: &str) -> bool {
+    current_condition(data, type_)
+        .and_then(|condition| condition.get("status"))
+        .and_then(serde_json::Value::as_str)
+        == Some(status)
+}
+
+pub fn status_generation_is_stale(data: &serde_json::Value) -> bool {
+    data.pointer("/metadata/generation")
+        .and_then(serde_json::Value::as_i64)
+        .zip(
+            data.pointer("/status/observedGeneration")
+                .and_then(serde_json::Value::as_i64),
+        )
+        .is_some_and(|(generation, observed)| observed < generation)
+}
+
 /// Static operations supported by one GroupVersionKind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResourceCapabilities(u32);
@@ -232,7 +328,11 @@ impl ResourceCapabilities {
             ]);
         }
         if group.is_empty() && kind == "Node" {
-            bits |= bits_for(&[ResourceAction::Cordon, ResourceAction::Drain]);
+            bits |= bits_for(&[
+                ResourceAction::Cordon,
+                ResourceAction::Drain,
+                ResourceAction::NodeShell,
+            ]);
         }
         if group == "apps"
             && matches!(
@@ -786,10 +886,12 @@ pub fn format_age_secs(secs: u64) -> String {
 }
 
 /// Result of a sweep/sanitize operation.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CleanupSummary {
     pub pods_deleted: usize,
     pub jobs_deleted: usize,
+    pub forbidden: Vec<String>,
+    pub failed: Vec<String>,
 }
 
 /// Resources currently matched by sweep options.
@@ -808,6 +910,12 @@ pub struct SweepOptions {
     pub restarted_pods: bool,
     pub completed_jobs: bool,
     pub failed_jobs: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SanitizeAction {
+    Preview,
+    Execute,
 }
 
 impl Default for SweepOptions {
@@ -829,6 +937,14 @@ impl SweepOptions {
             && !self.restarted_pods
             && !self.completed_jobs
             && !self.failed_jobs
+    }
+
+    pub fn includes_pods(self) -> bool {
+        self.terminal_pods || self.stuck_pods || self.restarted_pods
+    }
+
+    pub fn includes_jobs(self) -> bool {
+        self.completed_jobs || self.failed_jobs
     }
 }
 
@@ -1068,6 +1184,10 @@ mod tests {
         let pod = capabilities("", "v1", "Pod");
         assert!(pod.supports(ResourceAction::Exec));
         assert!(pod.supports(ResourceAction::DebugExec));
+
+        let node = capabilities("", "v1", "Node");
+        assert!(node.supports(ResourceAction::NodeShell));
+        assert!(!pod.supports(ResourceAction::NodeShell));
     }
 
     #[test]
@@ -1177,6 +1297,20 @@ mod tests {
     }
 
     #[test]
+    fn job_lifecycle_uses_current_generation_conditions() {
+        let job = serde_json::json!({
+            "metadata": {"generation": 3},
+            "status": {"conditions": [
+                {"type": "Complete", "status": "True", "observedGeneration": 2},
+                {"type": "FailureTarget", "status": "True", "observedGeneration": 3}
+            ]}
+        });
+
+        assert_eq!(job_lifecycle(&job), JobLifecycle::Failing);
+        assert!(!job_lifecycle(&job).is_terminal());
+    }
+
+    #[test]
     fn action_summaries_merge_all_outcomes() {
         let mut summary = ActionSummary {
             attempted: 2,
@@ -1194,6 +1328,26 @@ mod tests {
         assert_eq!(summary.succeeded, 1);
         assert_eq!(summary.forbidden, 1);
         assert_eq!(summary.failed, 1);
+    }
+
+    #[test]
+    fn sweep_options_select_only_requested_resource_types() {
+        let pods = SweepOptions {
+            completed_jobs: false,
+            failed_jobs: false,
+            ..Default::default()
+        };
+        assert!(pods.includes_pods());
+        assert!(!pods.includes_jobs());
+
+        let jobs = SweepOptions {
+            terminal_pods: false,
+            stuck_pods: false,
+            completed_jobs: true,
+            ..Default::default()
+        };
+        assert!(!jobs.includes_pods());
+        assert!(jobs.includes_jobs());
     }
 
     #[test]

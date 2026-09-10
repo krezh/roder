@@ -3,7 +3,7 @@
 use roder_core::RowStatus;
 use serde_json::Value;
 
-use super::accessors::{int_at, str_at};
+use super::accessors::{int_at, parse_timestamp, str_at};
 
 pub(crate) fn cluster_cells(data: &Value) -> (Vec<String>, RowStatus) {
     let instances = int_at(data, &["status", "instances"])
@@ -75,10 +75,6 @@ fn scheduled_backup_cells_at(data: &Value, now: time::OffsetDateTime) -> (Vec<St
         ],
         status,
     )
-}
-
-fn parse_timestamp(value: &str) -> Option<time::OffsetDateTime> {
-    time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339).ok()
 }
 
 pub(crate) fn pooler_cells(data: &Value) -> (Vec<String>, RowStatus) {

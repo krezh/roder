@@ -8,7 +8,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
-use roder_core::{ResourceAction, ResourceKind};
+use roder_core::{ResourceAction, ResourceKind, SanitizeAction};
 use roder_k8s::Backend;
 use serde::{Deserialize, Serialize};
 
@@ -126,20 +126,22 @@ pub async fn action(
             None => return (StatusCode::BAD_REQUEST, "missing yaml").into_response(),
         }
     } else if req.action == "sanitize-preview" {
-        return match b
-            .sanitize_preview(req.namespace.clone(), req.sweep_options.unwrap_or_default())
-            .await
-        {
+        let options = req.sweep_options.unwrap_or_default();
+        if !b.can_sanitize(ns, options, SanitizeAction::Preview).await {
+            return (StatusCode::FORBIDDEN, "sweep preview is not permitted").into_response();
+        }
+        return match b.sanitize_preview(ns.map(str::to_string), options).await {
             Ok(summary) => {
                 (StatusCode::OK, serde_json::to_string(&summary).unwrap()).into_response()
             }
             Err(e) => bad_gateway(e),
         };
     } else if req.action == "sanitize" {
-        return match b
-            .sanitize(req.namespace.clone(), req.sweep_options.unwrap_or_default())
-            .await
-        {
+        let options = req.sweep_options.unwrap_or_default();
+        if !b.can_sanitize(ns, options, SanitizeAction::Execute).await {
+            return (StatusCode::FORBIDDEN, "sweep is not permitted").into_response();
+        }
+        return match b.sanitize(ns.map(str::to_string), options).await {
             Ok(summary) => {
                 (StatusCode::OK, serde_json::to_string(&summary).unwrap()).into_response()
             }

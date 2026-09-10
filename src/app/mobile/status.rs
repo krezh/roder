@@ -2,9 +2,9 @@ use leptos::prelude::*;
 use roder_core::{ResourceKind, RowStatus};
 
 use crate::app::failure_watch::FailureWatchRows;
+use crate::app::overview::{core_kind, OverviewState};
 use crate::app::state::{AlertsData, AlertsOpen, Catalog, OnlyProblems};
 use crate::app::util::format::cluster_usage_pct;
-use crate::data;
 
 fn go_to_kind(
     name: &str,
@@ -82,50 +82,17 @@ pub(crate) fn MobileAlertActions() -> impl IntoView {
 pub(crate) fn MobileStatusRow() -> impl IntoView {
     let catalog = expect_context::<Catalog>().0;
     let selected = expect_context::<RwSignal<Option<ResourceKind>>>();
-    let overview = RwSignal::new(None::<roder_core::ClusterOverview>);
-    let stale = RwSignal::new(false);
-    Effect::new(move |_| {
-        if let Some(cached) =
-            data::storage_get("roder.overview").and_then(|value| serde_json::from_str(&value).ok())
-        {
-            overview.set(Some(cached));
-        }
-    });
-    let resource = LocalResource::new(|| async {
-        data::fetch_json::<roder_core::ClusterOverview>("/api/overview").await
-    });
-    Effect::new(move |_| {
-        if let Some(result) = resource.get() {
-            match result {
-                Ok(value) => {
-                    if let Ok(json) = serde_json::to_string(&value) {
-                        data::storage_set("roder.overview", &json);
-                    }
-                    overview.set(Some(value));
-                    stale.set(false);
-                }
-                Err(_) => stale.set(true),
-            }
-        }
-    });
-    Effect::new(move |_| {
-        if let Ok(handle) = set_interval_with_handle(
-            move || resource.refetch(),
-            std::time::Duration::from_secs(10),
-        ) {
-            on_cleanup(move || handle.clear());
-        }
-    });
-    view! { <div class="mobile-status-row">{move || match overview.get() {
-        None if stale.get() => view! { <span class="mobile-usage-unavailable">"Usage unavailable"</span> }.into_any(),
+    let overview = expect_context::<OverviewState>();
+    view! { <div class="mobile-status-row">{move || match overview.data.get() {
+        None if overview.stale.get() => view! { <span class="mobile-usage-unavailable">"Usage unavailable"</span> }.into_any(),
         None => ().into_any(),
-        Some(overview) => {
-            let (cpu, memory) = cluster_usage_pct(&overview.nodes);
-            let total = overview.nodes.len(); let ready = overview.nodes.iter().filter(|node| node.ready).count();
-            view! { <div class="mobile-usage" class:stale=move || stale.get() aria-label=format!("Cluster usage: CPU {cpu:.0}%, memory {memory:.0}%, {ready} of {total} nodes ready")>
+        Some(data) => {
+            let (cpu, memory) = cluster_usage_pct(&data.nodes);
+            let total = data.nodes.len(); let ready = data.nodes.iter().filter(|node| node.ready).count();
+            view! { <div class="mobile-usage" class:stale=move || overview.stale.get() aria-label=format!("Cluster usage: CPU {cpu:.0}%, memory {memory:.0}%, {ready} of {total} nodes ready")>
                 <span><small>"CPU"</small><b>{format!("{cpu:.0}%")}</b><i><em style:width=format!("{}%", cpu.clamp(0.0, 100.0))></em></i></span>
                 <span><small>"MEM"</small><b>{format!("{memory:.0}%")}</b><i><em style:width=format!("{}%", memory.clamp(0.0, 100.0))></em></i></span>
-                <button class:warning=ready != total on:click=move |_| if let Some(kind) = catalog.get_untracked().into_iter().find(|kind| kind.group.is_empty() && kind.kind == "Node") { selected.set(Some(kind)); }>
+                <button class:warning=ready != total on:click=move |_| if let Some(kind) = core_kind(&catalog.get_untracked(), "Node") { selected.set(Some(kind)); }>
                     <i></i><b>{ready}"/"{total}</b>
                 </button>
             </div> }.into_any()

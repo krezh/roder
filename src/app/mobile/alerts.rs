@@ -1,32 +1,9 @@
 use leptos::prelude::*;
 use roder_core::FiringAlert;
 
+use crate::app::alert_utils::{elapsed_since, elapsed_since_ms, sort_alerts};
 use crate::app::state::{AlertSilencesEnabled, AlertsData, AlertsLastRefresh, AlertsOpen, Tick};
 use crate::app::ui::use_bool_overlay;
-
-fn severity_order(severity: &str) -> u8 {
-    match severity {
-        "critical" => 0,
-        "warning" => 1,
-        "info" => 2,
-        _ => 3,
-    }
-}
-
-fn elapsed(timestamp: &str) -> String {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let parsed = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(timestamp)).get_time();
-        if parsed.is_nan() {
-            return timestamp.to_string();
-        }
-        return roder_core::format_age_secs(
-            ((js_sys::Date::now() - parsed) / 1000.0).max(0.0) as u64
-        );
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    timestamp.to_string()
-}
 
 fn refresh_label(last_refresh: Option<f64>, failed: bool) -> String {
     if failed {
@@ -35,16 +12,7 @@ fn refresh_label(last_refresh: Option<f64>, failed: bool) -> String {
     let Some(timestamp) = last_refresh else {
         return "Not refreshed yet".into();
     };
-    #[cfg(target_arch = "wasm32")]
-    return format!(
-        "Updated {} ago",
-        roder_core::format_age_secs(((js_sys::Date::now() - timestamp) / 1000.0).max(0.0) as u64)
-    );
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let _ = timestamp;
-        "Updated".into()
-    }
+    elapsed_since_ms(timestamp).map_or_else(|| "Updated".into(), |age| format!("Updated {age} ago"))
 }
 
 #[component]
@@ -65,12 +33,7 @@ pub(crate) fn MobileAlertsPanel() -> impl IntoView {
             .into_iter()
             .filter(|alert| show_silenced.get() || !alert.silenced)
             .collect();
-        alerts.sort_by(|left, right| {
-            severity_order(&left.severity)
-                .cmp(&severity_order(&right.severity))
-                .then_with(|| left.name.cmp(&right.name))
-                .then_with(|| left.fingerprint.cmp(&right.fingerprint))
-        });
+        sort_alerts(&mut alerts);
         alerts
     });
     let refresh = move |_| {
@@ -208,7 +171,7 @@ fn MobileAlertRow(
     };
     view! { <article class="mobile-alert-row">
         <header><span class=format!("severity {}", alert.severity)>{alert.severity.clone()}</span><strong>{alert.name}</strong>
-            {alert.silenced.then(|| view! { <span class="silenced">"Silenced"</span> })}<time>{move || { tick.get(); elapsed(&starts_at) }}</time>
+            {alert.silenced.then(|| view! { <span class="silenced">"Silenced"</span> })}<time>{move || { tick.get(); elapsed_since(&starts_at) }}</time>
         </header>
         {(!alert.summary.is_empty()).then(|| view! { <p class="summary">{alert.summary}</p> })}
         {(!alert.description.is_empty()).then(|| view! { <p>{alert.description}</p> })}

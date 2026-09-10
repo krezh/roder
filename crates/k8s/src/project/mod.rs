@@ -24,7 +24,7 @@ mod rook;
 mod status;
 mod workloads;
 
-pub(crate) use self::accessors::ts_string;
+pub(crate) use self::accessors::{parse_timestamp, ts_string};
 use self::certmanager::{acme_state_cells, certificate_cells, certrequest_cells, issuer_cells};
 use self::cnpg::{backup_cells, cluster_cells, pooler_cells, scheduled_backup_cells};
 use self::core::{
@@ -39,6 +39,7 @@ use self::pods::pod_cells;
 use self::rbac::rolebinding_cells;
 use self::rook::{ceph_cluster_cells, ceph_resource_cells, object_bucket_claim_cells};
 use self::status::generic_status;
+pub(crate) use self::status::{condition, job_lifecycle, JobLifecycle};
 use self::workloads::{
     cronjob_cells, daemonset_cells, deployment_cells, job_cells, replicaset_cells,
     statefulset_cells,
@@ -51,6 +52,7 @@ struct KindView {
     /// Column headers beyond the standard Name / Namespace / Age.
     headers: &'static [&'static str],
     project: Project,
+    custom_columns: bool,
 }
 
 /// How a kind's cells are produced. Most project purely from the object body; Pod
@@ -73,6 +75,16 @@ fn explicit_view(group: &str, kind: &str) -> Option<KindView> {
             KindView {
                 headers: $headers,
                 project: $project,
+                custom_columns: false,
+            }
+        };
+    }
+    macro_rules! custom_view {
+        ($headers:expr, $project:expr) => {
+            KindView {
+                headers: $headers,
+                project: $project,
+                custom_columns: true,
             }
         };
     }
@@ -98,9 +110,9 @@ fn explicit_view(group: &str, kind: &str) -> Option<KindView> {
         }
         // Flux: Ready (True/False) + the condition's reason (Status) + its message.
         _ if group.ends_with("fluxcd.io") => {
-            view!(&["Ready", "Status", "Message"], Plain(ready_message_cells))
+            custom_view!(&["Ready", "Status", "Message"], Plain(ready_message_cells))
         }
-        ("external-secrets.io", "ExternalSecret") => view!(
+        ("external-secrets.io", "ExternalSecret") => custom_view!(
             &[
                 "Store Type",
                 "Store",
@@ -112,30 +124,30 @@ fn explicit_view(group: &str, kind: &str) -> Option<KindView> {
             Plain(external_secret_cells)
         ),
         ("external-secrets.io", "ClusterExternalSecret") => {
-            view!(
+            custom_view!(
                 &["Ready", "Status", "Store"],
                 Plain(cluster_external_secret_cells)
             )
         }
         ("external-secrets.io", _) => {
-            view!(&["Ready", "Status"], Plain(eso_generic_cells))
+            custom_view!(&["Ready", "Status"], Plain(eso_generic_cells))
         }
         ("cert-manager.io", "Certificate") => {
-            view!(
+            custom_view!(
                 &["Ready", "Status", "Expires", "Renews", "Revision", "Secret"],
                 Plain(certificate_cells)
             )
         }
         ("cert-manager.io", "ClusterIssuer") | ("cert-manager.io", "Issuer") => {
-            view!(&["Ready", "Status"], Plain(issuer_cells))
+            custom_view!(&["Ready", "Status"], Plain(issuer_cells))
         }
         ("cert-manager.io", "CertificateRequest") => {
-            view!(&["Approved", "Ready", "Issuer"], Plain(certrequest_cells))
+            custom_view!(&["Approved", "Ready", "Issuer"], Plain(certrequest_cells))
         }
         ("acme.cert-manager.io", "Order") | ("acme.cert-manager.io", "Challenge") => {
-            view!(&["State", "Reason"], Plain(acme_state_cells))
+            custom_view!(&["State", "Reason"], Plain(acme_state_cells))
         }
-        ("ceph.rook.io", "CephCluster") => view!(
+        ("ceph.rook.io", "CephCluster") => custom_view!(
             &["Phase", "Health", "Version", "Message"],
             Plain(ceph_cluster_cells)
         ),
@@ -143,21 +155,21 @@ fn explicit_view(group: &str, kind: &str) -> Option<KindView> {
         | ("ceph.rook.io", "CephFilesystem")
         | ("ceph.rook.io", "CephNFS")
         | ("ceph.rook.io", "CephObjectStore") => {
-            view!(&["Phase", "Message"], Plain(ceph_resource_cells))
+            custom_view!(&["Phase", "Message"], Plain(ceph_resource_cells))
         }
-        ("objectbucket.io", "ObjectBucketClaim") => view!(
+        ("objectbucket.io", "ObjectBucketClaim") => custom_view!(
             &["Phase", "Storage Class", "Bucket"],
             Plain(object_bucket_claim_cells)
         ),
-        ("postgresql.cnpg.io", "Cluster") => view!(
+        ("postgresql.cnpg.io", "Cluster") => custom_view!(
             &["Instances", "Ready", "Primary", "Phase", "Image"],
             Plain(cluster_cells)
         ),
-        ("postgresql.cnpg.io", "Backup") => view!(
+        ("postgresql.cnpg.io", "Backup") => custom_view!(
             &["Cluster", "Method", "Phase", "Started", "Completed"],
             Plain(backup_cells)
         ),
-        ("postgresql.cnpg.io", "ScheduledBackup") => view!(
+        ("postgresql.cnpg.io", "ScheduledBackup") => custom_view!(
             &[
                 "Cluster",
                 "Schedule",
@@ -168,7 +180,7 @@ fn explicit_view(group: &str, kind: &str) -> Option<KindView> {
             ],
             Plain(scheduled_backup_cells)
         ),
-        ("postgresql.cnpg.io", "Pooler") => view!(
+        ("postgresql.cnpg.io", "Pooler") => custom_view!(
             &["Cluster", "Type", "Instances", "Phase", "Reason"],
             Plain(pooler_cells)
         ),
@@ -176,16 +188,16 @@ fn explicit_view(group: &str, kind: &str) -> Option<KindView> {
         ("gateway.networking.k8s.io", "HTTPRoute")
         | ("gateway.networking.k8s.io", "GRPCRoute")
         | ("gateway.networking.k8s.io", "TLSRoute") => {
-            view!(&["Hostnames", "Gateways", "Status"], Plain(httproute_cells))
+            custom_view!(&["Hostnames", "Gateways", "Status"], Plain(httproute_cells))
         }
         ("gateway.networking.k8s.io", "TCPRoute") | ("gateway.networking.k8s.io", "UDPRoute") => {
-            view!(&["Gateways", "Status"], Plain(parent_route_cells))
+            custom_view!(&["Gateways", "Status"], Plain(parent_route_cells))
         }
         ("gateway.networking.k8s.io", "Gateway") => {
-            view!(&["Class", "Address", "Programmed"], Plain(gateway_cells))
+            custom_view!(&["Class", "Address", "Programmed"], Plain(gateway_cells))
         }
         ("gateway.networking.k8s.io", "GatewayClass") => {
-            view!(&["Controller", "Accepted"], Plain(gatewayclass_cells))
+            custom_view!(&["Controller", "Accepted"], Plain(gatewayclass_cells))
         }
         // Core / storage / networking.
         ("", "PersistentVolume") => view!(
@@ -283,7 +295,7 @@ pub(crate) fn table_layout(
         columns.push("Namespace".to_string());
         sources.push(TableCellSource::Namespace);
     }
-    let handled_crd = is_augmented_crd(group) && explicit_view(group, kind).is_some();
+    let handled_crd = explicit_view(group, kind).is_some_and(|view| view.custom_columns);
     let include_wide = handled_crd;
     let visible = definitions
         .iter()
@@ -495,10 +507,10 @@ fn enhancement_headers(group: &str, kind: &str) -> &'static [&'static str] {
         ("", "Event") => explicit_view(group, kind)
             .map(|view| view.headers)
             .unwrap_or(&[]),
-        _ if is_augmented_crd(group) => explicit_view(group, kind)
+        _ => explicit_view(group, kind)
+            .filter(|view| view.custom_columns)
             .map(|view| view.headers)
             .unwrap_or(&[]),
-        _ => &[],
     }
 }
 
@@ -523,16 +535,18 @@ fn enhancement_values(
             let (cells, status) = event_cells(data);
             (cells, vec![], status)
         }
-        _ if is_augmented_crd(group) => match explicit_view(group, kind) {
-            Some(view) => match view.project {
-                Project::Plain(project) => {
-                    let (cells, status) = project(data);
-                    (cells, vec![], status)
-                }
-                Project::Pod | Project::Pvc => unreachable!("CRDs use plain projectors"),
-            },
-            None => (vec![], vec![], generic_status(data)),
-        },
+        _ if explicit_view(group, kind).is_some_and(|view| view.custom_columns) => {
+            match explicit_view(group, kind) {
+                Some(view) => match view.project {
+                    Project::Plain(project) => {
+                        let (cells, status) = project(data);
+                        (cells, vec![], status)
+                    }
+                    Project::Pod | Project::Pvc => unreachable!("CRDs use plain projectors"),
+                },
+                None => (vec![], vec![], generic_status(data)),
+            }
+        }
         _ => {
             let status = match explicit_view(group, kind) {
                 Some(view) => match view.project {
@@ -559,20 +573,6 @@ pub(crate) fn resource_status(group: &str, kind: &str, object: &DynamicObject) -
         None,
     )
     .2
-}
-
-fn is_augmented_crd(group: &str) -> bool {
-    group.ends_with("fluxcd.io")
-        || group == "ceph.rook.io"
-        || group == "objectbucket.io"
-        || group == "postgresql.cnpg.io"
-        || matches!(
-            group,
-            "external-secrets.io"
-                | "cert-manager.io"
-                | "acme.cert-manager.io"
-                | "gateway.networking.k8s.io"
-        )
 }
 
 fn same_column(left: &str, right: &str) -> bool {

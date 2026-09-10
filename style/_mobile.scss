@@ -328,9 +328,9 @@
     inset: 0;
     background: rgba(0, 0, 0, 0.5);
     z-index: 20;
-    animation: sheet-scrim-in 0.15s ease;
+    animation: scrim-in 0.15s ease;
     &.closing {
-      animation: sheet-scrim-out 0.15s ease forwards;
+      animation: scrim-out 0.15s ease forwards;
     }
   }
 
@@ -2399,9 +2399,9 @@
     inset: 0;
     z-index: 80;
     background: rgba(0, 0, 0, 0.62);
-    animation: sheet-scrim-in 0.16s ease;
+    animation: scrim-in 0.16s ease;
 
-    &.closing { animation: sheet-scrim-out 0.16s ease forwards; }
+    &.closing { animation: scrim-out 0.16s ease forwards; }
   }
 
   .mobile-dialog,
@@ -2715,12 +2715,6 @@
   }
 }
 
-@keyframes sheet-scrim-in {
-  from { opacity: 0; }
-}
-@keyframes sheet-scrim-out {
-  to { opacity: 0; }
-}
 @keyframes sheet-slide-in {
   from { transform: translateY(100%); }
 }

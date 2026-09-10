@@ -340,7 +340,11 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
         })
     });
 
-    let window = table_window(t, shown_uids);
+    let layout = table_window(t, shown_uids);
+    let window = Memo::new(move |_| {
+        let (first, last, _, _) = layout.get();
+        (first, last)
+    });
 
     let table_ref = t.table_ref;
     let selected = t.selected;
@@ -348,7 +352,6 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
     let sort = t.sort;
     let entering = t.entering;
     let removing = t.removing;
-    let row_h = t.row_h;
     let press = t.press;
 
     let grid_template = RwSignal::new(String::new());
@@ -532,7 +535,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                         {move || sizer.get().into_iter().map(|s| view! { <div class="cell">{s}</div> }).collect_view()}
                     </div>
                     <div class="vpad" style=move || {
-                        format!("grid-column:1/-1;height:{}px", window.get().0 as f64 * row_h.get())
+                        format!("grid-column:1/-1;height:{}px", layout.get().2)
                     }></div>
                     <For each=move || {
                         let (first, last) = window.get();
@@ -729,9 +732,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                         }
                     </For>
                     <div class="vpad" style=move || {
-                        let (_, last) = window.get();
-                        let total = shown_uids.with(|v| v.len());
-                        format!("grid-column:1/-1;height:{}px", total.saturating_sub(last) as f64 * row_h.get())
+                        format!("grid-column:1/-1;height:{}px", layout.get().3)
                     }></div>
                 </div>
                 {move || {

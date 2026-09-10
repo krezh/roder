@@ -150,6 +150,7 @@ pub(crate) fn KindTable(
                     variable_window_layout(
                         uids,
                         heights,
+                        &t.removing.get(),
                         estimate,
                         t.scroll_top.get(),
                         t.viewport_h.get(),
@@ -157,15 +158,7 @@ pub(crate) fn KindTable(
                 })
             })
         } else {
-            let (first, last) = fixed_window.get();
-            let total = shown_uids.with(|uids| uids.len());
-            let row_height = t.row_h.get();
-            (
-                first,
-                last,
-                first as f64 * row_height,
-                total.saturating_sub(last) as f64 * row_height,
-            )
+            fixed_window.get()
         }
     });
     let window = Memo::new(move |_| {

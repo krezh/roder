@@ -321,8 +321,8 @@ fn MobileInfo(detail: ObjectDetail, kind: String) -> impl IntoView {
                 </div>
                 <div class="event-detail-stats">
                     {event_count.map(|value| view! { <div><span>"Occurrences"</span><strong>{value}</strong></div> })}
-                    {event_first_seen.map(|value| { let age = data::humanize_age(&Some(value.clone())); view! { <div><span>"First seen"</span><strong title=value>{age}</strong></div> } })}
-                    {event_last_seen.map(|value| { let age = data::humanize_age(&Some(value.clone())); view! { <div><span>"Last seen"</span><strong title=value>{age}</strong></div> } })}
+                    {event_first_seen.map(|value| { let age = data::humanize_age(&Some(value.clone())); view! { <div><span>"First seen"</span><strong data-tip=value>{age}</strong></div> } })}
+                    {event_last_seen.map(|value| { let age = data::humanize_age(&Some(value.clone())); view! { <div><span>"Last seen"</span><strong data-tip=value>{age}</strong></div> } })}
                 </div>
             </section>
         })}
@@ -330,9 +330,9 @@ fn MobileInfo(detail: ObjectDetail, kind: String) -> impl IntoView {
             <section class="certificate-detail-summary">
                 <div class="certificate-detail-heading"><span>"Certificate lifecycle"</span><strong class=certificate.state_class>{certificate.state}</strong></div>
                 <div class="detail-stats">
-                    <div class="detail-stat"><span class="detail-stat-label">"Valid from"</span><span class="detail-stat-value" title=certificate.not_before_raw>{certificate.not_before}</span></div>
-                    <div class="detail-stat"><span class="detail-stat-label">"Expires"</span><span class="detail-stat-value" title=certificate.not_after_raw>{certificate.not_after}</span></div>
-                    <div class="detail-stat"><span class="detail-stat-label">"Scheduled renewal"</span><span class="detail-stat-value" title=certificate.renewal_time_raw>{certificate.renewal_time}</span></div>
+                    <div class="detail-stat"><span class="detail-stat-label">"Valid from"</span><span class="detail-stat-value" data-tip=certificate.not_before_raw>{certificate.not_before}</span></div>
+                    <div class="detail-stat"><span class="detail-stat-label">"Expires"</span><span class="detail-stat-value" data-tip=certificate.not_after_raw>{certificate.not_after}</span></div>
+                    <div class="detail-stat"><span class="detail-stat-label">"Scheduled renewal"</span><span class="detail-stat-value" data-tip=certificate.renewal_time_raw>{certificate.renewal_time}</span></div>
                     <div class="detail-stat"><span class="detail-stat-label">"Revision"</span><span class="detail-stat-value">{certificate.revision}</span></div>
                     <div class="detail-stat"><span class="detail-stat-label">"Target Secret"</span><span class="detail-stat-value">{certificate.secret}</span></div>
                 </div>

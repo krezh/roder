@@ -690,7 +690,7 @@ pub(crate) fn KindTable(
                     })}
                     {bulk_job.then(|| view! {
                         <button class="act" disabled=move || !can_rerun_selected_jobs() || !bulk_allowed(ResourceAction::JobRerun)
-                            title="Only completed or failed Jobs can be re-run"
+                            data-tip="Only completed or failed Jobs can be re-run"
                             on:click=move |_| do_bulk("job-rerun")>{move || bulk_label(ResourceAction::JobRerun, "Re-run")}</button>
                     })}
                     {bulk_flux_reconcile.then(|| view! {

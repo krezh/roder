@@ -432,7 +432,7 @@ fn rollup_card(
     };
     view! {
         <button type="button" class=format!("card controller-card {state}")
-            title=error
+            data-tip=error
             on:click=move |_| select_kind(catalog, selected_kind, &target)>
             <div class="controller-status" aria-hidden="true"></div>
             <div class="controller-main">
@@ -487,7 +487,7 @@ fn signal_card(signal: ControllerHealthSignal, tick: RwSignal<u32>) -> impl Into
     let timestamp = signal.timestamp;
     let fallback = signal.value;
     view! {
-        <article class=format!("card controller-card controller-signal {state}") title=signal.message>
+        <article class=format!("card controller-card controller-signal {state}") data-tip=signal.message>
             <div class="controller-status" aria-hidden="true"></div>
             <div class="controller-main">
                 <div class="card-heading"><h3>{signal.label}</h3></div>

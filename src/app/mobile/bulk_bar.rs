@@ -72,7 +72,7 @@ pub(crate) fn MobileBulkBar(
                 {bulk_job.then(|| view! {
                     <button class="act"
                         disabled=move || !can_rerun_jobs.is_some_and(|value| value.get()) || !allowed(ResourceAction::JobRerun)
-                        title="Only completed or failed Jobs can be re-run"
+                        data-tip="Only completed or failed Jobs can be re-run"
                         on:click=move |_| do_bulk("job-rerun")>{move || label(ResourceAction::JobRerun, "Re-run")}</button>
                 })}
                 {bulk_flux_reconcile.then(|| view! {

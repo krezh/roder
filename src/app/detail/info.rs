@@ -117,15 +117,15 @@ pub(crate) fn info_view(d: ObjectDetail, kind: String) -> impl IntoView {
                     <div class="detail-stats">
                         <div class="detail-stat">
                             <span class="detail-stat-label">"Valid from"</span>
-                            <span class="detail-stat-value" title=certificate.not_before_raw>{certificate.not_before}</span>
+                            <span class="detail-stat-value" data-tip=certificate.not_before_raw>{certificate.not_before}</span>
                         </div>
                         <div class="detail-stat">
                             <span class="detail-stat-label">"Expires"</span>
-                            <span class="detail-stat-value" title=certificate.not_after_raw>{certificate.not_after}</span>
+                            <span class="detail-stat-value" data-tip=certificate.not_after_raw>{certificate.not_after}</span>
                         </div>
                         <div class="detail-stat">
                             <span class="detail-stat-label">"Scheduled renewal"</span>
-                            <span class="detail-stat-value" title=certificate.renewal_time_raw>{certificate.renewal_time}</span>
+                            <span class="detail-stat-value" data-tip=certificate.renewal_time_raw>{certificate.renewal_time}</span>
                         </div>
                         <div class="detail-stat">
                             <span class="detail-stat-label">"Revision"</span>

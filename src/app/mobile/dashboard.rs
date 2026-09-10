@@ -252,7 +252,7 @@ fn mobile_rollup(
             format!("{label}s")
         }
     };
-    view! { <button class=format!("mobile-controller-card {state}") title=error on:click=move |_| select_kind(catalog, selected, &target)><i></i><span><strong>{label}</strong><b>{if only_unclassified { health.total.to_string() } else { format!("{} / {}", health.ready, health.total) }}</b><small>{if only_unclassified { "resources" } else { "ready" }}</small></span><em>
+    view! { <button class=format!("mobile-controller-card {state}") data-tip=error on:click=move |_| select_kind(catalog, selected, &target)><i></i><span><strong>{label}</strong><b>{if only_unclassified { health.total.to_string() } else { format!("{} / {}", health.ready, health.total) }}</b><small>{if only_unclassified { "resources" } else { "ready" }}</small></span><em>
         {(health.reconciling > 0).then(|| view! { <span>{health.reconciling}" reconciling"</span> })}{(health.suspended > 0).then(|| view! { <span>{health.suspended}" suspended"</span> })}
         {(health.warning > 0).then(|| view! { <span>{health.warning}" warning"</span> })}{(health.failing > 0).then(|| view! { <span>{health.failing}" failing"</span> })}
         {(health.unknown > 0).then(|| view! { <span>{health.unknown}" health status unrecognized"</span> })}{unreadable.then(|| view! { <span>"unreadable"</span> })}
@@ -271,7 +271,7 @@ fn mobile_signal(signal: ControllerHealthSignal, tick: RwSignal<u32>) -> impl In
     };
     let timestamp = signal.timestamp;
     let fallback = signal.value;
-    view! { <article class=format!("mobile-controller-card {state}") title=signal.message><i></i><span>
+    view! { <article class=format!("mobile-controller-card {state}") data-tip=signal.message><i></i><span>
         <strong>{signal.label}</strong>
         <b>{move || {
             tick.get();

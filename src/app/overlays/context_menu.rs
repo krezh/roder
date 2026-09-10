@@ -486,7 +486,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                     on:contextmenu=move |e: leptos::ev::MouseEvent| { e.prevent_default(); do_close(); }></div>
                 <div class="ctx-menu" role="menu" node_ref=menu_ref class:closing=move || closing.get()
                     style=move || { let (x, y) = pos.get(); format!("left:{x}px;top:{y}px") }>
-                    <div class="ctx-header" title=header_title>
+                    <div class="ctx-header" data-tip=header_title>
                         {header_label}
                     </div>
 

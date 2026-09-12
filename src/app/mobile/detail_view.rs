@@ -13,11 +13,15 @@ use crate::app::state::{
     DetailTarget, DrainOpen, DrainTarget, ExecOpen, ExecTarget, TalosFeatures,
 };
 use crate::app::ui::{ask_confirm, ask_delete, delete_extra, Confirm, DeleteRequest};
-use crate::app::util::format::{ansi_to_html, camel_label, log_level, parse_key, parse_log_line};
+use crate::app::util::format::{
+    ansi_to_html, camel_label, condition_class, counted, log_level, parse_key, parse_log_line,
+};
 use crate::app::util::json::{
     conditions, container_envs, container_images, data_entries, json_map, json_str, owner_refs,
-    rbac_rules, section_scalars, selector_from, status_scalars,
+    rbac_rules, section_fields, section_fields_except, selector_from, status_scalars,
+    top_level_fields_except,
 };
+use crate::app::util::json_fields::{json_fields, json_fields_except};
 use crate::app::util::yaml_hl;
 use crate::data;
 
@@ -143,7 +147,7 @@ pub(crate) fn MobileRowDetail(
                 {move || controller.status.get().map(|result| match result { Ok(message) => view! { <span class="act-ok">{message}</span> }.into_any(), Err(error) => view! { <span class="act-err">{error}</span> }.into_any() })}
             </div>
             <nav class="rd-tabs mobile-detail-tabs" aria-label="Detail sections">
-                <MobileTab tab current=DetailTab::Info label="Info" />
+                <MobileTab tab current=DetailTab::Info label="Describe" />
                 <MobileTab tab current=DetailTab::Yaml label="YAML" />
                 {is_pod.then(|| view! { <MobileTab tab current=DetailTab::Metrics label="Metrics" /> })}
                 {move || (is_pod || talos_available()).then(|| view! { <MobileTab tab current=DetailTab::Logs label="Logs" /> })}
@@ -257,7 +261,42 @@ fn MobileInfo(detail: ObjectDetail, kind: String) -> impl IntoView {
             )
         });
     }
-    let spec = section_scalars(object, "spec");
+    let spec_count = section_fields(object, "spec").len();
+    let status_detail_count = section_fields(object, "status").len();
+    let spec_value = object.get("spec").cloned().unwrap_or_default();
+    let status_value = object.get("status").cloned().unwrap_or_default();
+    let metadata_value = object.get("metadata").cloned().unwrap_or_default();
+    let additional_value = object.clone();
+    let metadata_count = section_fields(object, "metadata").len();
+    let metadata_detail_count = section_fields_except(
+        object,
+        "metadata",
+        &[
+            "name",
+            "namespace",
+            "creationTimestamp",
+            "uid",
+            "generation",
+            "resourceVersion",
+            "labels",
+            "annotations",
+        ],
+    )
+    .len();
+    let additional_count = top_level_fields_except(
+        object,
+        &[
+            "apiVersion",
+            "kind",
+            "metadata",
+            "spec",
+            "status",
+            "data",
+            "binaryData",
+            "stringData",
+        ],
+    )
+    .len();
     let labels = json_map(object, &["metadata", "labels"]);
     let annotations = json_map(object, &["metadata", "annotations"]);
     let conds = conditions(object);
@@ -294,6 +333,27 @@ fn MobileInfo(detail: ObjectDetail, kind: String) -> impl IntoView {
         (None, Some(name)) => Some(name),
         _ => None,
     };
+    let api_version = json_str(object, &["apiVersion"]);
+    let uid = json_str(object, &["metadata", "uid"]);
+    let generation = json_str(object, &["metadata", "generation"]);
+    let resource_version = json_str(object, &["metadata", "resourceVersion"]);
+    let condition_count = conds.len();
+    let container_count = images.len();
+    let env_count = envs
+        .iter()
+        .map(|container| container.entries.len())
+        .sum::<usize>();
+    let rule_count = rules.len();
+    let entry_count = entries.len();
+    let label_count = labels.len();
+    let annotation_count = annotations.len();
+    let related_event_count = detail.events.len();
+    let warning_count = detail
+        .events
+        .iter()
+        .filter(|event| event.type_.eq_ignore_ascii_case("warning"))
+        .count();
+
     view! { <section class="info mobile-info">
         {is_event.then(|| view! {
             <section class="event-detail-summary">
@@ -328,20 +388,162 @@ fn MobileInfo(detail: ObjectDetail, kind: String) -> impl IntoView {
                 </div>
             </section>
         })}
-        <div class="kv-grid">
-            {detail.namespace.map(|value| view! { <div class="kv"><span class="k">"Namespace"</span><span class="v">{value}</span></div> })}
-            {created.map(|value| view! { <div class="kv"><span class="k">"Age"</span><span class="v">{data::humanize_age(&Some(value))}</span></div> })}
-            {owners.into_iter().map(|(kind, name)| view! { <div class="kv"><span class="k">"Controlled By"</span><span class="v">{format!("{kind}/{name}")}</span></div> }).collect_view()}
-            {status.into_iter().map(|(key, value)| view! { <div class="kv"><span class="k">{camel_label(&key)}</span><span class="v">{value}</span></div> }).collect_view()}
-        </div>
-        {(!spec.is_empty()).then(|| view! { <h4>"Spec"</h4><div class="kv-cols">{spec.into_iter().map(|(key, value)| view! { <div class="kvc"><span class="kvc-k">{camel_label(&key)}</span><span class="kvc-v">{value}</span></div> }).collect_view()}</div> })}
-        {(!images.is_empty()).then(|| view! { <h4>"Containers"</h4><div class="kv-cols container-images">{images.into_iter().map(|(name, image)| view! { <div class="kvc"><span class="kvc-k">{name}</span><span class="kvc-v">{image}</span></div> }).collect_view()}</div> })}
-        {(!envs.is_empty()).then(|| { let multiple = envs.len() > 1; view! { <h4>"Env"</h4>{envs.into_iter().map(|container| view! { {multiple.then(|| view! { <div class="env-container-name">{container.container}</div> })}<div class="kvlist">{container.entries.into_iter().map(|(key, value)| view! { <div class="kvl"><span class="kvl-k">{format!("{key}:")}</span><span class="kvl-v">{value}</span></div> }).collect_view()}</div> }).collect_view()} } })}
-        {(!rules.is_empty()).then(|| view! { <h4>"Rules"</h4><div class="mobile-rules">{rules.into_iter().map(|rule| view! { <article><b>{rule.resources}</b><span>{rule.verbs}</span><small>{format!("{} {}", rule.groups, rule.names)}</small></article> }).collect_view()}</div> })}
-        {(!entries.is_empty()).then(|| view! { <h4>"Data"</h4>{secret.then(|| view! { <div class="hint">"Values are hidden - tap to reveal."</div> })}<div class="data">{entries.into_iter().map(|(key, value, hidden)| { let revealed = RwSignal::new(false); view! { <div class="data-row"><div class="data-key">{key}</div>{if hidden { view! { <pre class="data-val secret" class:revealed=move || revealed.get() on:click=move |_| revealed.set(true)>{value}</pre> }.into_any() } else { view! { <pre class="data-val">{value}</pre> }.into_any() }}</div> } }).collect_view()}</div> })}
-        {(!conds.is_empty()).then(|| view! { <h4>"Conditions"</h4><div class="mobile-conditions">{conds.into_iter().map(|condition| { let class = match condition.status.as_str() { "True" => "cond-ok", "False" => "cond-error", _ => "cond-pending" }; view! { <article><div><b>{condition.type_}</b><span class=class>{condition.status}</span></div><strong>{condition.reason}</strong><p>{condition.message}</p></article> } }).collect_view()}</div> })}
-        {[("Labels", labels), ("Annotations", annotations)].into_iter().filter_map(|(title, values)| (!values.is_empty()).then(|| view! { <h4>{title}</h4><div class="kvlist">{values.into_iter().map(|(key, value)| view! { <div class="kvl"><span class="kvl-k">{format!("{key}:")}</span><span class="kvl-v">{value}</span></div> }).collect_view()}</div> })).collect_view()}
-        {(!detail.events.is_empty()).then(|| view! { <h4>"Events"</h4><div class="events">{detail.events.into_iter().take(12).map(|event| view! { <div class=format!("event ev-{}", event.type_.to_lowercase())><span class="ev-reason">{event.reason}</span><span class="ev-msg">{event.message}</span></div> }).collect_view()}</div> })}
+
+        <section class="info-overview" aria-label="Resource overview">
+            <div class="info-overview-heading">
+                <h3>{kind}</h3>
+                {api_version.clone().map(|value| view! { <code>{value}</code> })}
+            </div>
+            <div class="kv-grid overview-grid">
+                {detail.namespace.map(|value| view! { <div class="kv"><span class="k">"Namespace"</span><span class="v">{value}</span></div> })}
+                {created.map(|value| {
+                    let age = data::humanize_age(&Some(value.clone()));
+                    let label = format!("{age}; {value}");
+                    view! { <div class="kv"><span class="k">"Created"</span><time class="v" datetime=value.clone() data-tip=value aria-label=label>{age}</time></div> }
+                })}
+                {owners.into_iter().map(|(owner_kind, name)| view! { <div class="kv"><span class="k">"Owner"</span><span class="v">{format!("{owner_kind}/{name}")}</span></div> }).collect_view()}
+                {status.into_iter().map(|(key, value)| view! { <div class="kv"><span class="k">{camel_label(&key)}</span><span class="v">{value}</span></div> }).collect_view()}
+            </div>
+        </section>
+
+        {(condition_count > 0).then(|| view! {
+            <details class="info-section conditions-section" open>
+                <summary><span>"Conditions"</span><small>{counted(condition_count, "condition", "conditions")}</small></summary>
+                <div class="info-section-body condition-list">
+                    {conds.into_iter().map(|condition| {
+                        let class = condition_class(&condition.type_, &condition.status);
+                        let transition = condition.last_transition.map(|value| {
+                            let age = data::humanize_age(&Some(value.clone()));
+                            let label = format!("{age}; {value}");
+                            view! { <time datetime=value.clone() data-tip=value aria-label=label>{age}</time> }
+                        });
+                        view! { <article class="condition-row">
+                            <div class="condition-head"><strong>{condition.type_}</strong><span class=format!("condition-state {class}")>{condition.status}</span>{transition}</div>
+                            {(!condition.reason.is_empty()).then(|| view! { <div class="condition-reason">{condition.reason}</div> })}
+                            {(!condition.message.is_empty()).then(|| view! { <p>{condition.message}</p> })}
+                            {condition.observed_generation.map(|value| view! { <small>"Observed generation "{value}</small> })}
+                        </article> }
+                    }).collect_view()}
+                </div>
+            </details>
+        })}
+
+        {(status_detail_count > 0).then(|| view! {
+            <details class="info-section">
+                <summary><span>"Status details"</span><small>{counted(status_detail_count, "field", "fields")}</small></summary>
+                <div class="info-section-body">{json_fields(status_value)}</div>
+            </details>
+        })}
+
+        {(spec_count > 0).then(|| view! {
+            <details class="info-section" open=spec_count <= 12>
+                <summary><span>"Specification"</span><small>{counted(spec_count, "field", "fields")}</small></summary>
+                <div class="info-section-body">{json_fields(spec_value)}</div>
+            </details>
+        })}
+
+        {(container_count > 0).then(|| view! {
+            <details class="info-section" open>
+                <summary><span>"Containers"</span><small>{counted(container_count, "image", "images")}</small></summary>
+                <div class="info-section-body kv-cols container-images">{images.into_iter().map(|(name, image)| view! {
+                    <div class="kvc"><span class="kvc-k">{name}</span><span class="kvc-v">{image}</span></div>
+                }).collect_view()}</div>
+            </details>
+        })}
+
+        {(env_count > 0).then(|| {
+            let multiple = envs.len() > 1;
+            view! { <details class="info-section">
+                <summary><span>"Environment"</span><small>{counted(env_count, "variable", "variables")}</small></summary>
+                <div class="info-section-body">{envs.into_iter().map(|container| view! {
+                    {multiple.then(|| view! { <div class="env-container-name">{container.container}</div> })}
+                    <div class="kvlist">{container.entries.into_iter().map(|(key, value)| view! {
+                        <div class="kvl"><span class="kvl-k">{key}</span><span class="kvl-v">{value}</span></div>
+                    }).collect_view()}</div>
+                }).collect_view()}</div>
+            </details> }
+        })}
+
+        {(rule_count > 0).then(|| view! {
+            <details class="info-section" open>
+                <summary><span>"Access rules"</span><small>{counted(rule_count, "rule", "rules")}</small></summary>
+                <div class="info-section-body mobile-rules">{rules.into_iter().map(|rule| view! {
+                    <article><b>{rule.resources}</b><span>{rule.verbs}</span><small>{format!("{} {}", rule.groups, rule.names)}</small></article>
+                }).collect_view()}</div>
+            </details>
+        })}
+
+        {(entry_count > 0).then(|| view! {
+            <details class="info-section" open>
+                <summary><span>"Data"</span><small>{counted(entry_count, "entry", "entries")}</small></summary>
+                <div class="info-section-body">
+                    {secret.then(|| view! { <div class="hint">"Values are hidden. Select a value to reveal it."</div> })}
+                    <div class="data">{entries.into_iter().map(|(key, value, hidden)| {
+                        let revealed = RwSignal::new(false);
+                        view! { <div class="data-row"><div class="data-key">{key}</div>{if hidden {
+                            view! { <button type="button" class="data-val secret" class:revealed=move || revealed.get()
+                                aria-pressed=move || revealed.get().to_string()
+                                aria-label=move || if revealed.get() { "Hide secret value" } else { "Reveal secret value" }
+                                on:click=move |_| revealed.update(|value| *value = !*value)>
+                                {move || if revealed.get() { value.clone() } else { "Hidden value".to_string() }}
+                            </button> }.into_any()
+                        } else {
+                            view! { <pre class="data-val">{value}</pre> }.into_any()
+                        }}</div> }
+                    }).collect_view()}</div>
+                </div>
+            </details>
+        })}
+
+        {(related_event_count > 0).then(|| view! {
+            <details class="info-section events-section" open=warning_count > 0>
+                <summary><span>"Recent events"</span><small>{
+                    let events = counted(related_event_count, "event", "events");
+                    if warning_count > 0 { format!("{events} · {}", counted(warning_count, "warning", "warnings")) } else { events }
+                }</small></summary>
+                <div class="info-section-body events">{detail.events.into_iter().map(|event| {
+                    let age = event.age.map(|value| {
+                        let label = data::humanize_age(&Some(value.clone()));
+                        let accessible_label = format!("{label}; {value}");
+                        view! { <time datetime=value.clone() data-tip=value aria-label=accessible_label>{label}</time> }
+                    });
+                    view! { <article class=format!("event ev-{}", event.type_.to_lowercase())>
+                        <div class="event-head"><strong class="ev-reason">{event.reason}</strong><span class="event-meta">{age}{(event.count > 1).then(|| view! { <span>{format!("×{}", event.count)}</span> })}</span></div>
+                        <p class="ev-msg">{event.message}</p>
+                    </article> }
+                }).collect_view()}</div>
+            </details>
+        })}
+
+        {(additional_count > 0).then(|| view! {
+            <details class="info-section">
+                <summary><span>"Additional fields"</span><small>{counted(additional_count, "field", "fields")}</small></summary>
+                <div class="info-section-body">{json_fields_except(additional_value, &[
+                    "apiVersion", "kind", "metadata", "spec", "status", "data", "binaryData", "stringData",
+                ])}</div>
+            </details>
+        })}
+
+        <details class="info-section metadata-section">
+            <summary><span>"Resource metadata"</span><small>{counted(metadata_count, "field", "fields")}</small></summary>
+            <div class="info-section-body">
+                <div class="kv-grid metadata-grid">
+                    {api_version.map(|value| view! { <div class="kv"><span class="k">"API version"</span><span class="v">{value}</span></div> })}
+                    {uid.map(|value| view! { <div class="kv"><span class="k">"UID"</span><span class="v font-mono">{value}</span></div> })}
+                    {generation.map(|value| view! { <div class="kv"><span class="k">"Generation"</span><span class="v">{value}</span></div> })}
+                    {resource_version.map(|value| view! { <div class="kv"><span class="k">"Resource version"</span><span class="v font-mono">{value}</span></div> })}
+                </div>
+                {(metadata_detail_count > 0).then(|| view! { <h5>"Additional metadata"</h5>{json_fields_except(metadata_value, &[
+                    "name", "namespace", "creationTimestamp", "uid", "generation", "resourceVersion", "labels", "annotations",
+                ])} })}
+                {(label_count > 0).then(|| view! { <h5>"Labels"</h5><div class="kvlist">{labels.into_iter().map(|(key, value)| view! {
+                    <div class="kvl"><span class="kvl-k">{key}</span><span class="kvl-v">{value}</span></div>
+                }).collect_view()}</div> })}
+                {(annotation_count > 0).then(|| view! { <h5>"Annotations"</h5><div class="kvlist">{annotations.into_iter().map(|(key, value)| view! {
+                    <div class="kvl"><span class="kvl-k">{key}</span><span class="kvl-v">{value}</span></div>
+                }).collect_view()}</div> })}
+            </div>
+        </details>
     </section> }
 }
 

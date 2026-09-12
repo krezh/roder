@@ -1,4 +1,4 @@
-//! Resource detail: a right-docked drawer holding actions, Info / YAML / Logs tabs,
+//! Resource detail: a right-docked drawer holding actions, Describe / YAML / Logs tabs,
 //! and the pod listing for pod-owning workloads.
 
 pub(crate) mod info;
@@ -34,7 +34,7 @@ use crate::app::jobs::CronJobJobs;
 #[component]
 pub(crate) fn DetailDrawer() -> impl IntoView {
     let detail = expect_context::<RwSignal<Option<DetailTarget>>>();
-    let width = RwSignal::new(560i32);
+    let width_percent = RwSignal::new(40.0);
     let dragging = RwSignal::new(false);
     let (snapshot, closing, do_close) = crate::app::overlays::use_option_overlay(detail);
 
@@ -50,7 +50,7 @@ pub(crate) fn DetailDrawer() -> impl IntoView {
                 .and_then(|v| v.as_f64())
                 .unwrap_or(1280.0);
             let w = (vw - e.client_x() as f64).clamp(360.0, vw * 0.9);
-            width.set(w as i32);
+            width_percent.set(w / vw * 100.0);
             e.prevent_default();
         });
         let up = window_event_listener(ev::mouseup, move |_| {
@@ -65,13 +65,13 @@ pub(crate) fn DetailDrawer() -> impl IntoView {
     }
 
     view! {
-        // Always mounted; `.open` slides it in. `width` drives the style in place so
-        // resizing never rebuilds the detail (and re-fetches).
+        // Always mounted; `.open` slides it in. Width updates in place so resizing
+        // never rebuilds the detail (and re-fetches).
         <div class="detailbar"
             class:open=move || snapshot.get().is_some()
             class:closing=move || closing.get()
             class:dragging=move || dragging.get()
-            style=move || format!("width:{}px", width.get())>
+            style=move || format!("width:{:.2}%", width_percent.get())>
             <div class="detailbar-resize"
                 on:mousedown=move |e: leptos::ev::MouseEvent| { e.prevent_default(); dragging.set(true); }></div>
             <div class="detailbar-head">
@@ -85,7 +85,7 @@ pub(crate) fn DetailDrawer() -> impl IntoView {
     }
 }
 
-/// Inline detail for an expanded row: actions, a describe-style Info view (default),
+/// Inline detail for an expanded row: actions, a Describe view (default),
 /// YAML, and pod logs — selectable via tabs.
 ///
 /// `on_delete` needs `Send + Sync` (unlike similar close-callback params
@@ -292,7 +292,7 @@ pub(crate) fn RowDetail(
             </div>
 
             <div class="rd-tabs">
-                <button class="rd-tab" class:active=move || tab.get() == Tab::Info on:click=move |_| tab.set(Tab::Info)>"Info"</button>
+                <button class="rd-tab" class:active=move || tab.get() == Tab::Info on:click=move |_| tab.set(Tab::Info)>"Describe"</button>
                 <button class="rd-tab" class:active=move || tab.get() == Tab::Yaml on:click=move |_| tab.set(Tab::Yaml)>"YAML"</button>
                 {is_pod.then(|| view! {
                     <button class="rd-tab" class:active=move || tab.get() == Tab::Metrics on:click=move |_| tab.set(Tab::Metrics)>"Metrics"</button>

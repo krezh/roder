@@ -200,7 +200,10 @@ impl Backend {
         obj.metadata.managed_fields = None; // declutter
         let yaml = serde_yaml::to_string(&obj).map_err(api_err)?;
         let object = serde_json::to_value(&obj).unwrap_or_default();
-        let events = self.events_for(namespace, name).await.unwrap_or_default();
+        let events = self
+            .events_for(namespace, name, obj.metadata.uid.as_deref())
+            .await
+            .unwrap_or_default();
 
         Ok(ObjectDetail {
             name: name.to_string(),
@@ -215,23 +218,41 @@ impl Backend {
         &self,
         namespace: Option<&str>,
         name: &str,
+        uid: Option<&str>,
     ) -> Result<Vec<ObjectEvent>, K8sError> {
         let client = self.client();
         let api: Api<Event> = match namespace {
             Some(ns) => Api::namespaced(client, ns),
             None => Api::all(client),
         };
-        let lp = ListParams::default().fields(&format!("involvedObject.name={name}"));
+        let selector = uid
+            .map(|uid| format!("involvedObject.uid={uid}"))
+            .unwrap_or_else(|| format!("involvedObject.name={name}"));
+        let lp = ListParams::default().fields(&selector);
         let list = api.list(&lp).await.map_err(api_err)?;
         let mut events: Vec<ObjectEvent> = list
             .items
             .into_iter()
-            .map(|e| ObjectEvent {
-                type_: e.type_.unwrap_or_default(),
-                reason: e.reason.unwrap_or_default(),
-                message: e.message.unwrap_or_default(),
-                age: e.last_timestamp.as_ref().and_then(ts_string),
-                count: e.count.unwrap_or(0),
+            .map(|e| {
+                let age = e
+                    .series
+                    .as_ref()
+                    .and_then(|series| ts_string(&series.last_observed_time))
+                    .or_else(|| e.event_time.as_ref().and_then(ts_string))
+                    .or_else(|| e.last_timestamp.as_ref().and_then(ts_string));
+                let count = e
+                    .series
+                    .as_ref()
+                    .and_then(|series| series.count)
+                    .or(e.count)
+                    .unwrap_or(0);
+                ObjectEvent {
+                    type_: e.type_.unwrap_or_default(),
+                    reason: e.reason.unwrap_or_default(),
+                    message: e.message.unwrap_or_default(),
+                    age,
+                    count,
+                }
             })
             .collect();
         events.sort_by(|a, b| b.age.cmp(&a.age));

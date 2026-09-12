@@ -238,27 +238,46 @@
   }
 }
 .events .event {
-  display: flex;
-  gap: 0.5rem;
-  padding: 0.2rem 0;
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.65rem 0;
   border-bottom: 1px solid var(--border);
+  &:first-child { padding-top: 0; }
+  &:last-child { padding-bottom: 0; border-bottom: 0; }
   .ev-reason {
     color: var(--accent);
-    flex: 0 0 auto;
   }
   .ev-msg {
+    margin: 0;
     color: var(--muted);
+    line-height: 1.5;
   }
   &.ev-warning .ev-reason {
     color: var(--warn);
   }
+}
+.events .event-head {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.events .event-meta {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.5rem;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---- detail tabs + info view ---- */
 .event-detail-summary {
   margin: 0.8rem 0 1rem;
   border: 1px solid var(--border);
-  border-left: 3px solid var(--warn);
+  border-top: 2px solid var(--warn);
   background: color-mix(in srgb, var(--warn) 3%, var(--panel));
 }
 .event-detail-head {
@@ -623,7 +642,7 @@
   line-height: 1.45;
 }
 .info {
-  padding: 0.6rem 0.9rem 1rem;
+  padding: 0.75rem 0.9rem 1.25rem;
   h4 {
     margin: 0.9rem 0 0.4rem;
     color: color-mix(in srgb, var(--accent) 65%, var(--fg));
@@ -640,6 +659,178 @@
       background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 35%, var(--border)), transparent);
     }
   }
+}
+.info-overview {
+  margin-bottom: 0.8rem;
+}
+.info-overview-heading {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding: 0.25rem 0 0.55rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
+
+  h3 {
+    margin: 0;
+    font-size: 1.15rem;
+    font-weight: 650;
+    letter-spacing: -0.015em;
+  }
+  code {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+.kv-grid.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+
+  .kv {
+    display: grid;
+    align-content: start;
+    gap: 0.1rem;
+    padding: 0.5rem 0.6rem;
+
+    &:nth-child(odd) { padding-left: 0; }
+    &:nth-child(even) { border-left: 1px solid var(--border); }
+  }
+  .k {
+    min-width: 0;
+    color: color-mix(in srgb, var(--accent) 36%, var(--muted));
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .v { font-weight: 520; }
+  time.v { text-decoration: none; }
+}
+.info-section {
+  margin-top: 0.55rem;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel-2) 34%, transparent);
+
+  > summary {
+    display: grid;
+    grid-template-columns: 0.65rem minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.65rem;
+    min-height: 38px;
+    padding: 0.45rem 0.65rem;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+
+    &::-webkit-details-marker { display: none; }
+    &::before {
+      content: '';
+      width: 0.38rem;
+      height: 0.38rem;
+      border-right: 1px solid var(--muted);
+      border-bottom: 1px solid var(--muted);
+      transform: rotate(-45deg);
+      transition: transform 0.14s ease;
+    }
+    &:hover { background: color-mix(in srgb, var(--accent) 4%, transparent); }
+    &:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+    > span {
+      font-size: 1rem;
+      font-weight: 620;
+    }
+    small {
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      font-variant-numeric: tabular-nums;
+      font-weight: 400;
+      text-align: right;
+    }
+  }
+  &[open] > summary {
+    background: color-mix(in srgb, var(--accent) 4%, transparent);
+  }
+  &[open] > summary::before { transform: rotate(45deg) translate(-0.1rem, -0.1rem); }
+}
+.info-section-body {
+  padding: 0.6rem 0.7rem 0.75rem;
+  border-top: 1px solid var(--border);
+
+  h5 {
+    margin: 0.9rem 0 0.4rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+}
+.info-table-scroll { overflow-x: auto; }
+.condition-list { padding-block: 0; }
+.condition-row {
+  display: grid;
+  gap: 0.22rem;
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--border);
+
+  &:last-child { border-bottom: 0; }
+  p {
+    margin: 0;
+    color: var(--muted);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+  > small {
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+  }
+}
+.condition-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5rem;
+
+  strong {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  time {
+    margin-left: auto;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    white-space: nowrap;
+  }
+}
+.condition-state {
+  flex: 0 0 auto;
+  padding: 0.05rem 0.35rem;
+  border: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 650;
+
+  &.ok { border-color: color-mix(in srgb, var(--ok) 44%, var(--border)); color: var(--ok); }
+  &.error { border-color: color-mix(in srgb, var(--error) 44%, var(--border)); color: var(--error); }
+  &.pending { border-color: color-mix(in srgb, var(--pending) 44%, var(--border)); color: var(--pending); }
+  &.neutral { color: var(--muted); }
+}
+.condition-reason {
+  color: color-mix(in srgb, var(--fg) 78%, var(--muted));
+  font-size: 0.92rem;
+  overflow-wrap: anywhere;
+}
+.metadata-grid {
+  margin: -0.15rem 0 0.4rem;
+
+  .kv .k { min-width: 9rem; }
 }
 /* One key/value pair per row (single column) — a long value can't overlap a
    neighbouring column because there isn't one. Value sits after the key and
@@ -697,12 +888,141 @@
 }
 .kvc-k {
   color: color-mix(in srgb, var(--accent) 35%, var(--muted));
-  font-size: 0.72rem;
+  font-size: 0.85rem;
 }
 .kvc-v {
   min-width: 0;
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
+}
+.json-fields {
+  display: grid;
+  min-width: 0;
+}
+.json-field-row {
+  display: grid;
+  grid-template-columns: minmax(8.5rem, 34%) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: baseline;
+  padding: 0.42rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.json-field-key {
+  min-width: 0;
+  color: color-mix(in srgb, var(--accent) 45%, var(--muted));
+  font-size: 0.85rem;
+  font-weight: 560;
+  overflow-wrap: anywhere;
+}
+.json-field-value {
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.json-field-group,
+.json-field-collection {
+  min-width: 0;
+  margin-top: 0.65rem;
+
+  &:first-child { margin-top: 0; }
+}
+.json-field-group > h5,
+.json-field-group-title h5 {
+  margin: 0;
+  color: color-mix(in srgb, var(--accent) 70%, var(--fg));
+  font-size: 0.92rem;
+  font-weight: 620;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.json-field-group > .json-fields {
+  margin-top: 0.28rem;
+  padding-left: 0.65rem;
+  border-left: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border));
+}
+.json-field-group-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.38rem;
+
+  small {
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+  }
+}
+.json-field-items {
+  display: grid;
+  gap: 0.5rem;
+}
+.json-field-item {
+  min-width: 0;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel-2) 58%, transparent);
+
+  > summary {
+    display: grid;
+    grid-template-columns: 0.5rem minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.45rem 0.55rem;
+    cursor: pointer;
+    list-style: none;
+
+    &::-webkit-details-marker { display: none; }
+    &::before {
+      content: '';
+      width: 0.3rem;
+      height: 0.3rem;
+      border-right: 1px solid var(--muted);
+      border-bottom: 1px solid var(--muted);
+      transform: rotate(-45deg);
+    }
+    strong {
+      min-width: 0;
+      color: var(--fg);
+      font-size: 0.9rem;
+      font-weight: 650;
+      overflow-wrap: anywhere;
+    }
+    small {
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      font-weight: 400;
+      white-space: nowrap;
+    }
+  }
+  &[open] > summary { border-bottom: 1px solid var(--border); }
+  &[open] > summary::before { transform: rotate(45deg) translate(-0.08rem, -0.08rem); }
+  > .json-fields { padding: 0.12rem 0.55rem 0.45rem; }
+
+  .json-field-item {
+    border-width: 1px 0 0;
+    background: transparent;
+  }
+}
+.json-field-sequence {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.42rem;
+
+  code {
+    color: var(--fg);
+    font-family: var(--font-mono);
+    font-size: 0.88rem;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+
+    &:not(:last-child) {
+      padding-right: 0.42rem;
+      border-right: 1px solid var(--border);
+    }
+  }
 }
 table.cond {
   width: 100%;
@@ -894,8 +1214,8 @@ table.cond {
 // is exactly as safe against overflow as truncating, since a wrapped cell
 // never exceeds its column's width.
 //
-// 30rem is the shared floor, chosen to sit under the default 560px drawer's
-// content width once `.info`/`.talos-section`/`.talos-section-body`
+// 30rem is the shared floor, chosen to fit inside the detail drawer once
+// `.info`/`.talos-section`/`.talos-section-body`
 // padding and borders are subtracted (verified in-browser, not by hand —
 // the app's root font-size is 13px, not the 16px a plain rem-to-px
 // conversion assumes). Below this floor the table can't shrink further, so
@@ -1001,6 +1321,29 @@ table.cond {
     &:nth-child(n + 3) { border-bottom: 0; }
   }
   .talos-section-meta { white-space: normal; text-align: right; }
+  .info-section {
+    border-color: var(--mobile-hairline, var(--border));
+    border-radius: 11px;
+    background: var(--mobile-surface, color-mix(in srgb, var(--panel-2) 34%, transparent));
+    overflow: hidden;
+
+    > summary {
+      min-height: 48px;
+      padding: 0.6rem 0.7rem;
+    }
+  }
+  .info-section-body { padding: 0.7rem; }
+  .json-field-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.12rem;
+    padding-block: 0.5rem;
+  }
+  .json-field-group > .json-fields { padding-left: 0.55rem; }
+  .json-field-item > .json-fields { padding-inline: 0.6rem; }
+  .condition-head { flex-wrap: wrap; }
+  .condition-head time { margin-left: auto; }
+  .events .event-head { align-items: flex-start; }
+  .events .event-meta { padding-top: 0.1rem; }
 }
 .talos-config-diff {
   display: grid;
@@ -1024,7 +1367,7 @@ table.cond {
 }
 table.rules {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 0.78rem;
+  font-size: 0.88rem;
   .rule-verbs {
     color: var(--accent);
   }
@@ -1046,7 +1389,7 @@ table.rules {
   flex-wrap: wrap;
   column-gap: 0.6rem;
   align-items: baseline;
-  font-size: 0.78rem;
+  font-size: 0.88rem;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
 }
 .kvl-k {
@@ -1059,7 +1402,7 @@ table.rules {
   overflow-wrap: break-word;
 }
 .env-container-name {
-  font-size: 0.72rem;
+  font-size: 0.85rem;
   font-weight: 700;
   color: var(--accent);
   text-transform: uppercase;
@@ -1079,11 +1422,13 @@ table.rules {
 .data-row {
   .data-key {
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
-    font-size: 0.8rem;
+    font-size: 0.88rem;
     color: var(--accent);
     margin-bottom: 0.2rem;
   }
   .data-val {
+    display: block;
+    width: 100%;
     margin: 0;
     background: var(--bg);
     border: 1px solid var(--border);
@@ -1096,14 +1441,15 @@ table.rules {
     max-height: 240px;
     overflow: auto;
     &.secret {
-      filter: blur(5px);
+      color: var(--muted);
+      text-align: left;
       cursor: pointer;
-      user-select: none;
-      transition: filter 0.12s ease;
+      transition: color 0.12s ease, border-color 0.12s ease;
+      &:hover,
+      &:focus-visible { border-color: var(--accent); }
     }
     &.secret.revealed {
-      filter: none;
-      user-select: text;
+      color: var(--fg);
     }
   }
 }

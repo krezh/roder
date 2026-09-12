@@ -42,6 +42,40 @@ pub(crate) fn camel_label(s: &str) -> String {
     out
 }
 
+pub(crate) fn counted(count: usize, singular: &str, plural: &str) -> String {
+    format!("{count} {}", if count == 1 { singular } else { plural })
+}
+
+pub(crate) fn condition_class(condition_type: &str, status: &str) -> &'static str {
+    let condition_type = condition_type.to_ascii_lowercase();
+    let negative = ["degraded", "failed", "error", "stalled", "unhealthy"]
+        .iter()
+        .any(|value| condition_type.contains(value));
+    let positive = [
+        "ready",
+        "available",
+        "healthy",
+        "succeeded",
+        "established",
+        "accepted",
+        "programmed",
+        "resolved",
+        "valid",
+    ]
+    .iter()
+    .any(|value| condition_type.contains(value));
+    let changing = ["reconciling", "progressing", "issuing"]
+        .iter()
+        .any(|value| condition_type.contains(value));
+
+    match (status, negative, positive, changing) {
+        ("True", true, _, _) | ("False", _, true, _) => "error",
+        ("False", true, _, _) | ("True", _, true, _) => "ok",
+        ("True", _, _, true) | ("Unknown", _, _, _) => "pending",
+        _ => "neutral",
+    }
+}
+
 /// Extract a Talos version from a node's `osImage` ("Talos (v1.7.6)" → "v1.7.6").
 pub(crate) fn talos_version(os_image: &str) -> Option<String> {
     if let (Some(a), Some(b)) = (os_image.find('('), os_image.find(')')) {
@@ -89,5 +123,20 @@ pub(crate) fn fmt_mem(used: Option<f64>, total: Option<f64>) -> String {
         (Some(u), Some(t)) => format!("{:.1} / {:.1} GiB", g(u), g(t)),
         (None, Some(t)) => format!("{:.1} GiB", g(t)),
         _ => "—".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn condition_class_accounts_for_condition_polarity() {
+        assert_eq!(condition_class("Ready", "True"), "ok");
+        assert_eq!(condition_class("Ready", "False"), "error");
+        assert_eq!(condition_class("Degraded", "True"), "error");
+        assert_eq!(condition_class("Degraded", "False"), "ok");
+        assert_eq!(condition_class("Reconciling", "True"), "pending");
+        assert_eq!(condition_class("CustomState", "False"), "neutral");
     }
 }

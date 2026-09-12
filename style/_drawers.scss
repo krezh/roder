@@ -83,7 +83,7 @@
   overflow: hidden;
 }
 /* The detail fills the drawer height. Each tab owns its own scroll:
-   - Info scrolls inside .info
+   - Describe scrolls inside .info
    - YAML fills via .yaml-pane (flex:1)
    - Logs fill via .logs (flex:1) */
 .detailbar .rd {

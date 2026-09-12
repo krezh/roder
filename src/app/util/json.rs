@@ -1,5 +1,5 @@
-//! JSON extraction helpers for the describe-style Info view: scalars, labels,
-//! conditions, owner refs, RBAC rules, and ConfigMap/Secret data.
+//! JSON extraction helpers for the Describe view: fields, conditions, owner
+//! refs, RBAC rules, and ConfigMap/Secret data.
 
 use serde_json::Value;
 
@@ -8,6 +8,8 @@ pub(crate) struct Cond {
     pub(crate) status: String,
     pub(crate) reason: String,
     pub(crate) message: String,
+    pub(crate) last_transition: Option<String>,
+    pub(crate) observed_generation: Option<String>,
 }
 
 pub(crate) fn conditions(v: &Value) -> Vec<Cond> {
@@ -37,6 +39,15 @@ pub(crate) fn conditions(v: &Value) -> Vec<Cond> {
                         .and_then(|x| x.as_str())
                         .unwrap_or("")
                         .to_string(),
+                    last_transition: c
+                        .get("lastTransitionTime")
+                        .and_then(|x| x.as_str())
+                        .map(str::to_string),
+                    observed_generation: c.get("observedGeneration").and_then(|x| match x {
+                        Value::Number(n) => Some(n.to_string()),
+                        Value::String(s) => Some(s.clone()),
+                        _ => None,
+                    }),
                 })
                 .collect()
         })
@@ -46,6 +57,83 @@ pub(crate) fn conditions(v: &Value) -> Vec<Cond> {
 /// Scalar fields under `status` (excluding conditions) as key/value pairs.
 pub(crate) fn status_scalars(v: &Value) -> Vec<(String, String)> {
     section_scalars(v, "status")
+}
+
+pub(crate) fn section_fields(v: &Value, section: &str) -> Vec<(String, String)> {
+    v.get(section).map(flatten_fields).unwrap_or_default()
+}
+
+pub(crate) fn section_fields_except(
+    v: &Value,
+    section: &str,
+    excluded: &[&str],
+) -> Vec<(String, String)> {
+    v.get(section)
+        .map(|value| flatten_fields_except(value, excluded))
+        .unwrap_or_default()
+}
+
+pub(crate) fn top_level_fields_except(v: &Value, excluded: &[&str]) -> Vec<(String, String)> {
+    flatten_fields_except(v, excluded)
+}
+
+fn flatten_fields(v: &Value) -> Vec<(String, String)> {
+    let mut fields = Vec::new();
+    flatten_value(v, "", &mut fields);
+    fields
+}
+
+fn flatten_fields_except(v: &Value, excluded: &[&str]) -> Vec<(String, String)> {
+    let mut fields = Vec::new();
+    if let Some(object) = v.as_object() {
+        for (key, value) in object {
+            if !excluded.contains(&key.as_str()) {
+                flatten_value(value, key, &mut fields);
+            }
+        }
+    } else {
+        flatten_value(v, "", &mut fields);
+    }
+    fields
+}
+
+fn flatten_value(v: &Value, path: &str, fields: &mut Vec<(String, String)>) {
+    match v {
+        Value::Object(object) if object.is_empty() => {
+            fields.push((path.to_string(), "(empty object)".to_string()));
+        }
+        Value::Object(object) => {
+            for (key, value) in object {
+                let child = if path.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{path}.{key}")
+                };
+                flatten_value(value, &child, fields);
+            }
+        }
+        Value::Array(values) if values.is_empty() => {
+            fields.push((path.to_string(), "(empty list)".to_string()));
+        }
+        Value::Array(values) => {
+            for (index, value) in values.iter().enumerate() {
+                flatten_value(value, &format!("{path}[{index}]"), fields);
+            }
+        }
+        Value::String(value) => {
+            fields.push((
+                path.to_string(),
+                if value.is_empty() {
+                    "(empty string)".to_string()
+                } else {
+                    value.clone()
+                },
+            ));
+        }
+        Value::Number(value) => fields.push((path.to_string(), value.to_string())),
+        Value::Bool(value) => fields.push((path.to_string(), value.to_string())),
+        Value::Null => fields.push((path.to_string(), "null".to_string())),
+    }
 }
 
 /// Top-level scalar fields of a section (`spec`/`status`) as label/value pairs —
@@ -72,7 +160,7 @@ pub(crate) fn section_scalars(v: &Value, section: &str) -> Vec<(String, String)>
         .unwrap_or_default()
 }
 
-/// `(Kind, name)` owner references — the resource's controllers ("Controlled By").
+/// `(Kind, name)` owner references attached to the resource.
 pub(crate) fn owner_refs(v: &Value) -> Vec<(String, String)> {
     v.get("metadata")
         .and_then(|m| m.get("ownerReferences"))
@@ -338,4 +426,77 @@ pub(crate) fn selector_from(o: &Value) -> String {
                 .join(",")
         })
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn conditions_include_transition_context() {
+        let result = conditions(&json!({
+            "status": {
+                "conditions": [{
+                    "type": "Ready",
+                    "status": "True",
+                    "reason": "Available",
+                    "message": "Resource is ready",
+                    "lastTransitionTime": "2026-09-01T10:30:00Z",
+                    "observedGeneration": 7
+                }]
+            }
+        }));
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].last_transition.as_deref(),
+            Some("2026-09-01T10:30:00Z")
+        );
+        assert_eq!(result[0].observed_generation.as_deref(), Some("7"));
+    }
+
+    #[test]
+    fn section_fields_include_nested_objects_arrays_and_empty_values() {
+        let result = section_fields(
+            &json!({
+                "spec": {
+                    "selector": {"matchLabels": {"app": "api"}},
+                    "containers": [{"ports": [8080], "args": []}],
+                    "securityContext": {},
+                    "serviceAccountName": ""
+                }
+            }),
+            "spec",
+        );
+
+        assert_eq!(
+            result,
+            vec![
+                ("containers[0].args".into(), "(empty list)".into()),
+                ("containers[0].ports[0]".into(), "8080".into()),
+                ("securityContext".into(), "(empty object)".into()),
+                ("selector.matchLabels.app".into(), "api".into()),
+                ("serviceAccountName".into(), "(empty string)".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn field_exclusions_only_apply_to_the_selected_object_level() {
+        let object = json!({
+            "apiVersion": "v1",
+            "metadata": {"name": "api", "labels": {"app": "api"}},
+            "spec": {"apiVersion": "nested"}
+        });
+
+        assert_eq!(
+            top_level_fields_except(&object, &["apiVersion", "metadata"]),
+            vec![("spec.apiVersion".into(), "nested".into())]
+        );
+        assert_eq!(
+            section_fields_except(&object, "metadata", &["name"]),
+            vec![("labels.app".into(), "api".into())]
+        );
+    }
 }

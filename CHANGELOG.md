@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.1.49](https://github.com/krezh/roder/compare/0.1.48...0.1.49) (2026-09-12)
+
+
+### Features
+
+* **alerts:** configure silence matchers ([342efbe](https://github.com/krezh/roder/commit/342efbeaf8cee8aa6d59a5295e26aeda4ada53b8))
+
+
+### Bug Fixes
+
+* **cargo:** update rust crate reqwest (0.13.4 ➔ 0.13.5) ([#229](https://github.com/krezh/roder/issues/229)) ([ecff70c](https://github.com/krezh/roder/commit/ecff70c3dd6e1268bfea692b71df41169217f4d0))
+* **cargo:** update rust crate rustls (0.23.43 ➔ 0.23.44) ([#226](https://github.com/krezh/roder/issues/226)) ([b43ed6b](https://github.com/krezh/roder/commit/b43ed6bfd79df3e800c3693924dab4319be27a71))
+* **cargo:** update rustwright digest (3bf0f19 ➔ 9347986) ([#223](https://github.com/krezh/roder/issues/223)) ([761f545](https://github.com/krezh/roder/commit/761f54532a7b52501ceabb0a432513da15ba97c1))
+* **cargo:** update rustwright digest (9347986 ➔ a5edad0) ([#224](https://github.com/krezh/roder/issues/224)) ([ddb1eb6](https://github.com/krezh/roder/commit/ddb1eb6c95948c8aa9a1f6e8d934a1e03f180d23))
+* **cargo:** update rustwright digest (a5edad0 ➔ bcd8b68) ([#234](https://github.com/krezh/roder/issues/234)) ([53561aa](https://github.com/krezh/roder/commit/53561aa3b5bd3bd21463e25a26eab426834fa7f5))
+* **cargo:** update rustwright digest (bcd8b68 ➔ dfb481b) ([#237](https://github.com/krezh/roder/issues/237)) ([f028e12](https://github.com/krezh/roder/commit/f028e12f489cfc2dc347128b1de50137b879f37d))
+* **cargo:** update wasm-bindgen ([#228](https://github.com/krezh/roder/issues/228)) ([05115b9](https://github.com/krezh/roder/commit/05115b94e2d9c1fda25daf61ed702c92567a6252))
+* **container:** update image ghcr.io/rust-lang/rust (1.98.0 ➔ 1.98.1) ([#227](https://github.com/krezh/roder/issues/227)) ([9daa2a4](https://github.com/krezh/roder/commit/9daa2a449a67958ea6b3df6b44b502bb7cdc4c53))
+* **container:** update image ghcr.io/rust-lang/rust (620dbcd ➔ bf5a9aa) ([#232](https://github.com/krezh/roder/issues/232)) ([ac21ece](https://github.com/krezh/roder/commit/ac21ece7b8f71b6ec95b142cbaf206db5f7d7253))
+* **dashboard:** unify resource health rollups ([6a99cd3](https://github.com/krezh/roder/commit/6a99cd3b9787ee2e8d7e67057f1e967dd3231007))
+* **status:** harden resource health semantics ([f480868](https://github.com/krezh/roder/commit/f480868b2e62408abfc0b9a04c46d4106f8faf60))
+
+
+### Styles
+
+* **app:** refine scrollbars ([8d3d81a](https://github.com/krezh/roder/commit/8d3d81a919ddd91c598b92c91a077e6848503695))
+
+
+### Miscellaneous Chores
+
+* **cargo:** lock file maintenance cargo.lock ([#221](https://github.com/krezh/roder/issues/221)) ([c1fcd19](https://github.com/krezh/roder/commit/c1fcd19d89a8945d3f4ac6f2a73b790aab965e78))
+* **cargo:** lock file maintenance cargo.lock ([#225](https://github.com/krezh/roder/issues/225)) ([6183153](https://github.com/krezh/roder/commit/6183153e45f70ce5a334bdba729260ad0a0542cd))
+* **cargo:** lock file maintenance cargo.lock ([#230](https://github.com/krezh/roder/issues/230)) ([8008768](https://github.com/krezh/roder/commit/800876829e8f9cebf99c5c8d8fa07efb0874b7b8))
+* **cargo:** lock file maintenance cargo.lock ([#231](https://github.com/krezh/roder/issues/231)) ([f69628c](https://github.com/krezh/roder/commit/f69628ceddb31bf3c59e0d732ce32f36aa38f330))
+* **cargo:** lock file maintenance cargo.lock ([#233](https://github.com/krezh/roder/issues/233)) ([30d9813](https://github.com/krezh/roder/commit/30d981307e8a23896e2a62c08abaa7e1bf50cd25))
+* **cargo:** lock file maintenance cargo.lock ([#236](https://github.com/krezh/roder/issues/236)) ([d1c57a6](https://github.com/krezh/roder/commit/d1c57a6276390c38810a691e6d72a6711f952b98))
+* **cargo:** lock file maintenance cargo.lock ([#238](https://github.com/krezh/roder/issues/238)) ([bc19d52](https://github.com/krezh/roder/commit/bc19d52d38116f981d4247394ae17812ee6696cb))
+
 ## [0.1.48](https://github.com/krezh/roder/compare/0.1.47...0.1.48) (2026-09-04)
 
 

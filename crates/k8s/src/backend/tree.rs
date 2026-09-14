@@ -74,6 +74,7 @@ enum RelationshipProvider {
     OwnedChildren,
     WorkloadPods,
     ServiceTargets,
+    EndpointSliceService,
     CnpgCluster,
     CnpgClusterReference,
     CnpgScheduledBackup,
@@ -175,6 +176,12 @@ const RELATIONSHIP_PROVIDERS: &[ProviderRegistration] = &[
         version: Some("v1"),
         kind: "Service",
         provider: RelationshipProvider::ServiceTargets,
+    },
+    ProviderRegistration {
+        group: "discovery.k8s.io",
+        version: Some("v1"),
+        kind: "EndpointSlice",
+        provider: RelationshipProvider::EndpointSliceService,
     },
     ProviderRegistration {
         group: "postgresql.cnpg.io",
@@ -510,6 +517,21 @@ impl Backend {
                         self.service_relationships(resource, data, semaphore).await;
                     children.append(&mut refs);
                     errors.append(&mut provider_errors);
+                }
+                RelationshipProvider::EndpointSliceService => {
+                    if let Some(service) = endpoint_slice_service_name(data) {
+                        let mut child = self.resolve_resource(
+                            String::new(),
+                            "v1".into(),
+                            "Service".into(),
+                            service.into(),
+                            resource.namespace.clone(),
+                            Some(ResourceTreeRelation::ReferencedResource),
+                        );
+                        // Expanding the Service would immediately link back to this slice.
+                        child.expandable = false;
+                        children.push(child);
+                    }
                 }
                 RelationshipProvider::CnpgCluster => {
                     let (mut refs, mut provider_errors) =
@@ -1241,6 +1263,12 @@ fn service_selector(data: &Value) -> Option<String> {
     (!requirements.is_empty()).then(|| requirements.join(","))
 }
 
+fn endpoint_slice_service_name(data: &Value) -> Option<&str> {
+    data.pointer("/metadata/labels/kubernetes.io~1service-name")
+        .and_then(Value::as_str)
+        .filter(|name| !name.is_empty())
+}
+
 fn deduplicate_and_sort(resources: &mut Vec<ResourceRef>) {
     resources.sort_by(|left, right| {
         left.relation
@@ -1299,6 +1327,41 @@ mod tests {
             Some("app=api,tier=web".into())
         );
         assert_eq!(service_selector(&json!({"spec": {"selector": {}}})), None);
+    }
+
+    #[test]
+    fn endpoint_slice_registry_and_label_resolve_the_service() {
+        let mut resource = ResourceRef {
+            group: "discovery.k8s.io".into(),
+            version: "v1".into(),
+            kind: "EndpointSlice".into(),
+            name: "api-abc12".into(),
+            namespace: Some("app".into()),
+            key: None,
+            category: Some(Category::Network),
+            relation: None,
+            expandable: true,
+        };
+        assert_eq!(
+            relationship_providers(&resource).collect::<Vec<_>>(),
+            [RelationshipProvider::EndpointSliceService]
+        );
+        resource.version = "v1beta1".into();
+        assert_eq!(relationship_providers(&resource).count(), 0);
+
+        assert_eq!(
+            endpoint_slice_service_name(&json!({
+                "metadata": {"labels": {"kubernetes.io/service-name": "api"}}
+            })),
+            Some("api")
+        );
+        assert_eq!(endpoint_slice_service_name(&json!({})), None);
+        assert_eq!(
+            endpoint_slice_service_name(&json!({
+                "metadata": {"labels": {"kubernetes.io/service-name": ""}}
+            })),
+            None
+        );
     }
 
     #[test]

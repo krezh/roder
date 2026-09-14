@@ -1,12 +1,80 @@
 use std::collections::{BTreeSet, HashMap};
 
 use leptos::prelude::*;
-use roder_core::{MetricsPoint, ObjectDetail, ResourceRow, TalosConfigDiff, TalosNode};
+use roder_core::{
+    ActionPermissions, MetricsPoint, ObjectDetail, ResourceAction, ResourceRow, TalosConfigDiff,
+    TalosNode,
+};
 
 use crate::app::hooks::use_sse_subscription;
 use crate::app::state::{Catalog, DetailTarget};
 use crate::app::util::json::json_str;
 use crate::data;
+
+#[derive(Clone, Default)]
+pub(crate) struct SelectionPermissions {
+    selected: usize,
+    permitted: HashMap<String, usize>,
+}
+
+impl SelectionPermissions {
+    pub(crate) fn allows_all(&self, action: ResourceAction) -> bool {
+        self.selected > 0 && self.permitted.get(action.api_name()).copied() == Some(self.selected)
+    }
+
+    pub(crate) fn count(&self, action: ResourceAction) -> (usize, usize) {
+        (
+            self.permitted.get(action.api_name()).copied().unwrap_or(0),
+            self.selected,
+        )
+    }
+}
+
+pub(crate) fn selection_permissions_resource(
+    targets: impl Fn() -> Vec<DetailTarget> + Copy + Send + Sync + 'static,
+) -> LocalResource<SelectionPermissions> {
+    LocalResource::new(move || {
+        let targets = targets();
+        async move { fetch_selection_permissions(targets).await }
+    })
+}
+
+pub(crate) async fn fetch_permissions(target: &DetailTarget) -> Permissions {
+    data::fetch_json::<ActionPermissions>(&format!(
+        "/api/permissions?key={}&namespace={}&name={}",
+        target.key,
+        target
+            .namespace
+            .as_deref()
+            .map(data::percent_encode)
+            .unwrap_or_default(),
+        data::percent_encode(&target.name),
+    ))
+    .await
+    .map(|inner| Permissions { inner })
+    .unwrap_or_default()
+}
+
+pub(crate) async fn fetch_selection_permissions(
+    targets: Vec<DetailTarget>,
+) -> SelectionPermissions {
+    let mut selection = SelectionPermissions {
+        selected: targets.len(),
+        ..Default::default()
+    };
+    for target in targets {
+        let permissions = fetch_permissions(&target).await;
+        for action in ResourceAction::ALL {
+            if permissions.allows(action) {
+                *selection
+                    .permitted
+                    .entry(action.api_name().to_string())
+                    .or_default() += 1;
+            }
+        }
+    }
+    selection
+}
 
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum DetailTab {
@@ -18,28 +86,18 @@ pub(crate) enum DetailTab {
     Jobs,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Default)]
 pub(crate) struct Permissions {
-    pub(crate) patch: bool,
-    pub(crate) delete: bool,
-    pub(crate) create: bool,
-    pub(crate) update_status: bool,
+    inner: ActionPermissions,
 }
 
 impl Permissions {
-    fn from_json(value: serde_json::Value) -> Self {
-        let allowed = |verb| {
-            value
-                .get(verb)
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false)
-        };
-        Self {
-            patch: allowed("patch"),
-            delete: allowed("delete"),
-            create: allowed("create"),
-            update_status: allowed("update_status"),
-        }
+    pub(crate) fn allows(&self, action: ResourceAction) -> bool {
+        self.inner.allows(action)
+    }
+
+    pub(crate) fn apply(&self) -> bool {
+        self.inner.apply
     }
 }
 
@@ -68,20 +126,7 @@ impl ResourceDetailController {
         let permission_target = target;
         let permissions = LocalResource::new(move || {
             let target = permission_target.clone();
-            async move {
-                data::fetch_json::<serde_json::Value>(&format!(
-                    "/api/permissions?key={}&namespace={}",
-                    target.key,
-                    target
-                        .namespace
-                        .as_deref()
-                        .map(data::percent_encode)
-                        .unwrap_or_default()
-                ))
-                .await
-                .map(Permissions::from_json)
-                .unwrap_or_default()
-            }
+            async move { fetch_permissions(&target).await }
         });
         Self {
             object,

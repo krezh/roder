@@ -4,7 +4,11 @@
 use roder_core::RowStatus;
 use serde_json::Value;
 
-use super::accessors::{int_at, str_at};
+use super::accessors::str_at;
+pub(crate) use roder_core::{
+    condition_is, current_condition as condition, current_condition_from as condition_from,
+    job_lifecycle, status_generation_is_stale, JobLifecycle,
+};
 
 pub(crate) fn generic_status(data: &Value) -> RowStatus {
     if status_generation_is_stale(data) {
@@ -34,9 +38,23 @@ pub(crate) fn generic_status(data: &Value) -> RowStatus {
             return RowStatus::Pending;
         }
     }
-    for type_ in ["Ready", "Healthy", "Available"] {
+    for type_ in ["Ready", "Healthy", "Available", "Applied", "Synced"] {
         if let Some(status) = condition_status(data, type_) {
             return cond_to_status(Some(&status));
+        }
+    }
+
+    let status = data.get("status");
+    for field in ["applied", "synced"] {
+        if let Some(value) = status
+            .and_then(|status| status.get(field))
+            .and_then(Value::as_bool)
+        {
+            return if value {
+                RowStatus::Ok
+            } else {
+                RowStatus::Error
+            };
         }
     }
 
@@ -63,30 +81,6 @@ pub(crate) fn condition_status(data: &Value, type_: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-pub(crate) fn condition_is(data: &Value, type_: &str, status: &str) -> bool {
-    condition(data, type_)
-        .and_then(|condition| condition.get("status"))
-        .and_then(Value::as_str)
-        == Some(status)
-}
-
-fn condition<'a>(data: &'a Value, type_: &str) -> Option<&'a Value> {
-    if status_generation_is_stale(data) {
-        return None;
-    }
-    let generation = int_at(data, &["metadata", "generation"]);
-    data.pointer("/status/conditions")?
-        .as_array()?
-        .iter()
-        .rev()
-        .find(|condition| {
-            condition.get("type").and_then(Value::as_str) == Some(type_)
-                && generation
-                    .zip(condition.get("observedGeneration").and_then(Value::as_i64))
-                    .is_none_or(|(generation, observed)| generation == observed)
-        })
-}
-
 pub(crate) fn condition_reason(data: &Value, type_: &str) -> Option<String> {
     condition(data, type_)?
         .get("reason")
@@ -101,12 +95,6 @@ pub(crate) fn condition_message(data: &Value, type_: &str) -> Option<String> {
         .and_then(Value::as_str)
         .filter(|message| !message.is_empty())
         .map(str::to_string)
-}
-
-pub(crate) fn status_generation_is_stale(data: &Value) -> bool {
-    int_at(data, &["metadata", "generation"])
-        .zip(int_at(data, &["status", "observedGeneration"]))
-        .is_some_and(|(generation, observed)| observed < generation)
 }
 
 /// The Ready condition's reason (e.g. "ReconciliationSucceeded"), falling back to
@@ -149,6 +137,19 @@ mod tests {
     }
 
     #[test]
+    fn condition_helpers_prefer_current_generation_over_unversioned_entries() {
+        let data = json!({
+            "metadata": {"generation": 4},
+            "status": {"conditions": [
+                {"type": "Ready", "status": "True", "observedGeneration": 4},
+                {"type": "Ready", "status": "False"}
+            ]}
+        });
+
+        assert_eq!(condition_status(&data, "Ready").as_deref(), Some("True"));
+    }
+
+    #[test]
     fn generic_status_precedence_and_phases_are_table_driven() {
         let cases = [
             (json!({"status": {"phase": "Completed"}}), RowStatus::Done),
@@ -159,11 +160,50 @@ mod tests {
             ),
             (json!({"status": {"phase": "Invalid"}}), RowStatus::Error),
             (json!({"status": {"phase": "Healthy"}}), RowStatus::Ok),
+            (
+                json!({"status": {"conditions": [{"type": "Synced", "status": "True"}]}}),
+                RowStatus::Ok,
+            ),
+            (
+                json!({"status": {"conditions": [{"type": "Applied", "status": "False"}]}}),
+                RowStatus::Error,
+            ),
+            (json!({"status": {"applied": true}}), RowStatus::Ok),
+            (json!({"status": {"applied": false}}), RowStatus::Error),
             (json!({"status": {"phase": "Mystery"}}), RowStatus::Unknown),
             (
                 json!({"status": {"conditions": [
                     {"type": "Ready", "status": "False"},
                     {"type": "Reconciling", "status": "True"}
+                ]}}),
+                RowStatus::Pending,
+            ),
+            (
+                json!({"status": {"conditions": [
+                    {"type": "Failed", "status": "True"},
+                    {"type": "Complete", "status": "True"},
+                    {"type": "Degraded", "status": "True"}
+                ]}}),
+                RowStatus::Error,
+            ),
+            (
+                json!({"status": {"conditions": [
+                    {"type": "Complete", "status": "True"},
+                    {"type": "Degraded", "status": "True"},
+                    {"type": "Progressing", "status": "True"}
+                ]}}),
+                RowStatus::Done,
+            ),
+            (
+                json!({"status": {"conditions": [
+                    {"type": "Degraded", "status": "True"},
+                    {"type": "Progressing", "status": "True"}
+                ]}}),
+                RowStatus::Warn,
+            ),
+            (
+                json!({"status": {"conditions": [
+                    {"type": "Ready", "status": "Unknown"}
                 ]}}),
                 RowStatus::Pending,
             ),

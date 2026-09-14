@@ -53,6 +53,7 @@ pub async fn resource_tree(
 pub struct PermQuery {
     key: String,
     namespace: Option<String>,
+    name: Option<String>,
 }
 
 /// Which mutations the current identity may perform (drives button visibility).
@@ -61,17 +62,7 @@ pub async fn permissions(
     Query(q): Query<PermQuery>,
 ) -> Response {
     let ns = ns_filter(&q.namespace);
-    let patch = b.can("patch", &q.key, ns).await;
-    let create = b.can("create", &q.key, ns).await;
-    let delete = b.can("delete", &q.key, ns).await;
-    let update_status = b.can_subresource("update", &q.key, ns, "status").await;
-    Json(serde_json::json!({
-        "patch": patch,
-        "create": create,
-        "delete": delete,
-        "update_status": update_status,
-    }))
-    .into_response()
+    Json(b.action_permissions(&q.key, ns, q.name.as_deref()).await).into_response()
 }
 
 #[derive(Deserialize)]

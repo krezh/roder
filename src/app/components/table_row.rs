@@ -62,6 +62,7 @@ where
 
     view! {
         <div class="grid-row row"
+            data-row-uid=uid_ctrl.clone()
             class:active=is_active
             class:cursor=move || {
                 cursor.is_some_and(|c| c.with(|u| u.as_deref() == Some(uid_cur.as_str())))
@@ -125,7 +126,7 @@ where
                 }));
             }
             on:transitionend=move |e: leptos::ev::TransitionEvent| {
-                if e.property_name() == "grid-template-rows"
+                if matches!(e.property_name().as_str(), "grid-template-rows" | "height")
                     && removing.get_untracked().contains(&uid_te)
                 {
                     on_unmount.run(uid_te.clone());

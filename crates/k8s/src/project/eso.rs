@@ -46,3 +46,74 @@ pub(crate) fn cluster_external_secret_cells(data: &Value) -> (Vec<String>, RowSt
     );
     (cells, status)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn external_secret_projection_includes_store_and_sync_state() {
+        let data = json!({
+            "spec": {
+                "secretStoreRef": {"kind": "ClusterSecretStore", "name": "vault"},
+                "refreshInterval": "1h"
+            },
+            "status": {
+                "refreshTime": "2026-09-14T10:00:00Z",
+                "conditions": [{
+                    "type": "Ready", "status": "True", "reason": "SecretSynced"
+                }]
+            }
+        });
+
+        assert_eq!(
+            external_secret_cells(&data),
+            (
+                vec![
+                    "ClusterSecretStore".to_string(),
+                    "vault".to_string(),
+                    "1h".to_string(),
+                    "SecretSynced".to_string(),
+                    "True".to_string(),
+                    "2026-09-14T10:00:00Z".to_string()
+                ],
+                RowStatus::Ok
+            )
+        );
+    }
+
+    #[test]
+    fn eso_conditions_and_nested_store_drive_generic_projections() {
+        for (condition, expected) in [
+            ("True", RowStatus::Ok),
+            ("False", RowStatus::Error),
+            ("Unknown", RowStatus::Pending),
+        ] {
+            let data = json!({"status": {"conditions": [{
+                "type": "Ready", "status": condition
+            }]}});
+            assert_eq!(eso_generic_cells(&data).1, expected, "{condition}");
+        }
+
+        let data = json!({
+            "spec": {"externalSecretSpec": {
+                "secretStoreRef": {"name": "production-vault"}
+            }},
+            "status": {"conditions": [{
+                "type": "Ready", "status": "True", "reason": "Ready"
+            }]}
+        });
+        assert_eq!(
+            cluster_external_secret_cells(&data),
+            (
+                vec![
+                    "True".to_string(),
+                    "Ready".to_string(),
+                    "production-vault".to_string()
+                ],
+                RowStatus::Ok
+            )
+        );
+    }
+}

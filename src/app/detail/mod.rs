@@ -1,4 +1,4 @@
-//! Resource detail: a right-docked drawer holding actions, Info / YAML / Logs tabs,
+//! Resource detail: a right-docked drawer holding actions, Describe / YAML / Logs tabs,
 //! and the pod listing for pod-owning workloads.
 
 pub(crate) mod info;
@@ -6,19 +6,23 @@ pub(crate) mod metrics;
 pub(crate) mod pods;
 
 use crate::app::components::table::ScaleControl;
-use crate::app::controllers::detail::{DetailTab as Tab, ResourceDetailController};
+use crate::app::controllers::detail::{
+    format_bytes, short_fingerprint, talos_action, talos_config_diff, talos_node, DetailTab as Tab,
+    ResourceDetailController,
+};
 use crate::app::logs::LogsView;
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::overlays::delete::{ask_delete, delete_extra, DeleteRequest};
+use crate::app::resource_actions::AvailableActions;
 use crate::app::state::{
     DetailTarget, DrainOpen, DrainTarget, ExecOpen, ExecTarget, TalosFeatures,
 };
 use crate::app::util::format::parse_key;
 use crate::app::util::json::selector_from;
-use crate::app::util::predicate::KindKind;
 use crate::app::util::yaml_hl;
 use crate::data;
 use leptos::prelude::*;
+use roder_core::ResourceAction;
 
 use self::info::info_view;
 use self::metrics::MetricsChart;
@@ -30,7 +34,7 @@ use crate::app::jobs::CronJobJobs;
 #[component]
 pub(crate) fn DetailDrawer() -> impl IntoView {
     let detail = expect_context::<RwSignal<Option<DetailTarget>>>();
-    let width = RwSignal::new(560i32);
+    let width_percent = RwSignal::new(40.0);
     let dragging = RwSignal::new(false);
     let (snapshot, closing, do_close) = crate::app::overlays::use_option_overlay(detail);
 
@@ -46,7 +50,7 @@ pub(crate) fn DetailDrawer() -> impl IntoView {
                 .and_then(|v| v.as_f64())
                 .unwrap_or(1280.0);
             let w = (vw - e.client_x() as f64).clamp(360.0, vw * 0.9);
-            width.set(w as i32);
+            width_percent.set(w / vw * 100.0);
             e.prevent_default();
         });
         let up = window_event_listener(ev::mouseup, move |_| {
@@ -61,13 +65,13 @@ pub(crate) fn DetailDrawer() -> impl IntoView {
     }
 
     view! {
-        // Always mounted; `.open` slides it in. `width` drives the style in place so
-        // resizing never rebuilds the detail (and re-fetches).
+        // Always mounted; `.open` slides it in. Width updates in place so resizing
+        // never rebuilds the detail (and re-fetches).
         <div class="detailbar"
             class:open=move || snapshot.get().is_some()
             class:closing=move || closing.get()
             class:dragging=move || dragging.get()
-            style=move || format!("width:{}px", width.get())>
+            style=move || format!("width:{:.2}%", width_percent.get())>
             <div class="detailbar-resize"
                 on:mousedown=move |e: leptos::ev::MouseEvent| { e.prevent_default(); dragging.set(true); }></div>
             <div class="detailbar-head">
@@ -81,7 +85,7 @@ pub(crate) fn DetailDrawer() -> impl IntoView {
     }
 }
 
-/// Inline detail for an expanded row: actions, a describe-style Info view (default),
+/// Inline detail for an expanded row: actions, a Describe view (default),
 /// YAML, and pod logs — selectable via tabs.
 ///
 /// `on_delete` needs `Send + Sync` (unlike similar close-callback params
@@ -108,26 +112,27 @@ pub(crate) fn RowDetail(
     let tab = RwSignal::new(initial_tab);
     let yaml_editing = RwSignal::new(false);
 
-    let (group, kind) = parse_key(&target.key);
-    let kk = KindKind::new(&group, &kind);
-    let is_workload = kk.is_workload();
-    let is_scalable = kk.is_scalable();
-    let is_flux = kk.is_flux();
-    let is_helmrelease = kk.is_helmrelease();
-    let has_source_ref = kk.has_source_ref();
-    let is_eso = kk.is_eso();
-    let is_certificate = kk.is_certificate();
-    let is_pod = kk.is_pod();
-    let is_node = kk.is_node();
-    let is_job = kk.is_job();
+    let (_, _, kind) = parse_key(&target.key);
+    let available = AvailableActions::for_targets(std::slice::from_ref(&target));
+    let is_workload = available.supports(ResourceAction::Restart);
+    let is_scalable = available.supports(ResourceAction::Scale);
+    let is_flux = available.supports(ResourceAction::FluxReconcile)
+        || available.supports(ResourceAction::FluxSuspend);
+    let is_helmrelease = available.supports(ResourceAction::FluxForce);
+    let has_source_ref = available.supports(ResourceAction::FluxReconcileWithSource);
+    let is_eso = available.supports(ResourceAction::ExternalSecretsRefresh);
+    let is_certificate = available.supports(ResourceAction::CertificateRenew);
+    let is_pod = available.supports(ResourceAction::Exec);
+    let is_node = available.supports(ResourceAction::Cordon);
+    let is_job = available.supports(ResourceAction::JobRerun);
     let features = expect_context::<TalosFeatures>().0;
     let talos_available = move || is_node && features.get().read;
     let talos_actions = move || is_node && features.get().actions;
     let talos_config = move || is_node && features.get().config;
     // Pod-owning resources get a live "Pods" tab listing their pods by selector.
-    let has_pods = is_workload || kk.is_job();
-    let is_cronjob = kk.is_cronjob();
-    let is_kopiur_snapshot_policy = kk.is_kopiur_snapshot_policy();
+    let has_pods = is_workload || is_job;
+    let is_cronjob = available.supports(ResourceAction::CronJobTrigger);
+    let is_kopiur_snapshot_policy = available.supports(ResourceAction::KopiurSnapshotNow);
     let ns = target.namespace.clone().unwrap_or_default();
     let pod = target.name.clone();
     let exec_open = expect_context::<ExecOpen>().0;
@@ -167,47 +172,22 @@ pub(crate) fn RowDetail(
         }
     });
 
-    let can_patch = move || {
+    let allows = move |action| {
         controller
             .permissions
             .get()
-            .is_some_and(|value| value.patch)
+            .is_some_and(|value| value.allows(action))
     };
-    let can_delete = move || {
+    let can_apply = move || {
         controller
             .permissions
             .get()
-            .is_some_and(|value| value.delete)
-    };
-    let can_create = move || {
-        controller
-            .permissions
-            .get()
-            .is_some_and(|value| value.create)
-    };
-    let can_update_status = move || {
-        controller
-            .permissions
-            .get()
-            .is_some_and(|value| value.update_status)
+            .is_some_and(|value| value.apply())
     };
     let job_terminal = move || {
-        obj.get().flatten().is_some_and(|detail| {
-            detail
-                .object
-                .get("status")
-                .and_then(|status| status.get("conditions"))
-                .and_then(serde_json::Value::as_array)
-                .is_some_and(|conditions| {
-                    conditions.iter().any(|condition| {
-                        matches!(
-                            condition.get("type").and_then(serde_json::Value::as_str),
-                            Some("Complete" | "Failed")
-                        ) && condition.get("status").and_then(serde_json::Value::as_str)
-                            == Some("True")
-                    })
-                })
-        })
+        obj.get()
+            .flatten()
+            .is_some_and(|detail| roder_core::job_lifecycle(&detail.object).is_terminal())
     };
 
     let run = move |action: &'static str, extra: serde_json::Value| {
@@ -218,21 +198,29 @@ pub(crate) fn RowDetail(
         <div class="rd">
             <div class="actions">
                 {is_workload.then(|| view! {
-                    <Show when=can_patch fallback=|| ()>
+                    <Show when=move || allows(ResourceAction::Restart) fallback=|| ()>
                         <button class="act" on:click=move |_| run("restart", serde_json::json!({}))>"Restart"</button>
-                        {is_scalable.then(|| view! { <ScaleControl run=run current=current_replicas /> })}
                     </Show>
+                    {is_scalable.then(|| view! { <Show when=move || allows(ResourceAction::Scale)><ScaleControl run=run current=current_replicas /></Show> })}
                 })}
                 {is_flux.then(|| view! {
-                    <Show when=can_patch fallback=|| ()>
+                    <Show when=move || allows(ResourceAction::FluxReconcile) fallback=|| ()>
                         <button class="act" on:click=move |_| run("flux-reconcile", serde_json::json!({}))>"Reconcile"</button>
-                        {has_source_ref.then(|| view! {
-                            <button class="act" on:click=move |_| run("flux-reconcile-with-source", serde_json::json!({}))>"Reconcile w/ source"</button>
-                        })}
-                        {is_helmrelease.then(|| view! {
+                    </Show>
+                    {has_source_ref.then(|| view! {
+                        <Show when=move || allows(ResourceAction::FluxReconcileWithSource)>
+                        <button class="act" on:click=move |_| run("flux-reconcile-with-source", serde_json::json!({}))>"Reconcile w/ source"</button>
+                        </Show>
+                    })}
+                    {is_helmrelease.then(|| view! {
+                        <Show when=move || allows(ResourceAction::FluxForce)>
                             <button class="act" on:click=move |_| run("flux-force", serde_json::json!({}))>"Force"</button>
+                        </Show>
+                        <Show when=move || allows(ResourceAction::FluxReset)>
                             <button class="act" on:click=move |_| run("flux-reset", serde_json::json!({}))>"Reset"</button>
-                        })}
+                        </Show>
+                    })}
+                    <Show when=move || allows(ResourceAction::FluxSuspend)>
                         <Show when=move || !is_suspended() fallback=|| ()>
                             <button class="act" on:click=move |_| run("flux-suspend", serde_json::json!({}))>"Suspend"</button>
                         </Show>
@@ -242,12 +230,12 @@ pub(crate) fn RowDetail(
                     </Show>
                 })}
                 {is_eso.then(|| view! {
-                    <Show when=can_patch fallback=|| ()>
+                    <Show when=move || allows(ResourceAction::ExternalSecretsRefresh) fallback=|| ()>
                         <button class="act" on:click=move |_| run("eso-refresh", serde_json::json!({}))>"Refresh"</button>
                     </Show>
                 })}
                 {is_certificate.then(|| view! {
-                    <Show when=can_update_status fallback=|| ()>
+                    <Show when=move || allows(ResourceAction::CertificateRenew) fallback=|| ()>
                         <button class="act" on:click=move |_| {
                             ask_confirm(
                                 confirm,
@@ -261,37 +249,36 @@ pub(crate) fn RowDetail(
                     </Show>
                 })}
                 {is_cronjob.then(|| view! {
-                    <Show when=can_patch fallback=|| ()>
+                    <Show when=move || allows(ResourceAction::CronJobTrigger) fallback=|| ()>
                         <button class="act" on:click=move |_| run("cronjob-trigger", serde_json::json!({}))>"Trigger"</button>
                     </Show>
                 })}
                 {is_job.then(|| view! {
-                    <Show when=move || can_create() && job_terminal() fallback=|| ()>
+                    <Show when=move || allows(ResourceAction::JobRerun) && job_terminal() fallback=|| ()>
                         <button class="act" on:click=move |_| run("job-rerun", serde_json::json!({}))>"Re-run"</button>
                     </Show>
                 })}
                 {is_kopiur_snapshot_policy.then(|| view! {
-                    <Show when=can_patch fallback=|| ()>
+                    <Show when=move || allows(ResourceAction::KopiurSnapshotNow) fallback=|| ()>
                         <button class="act" on:click=move |_| run("kopiur-snapshot-now", serde_json::json!({}))>"Snapshot Now"</button>
                     </Show>
                 })}
                 {is_pod.then(|| {
-                    let exec_ns  = ns.clone();
-                    let exec_pod = pod.clone();
-                    view! {
+                    view! { <Show when=move || allows(ResourceAction::Exec)>
                         <button class="act" on:click=move |_| {
+                            let target = tv.get_value();
                             exec_open.set(Some(ExecTarget {
-                                namespace: exec_ns.clone(),
-                                pod: exec_pod.clone(),
+                                namespace: target.namespace.unwrap_or_default(),
+                                pod: target.name,
                                 container: None,
                                 pending: false,
                                 node_shell: false,
                                 image: String::new(),
                             }));
                         }>"Shell"</button>
-                    }
+                    </Show> }
                 })}
-                {move || can_delete().then(|| view! {
+                {move || allows(ResourceAction::Delete).then(|| view! {
                     <button class="act danger" on:click=move |_| {
                         ask_delete(delete_confirm, "Delete this resource?", move |force, propagation| {
                             run("delete", delete_extra(force, propagation));
@@ -305,7 +292,7 @@ pub(crate) fn RowDetail(
             </div>
 
             <div class="rd-tabs">
-                <button class="rd-tab" class:active=move || tab.get() == Tab::Info on:click=move |_| tab.set(Tab::Info)>"Info"</button>
+                <button class="rd-tab" class:active=move || tab.get() == Tab::Info on:click=move |_| tab.set(Tab::Info)>"Describe"</button>
                 <button class="rd-tab" class:active=move || tab.get() == Tab::Yaml on:click=move |_| tab.set(Tab::Yaml)>"YAML"</button>
                 {is_pod.then(|| view! {
                     <button class="rd-tab" class:active=move || tab.get() == Tab::Metrics on:click=move |_| tab.set(Tab::Metrics)>"Metrics"</button>
@@ -346,7 +333,7 @@ pub(crate) fn RowDetail(
                             <div class="yaml-pane">
                                 <div class="yaml-head">
                                     <h4>"YAML"</h4>
-                                    {move || can_patch().then(|| view! {
+                                    {move || can_apply().then(|| view! {
                                         <Show when=move || yaml_editing.get() fallback=|| ()>
                                             <button class="act"
                                                 on:click=move |_| run("apply", serde_json::json!({ "yaml": yaml.get() }))>
@@ -392,35 +379,8 @@ fn TalosNodeView(node: String, key: String, actions: bool, config: bool) -> impl
     let pending_action = RwSignal::new(None::<String>);
     let drain_first = RwSignal::new(true);
     let load_config_diff = RwSignal::new(false);
-    let status_node = node.clone();
-    let status = LocalResource::new(move || {
-        let node = status_node.clone();
-        async move {
-            data::fetch_json::<roder_core::TalosNode>(&format!(
-                "/api/talos/node?node={}",
-                data::percent_encode(&node)
-            ))
-            .await
-        }
-    });
-    let config_diff = LocalResource::new({
-        let node = node.clone();
-        move || {
-            let node = node.clone();
-            let should_load = load_config_diff.get();
-            async move {
-                if !should_load {
-                    return Ok(None);
-                }
-                data::fetch_json::<roder_core::TalosConfigDiff>(&format!(
-                    "/api/talos/config-diff?node={}",
-                    data::percent_encode(&node)
-                ))
-                .await
-                .map(Some)
-            }
-        }
-    });
+    let status = talos_node(node.clone());
+    let config_diff = talos_config_diff(node.clone(), load_config_diff);
     let refresh = Callback::new(move |_| status.refetch());
 
     view! {
@@ -684,64 +644,21 @@ fn talos_service_action(
     pending: RwSignal<Option<String>>,
     refresh: Callback<()>,
 ) {
-    leptos::task::spawn_local(async move {
-        status.set(None);
-        pending.set(Some(format!("{action}:{service}")));
-        let result = data::post_action(&serde_json::json!({
-            "action": format!("talos-service-{action}"),
-            "name": node,
-            "service": service,
-        }))
-        .await
-        .map(|_| format!("service {action} requested"));
-        if result.is_ok() {
-            refresh.run(());
-        }
-        status.set(Some(result));
-        pending.set(None);
-    });
+    talos_action(
+        node,
+        format!("talos-service-{action}"),
+        Some(service),
+        status,
+        pending,
+        Some(refresh),
+    );
 }
 
-/// Drives a plain (non-drain-first) Talos reboot/shutdown. The drain-first
-/// path no longer goes through here — it opens the drain dialog
-/// (`overlays::drain::DrainOverlay`) instead, which POSTs the same
-/// `talos-{action}` action itself with `drain: true`.
 fn talos_power_action(
     node: String,
     action: &'static str,
     status: RwSignal<Option<Result<String, String>>>,
     pending: RwSignal<Option<String>>,
 ) {
-    leptos::task::spawn_local(async move {
-        status.set(None);
-        pending.set(Some(action.into()));
-        let result = data::post_action(&serde_json::json!({
-            "action": format!("talos-{action}"),
-            "name": node,
-        }))
-        .await;
-        status.set(Some(result.map(|_| {
-            if action == "reboot" {
-                "node returned Ready".into()
-            } else {
-                format!("{action} requested")
-            }
-        })));
-        pending.set(None);
-    });
-}
-
-fn format_bytes(bytes: u64) -> String {
-    const UNITS: &[&str] = &["B", "KiB", "MiB", "GiB", "TiB"];
-    let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1024.0 && unit + 1 < UNITS.len() {
-        value /= 1024.0;
-        unit += 1;
-    }
-    format!("{value:.1} {}", UNITS[unit])
-}
-
-fn short_fingerprint(fingerprint: &str) -> String {
-    fingerprint.chars().take(12).collect()
+    talos_action(node, format!("talos-{action}"), None, status, pending, None);
 }

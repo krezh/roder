@@ -6,12 +6,11 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap};
 
+use leptos::prelude::{GetUntracked, GetValue, RwSignal, StoredValue};
 use roder_core::{ResourceRow, RowStatus};
 
 use crate::app::components::table::cmp_cell;
-use crate::app::state::{DetailTarget, SortKey};
-use crate::app::util::format::parse_key;
-use crate::app::util::predicate::KindKind;
+use crate::app::state::{CtxMenu, DetailTarget, SortKey};
 
 /// Where the keyboard cursor lands after moving `delta` rows.
 ///
@@ -255,24 +254,29 @@ pub(crate) fn resolve_action_targets(
     }
 }
 
-/// Whether every resolved target supports a kind-specific action. Mixed-kind
-/// selections may only expose an action when it is valid for every target.
-pub(crate) fn targets_all(
-    targets: &[DetailTarget],
-    predicate: impl for<'a> Fn(KindKind<'a>) -> bool,
-) -> bool {
-    !targets.is_empty()
-        && targets.iter().all(|target| {
-            let (group, kind) = parse_key(&target.key);
-            predicate(KindKind::new(&group, &kind))
-        })
+pub(crate) fn resolve_current_action_targets(
+    menu: &CtxMenu,
+    table_selected: StoredValue<Option<RwSignal<BTreeSet<String>>>>,
+    table_rows: StoredValue<Option<RwSignal<HashMap<String, ResourceRow>>>>,
+    table_targets: StoredValue<Option<RwSignal<HashMap<String, DetailTarget>>>>,
+) -> ResolvedActionTargets {
+    let selected = table_selected
+        .get_value()
+        .map(|signal| signal.get_untracked());
+    let rows = table_rows
+        .get_value()
+        .map(|signal| signal.get_untracked())
+        .unwrap_or_default();
+    let targets = table_targets
+        .get_value()
+        .map(|signal| signal.get_untracked())
+        .unwrap_or_default();
+    resolve_action_targets(&menu.uid, &menu.target, selected.as_ref(), &rows, &targets)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        move_cursor, node_is_control_plane, resolve_action_targets, surfaced_cells, targets_all,
-    };
+    use super::{move_cursor, node_is_control_plane, resolve_action_targets, surfaced_cells};
     use crate::app::state::DetailTarget;
     use roder_core::{ResourceRow, RowStatus};
     use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -374,24 +378,6 @@ mod tests {
         assert_eq!(resolved.targets.len(), 2);
         assert_eq!(resolved.targets[0].key, "/v1/Service");
         assert_eq!(resolved.targets[1].key, "apps/v1/Deployment");
-    }
-
-    #[test]
-    fn kind_specific_actions_require_every_selected_target_to_match() {
-        let targets = [
-            DetailTarget {
-                key: "kustomize.toolkit.fluxcd.io/v1/Kustomization".to_string(),
-                namespace: Some("default".to_string()),
-                name: "apps".to_string(),
-            },
-            DetailTarget {
-                key: "batch/v1/CronJob".to_string(),
-                namespace: Some("default".to_string()),
-                name: "backup".to_string(),
-            },
-        ];
-        assert!(!targets_all(&targets, |kind| kind.is_flux()));
-        assert!(!targets_all(&targets, |kind| kind.is_cronjob()));
     }
 
     #[test]

@@ -1,5 +1,7 @@
 //! Reactive hooks shared by the live tables.
 
+use std::collections::{BTreeSet, HashMap};
+
 use leptos::html::Div;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -178,6 +180,89 @@ pub(crate) struct ResourceTable {
 /// Rows rendered beyond the viewport on each side, so scrolling doesn't flash blanks.
 pub(crate) const OVERSCAN: usize = 12;
 
+/// Returns the row range and leading/trailing spacers for variable-height rows.
+pub(crate) fn variable_window_layout(
+    uids: &[String],
+    heights: &HashMap<String, f64>,
+    collapsed: &BTreeSet<String>,
+    estimated_height: f64,
+    scroll_top: f64,
+    viewport_height: f64,
+) -> (usize, usize, f64, f64) {
+    window_layout(
+        uids,
+        |uid| {
+            if collapsed.contains(uid) {
+                0.0
+            } else {
+                heights.get(uid).copied().unwrap_or(estimated_height)
+            }
+        },
+        estimated_height,
+        scroll_top,
+        viewport_height,
+    )
+}
+
+fn fixed_window_layout(
+    uids: &[String],
+    collapsed: &BTreeSet<String>,
+    row_height: f64,
+    scroll_top: f64,
+    viewport_height: f64,
+) -> (usize, usize, f64, f64) {
+    window_layout(
+        uids,
+        |uid| {
+            if collapsed.contains(uid) {
+                0.0
+            } else {
+                row_height
+            }
+        },
+        row_height,
+        scroll_top,
+        viewport_height,
+    )
+}
+
+fn window_layout(
+    uids: &[String],
+    height: impl Fn(&String) -> f64,
+    estimated_height: f64,
+    scroll_top: f64,
+    viewport_height: f64,
+) -> (usize, usize, f64, f64) {
+    let estimate = estimated_height.max(1.0);
+    let overscan = estimate * OVERSCAN as f64;
+    let window_start = (scroll_top - overscan).max(0.0);
+    let window_end = scroll_top + viewport_height + overscan;
+
+    let mut first = 0;
+    let mut before = 0.0;
+    while first < uids.len() {
+        let row_height = height(&uids[first]);
+        if row_height == 0.0 && before >= window_start {
+            break;
+        }
+        if before + row_height > window_start {
+            break;
+        }
+        before += row_height;
+        first += 1;
+    }
+
+    let mut last = first;
+    let mut through_window = before;
+    while last < uids.len() && through_window < window_end {
+        through_window += height(&uids[last]);
+        last += 1;
+    }
+
+    let after = uids[last..].iter().map(height).sum();
+    (first, last, before, after)
+}
+
 /// Create the shared table signals and long-press infra. Does not attach any
 /// keyboard shortcuts — those live in [`KindTable`] and are opt-in per instance.
 pub(crate) fn use_table_state() -> ResourceTable {
@@ -224,29 +309,26 @@ pub(crate) fn use_table_state() -> ResourceTable {
     }
 }
 
-/// Build the `(first, last)` virtual-window memo, and attach the RAF-measure +
-/// scroll + resize listeners. Must be called once per table, after the caller has
-/// derived `shown_uids` from `table.rows`.
+/// Build the virtual-window range and spacers, and attach its DOM listeners.
 pub(crate) fn table_window(
     table: ResourceTable,
     shown_uids: Memo<Vec<String>>,
-) -> Memo<(usize, usize)> {
+) -> Memo<(usize, usize, f64, f64)> {
     // `ResourceTable` is `Copy`, so field access doesn't consume it; this lets us
     // bind `table_ref` only on wasm32 (the only target that uses it).
     let scroll_top = table.scroll_top;
     let viewport_h = table.viewport_h;
     let row_h = table.row_h;
+    let removing = table.removing;
     #[cfg(target_arch = "wasm32")]
     let table_ref = table.table_ref;
     let window = Memo::new(move |_| {
-        let total = shown_uids.with(|v| v.len());
         let rh = row_h.get().max(1.0);
-        let first = ((scroll_top.get() / rh).floor() as usize)
-            .saturating_sub(OVERSCAN)
-            .min(total);
-        let count = (viewport_h.get() / rh).ceil() as usize + 2 * OVERSCAN;
-        let last = (first + count).min(total);
-        (first, last)
+        shown_uids.with(|uids| {
+            removing.with(|collapsed| {
+                fixed_window_layout(uids, collapsed, rh, scroll_top.get(), viewport_h.get())
+            })
+        })
     });
 
     // Measure the real viewport + row height from the DOM. Done in a rAF so the
@@ -318,6 +400,43 @@ pub(crate) fn table_window(
     });
 
     window
+}
+
+#[cfg(test)]
+mod tests {
+    use super::variable_window_layout;
+    use std::collections::{BTreeSet, HashMap};
+
+    #[test]
+    fn variable_window_uses_measured_heights_for_ranges_and_spacers() {
+        let uids = (0..40).map(|i| format!("uid-{i}")).collect::<Vec<_>>();
+        let heights = HashMap::from([("uid-0".to_string(), 100.0), ("uid-1".to_string(), 20.0)]);
+
+        let (first, last, before, after) =
+            variable_window_layout(&uids, &heights, &BTreeSet::new(), 20.0, 400.0, 100.0);
+
+        assert_eq!((first, last), (4, 33));
+        assert_eq!(before, 160.0);
+        assert_eq!(after, 140.0);
+    }
+
+    #[test]
+    fn collapsed_rows_do_not_leave_virtual_spacer_holes() {
+        let uids = (0..40).map(|i| format!("uid-{i}")).collect::<Vec<_>>();
+        let collapsed = (0..10).map(|i| format!("uid-{i}")).collect();
+
+        let (first, last, before, after) =
+            variable_window_layout(&uids, &HashMap::new(), &collapsed, 20.0, 400.0, 100.0);
+
+        assert_eq!((first, last), (18, 40));
+        assert_eq!(before, 160.0);
+        assert_eq!(after, 0.0);
+
+        let (first, _, before, _) =
+            variable_window_layout(&uids, &HashMap::new(), &collapsed, 20.0, 0.0, 100.0);
+        assert_eq!(first, 0);
+        assert_eq!(before, 0.0);
+    }
 }
 
 /// Scroll the virtual viewport so the row at `index` is on screen.

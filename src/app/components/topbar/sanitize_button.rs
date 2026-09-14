@@ -2,9 +2,8 @@
 
 use leptos::prelude::*;
 
-use crate::app::overlays::toast::{show_toast, show_toast_detail, Toast, ToastKind};
-use crate::app::ui::{ask_sweep, SweepRequest};
-use crate::data;
+use crate::app::overlays::toast::Toast;
+use crate::app::ui::{ask_sweep, run_sweep, SweepRequest};
 
 #[component]
 pub(crate) fn SanitizeButton() -> impl IntoView {
@@ -13,34 +12,7 @@ pub(crate) fn SanitizeButton() -> impl IntoView {
     let toast = expect_context::<RwSignal<Option<Toast>>>();
 
     let do_sanitize = move |options: roder_core::SweepOptions| {
-        let ns = selected_ns.get_untracked();
-        let payload = serde_json::json!({
-            "action": "sanitize",
-            "namespace": ns,
-            "sweep_options": options,
-        });
-        leptos::task::spawn_local(async move {
-            match data::post_action(&payload).await {
-                Ok(body) => {
-                    let summary: roder_core::CleanupSummary =
-                        serde_json::from_str(&body).unwrap_or_default();
-                    let total = summary.pods_deleted + summary.jobs_deleted;
-                    if total == 0 {
-                        show_toast(toast, "Nothing to sweep", ToastKind::Ok);
-                    } else {
-                        show_toast(
-                            toast,
-                            format!(
-                                "Swept {} pod(s), {} job(s)",
-                                summary.pods_deleted, summary.jobs_deleted
-                            ),
-                            ToastKind::Ok,
-                        );
-                    }
-                }
-                Err(e) => show_toast_detail(toast, "Sweep failed", Some(e), ToastKind::Err),
-            }
-        });
+        run_sweep(toast, selected_ns.get_untracked(), options);
     };
 
     view! {

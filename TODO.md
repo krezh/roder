@@ -1,51 +1,18 @@
 # TODO
 
-## Correctness Foundations
-
-- Map Warning and Normal Event types to meaningful row status
-- Detect pending LoadBalancer Services and Ingresses
-- Detect Endpoints and EndpointSlices without ready backends
-- Derive HPA health from AbleToScale, ScalingActive, and ScalingLimited conditions
-- Derive PDB health from conditions and desired/current healthy counts
-- Treat Lost PVCs as errors
-
 ## Actions And Access
 
-- Introduce a central GVK capability registry shared by desktop, mobile, bulk actions, and backend validation
-- Split Flux capabilities into reconcile, suspend, source reconciliation, force, and reset
-- Restrict Flux actions to supported exact resource kinds and validate them server-side
-- Restrict External Secrets refresh to supported resource kinds and validate it server-side
-- Return attempted, succeeded, forbidden, and failed counts from reconcile-all operations
-- Add batch action capability checks and show how many selected resources permit an operation
-- Hide or disable context-menu, action-sheet, and bulk actions when RBAC denies them
-- Model semantic operation permissions, including dependent resource and subresource checks
-- Check Job create permission before triggering a CronJob
-- Check Snapshot create permission before triggering a Kopiur SnapshotPolicy
-- Check source and target permissions for Flux reconcile-with-source
-- Pass no namespace to access reviews for cluster-scoped resources
-- Add watch, status update, logs, exec, eviction, and dependent-resource operations to Access Review
 - Group Access Review rows by category or operator
 
 ## Dashboard
 
-- Replace hard-coded controller fields with generic controller health groups
-- Add cert-manager health rollups
-- Add Rook health rollups using Ceph health semantics
-- Add CloudNativePG cluster, archival, and backup freshness rollups
-- Show backup age as an RPO signal
 - Add Prometheus and Alertmanager readiness rollups
 
 ## Resource Relationships
 
-- Introduce a GVK-keyed relationship provider registry
 - Add Pod to PVC to PV to StorageClass relationships
 - Add VolumeAttachment to PV and Node relationships
-- Link Rook-backed StorageClasses to CephBlockPools and CephClusters
-- Add CephCluster to pool, filesystem, object-store, and operator workload relationships
 - Add ObjectBucketClaim to ObjectBucket, Secret, and ConfigMap relationships
-- Add CloudNativePG Cluster to Pods, PVCs, Services, Backups, Databases, DatabaseRoles, and Poolers
-- Add CloudNativePG ScheduledBackup to generated Backup relationships
-- Link CloudNativePG Backup, Database, DatabaseRole, and Pooler resources to their Cluster
 - Add cert-manager Certificate to target Secret and issuer relationships
 - Add cert-manager CertificateRequest to issuer, Order, and Challenge relationships
 - Add ExternalSecret to store and generated Secret relationships
@@ -90,7 +57,6 @@
 - Add Kopiur policy and snapshot detail summaries
 - Add restore history and progress summaries
 - Add KubernetesUpgrade and TalosUpgrade row projections and detail summaries
-- Add Kopiur Snapshot Now to bulk actions where valid
 
 ## Monitoring And Alerts
 
@@ -98,11 +64,7 @@
 - Add Prometheus, PrometheusAgent, Alertmanager, and ThanosRuler readiness projections
 - Add PrometheusRule group, rule count, evaluation, and error summaries
 - Add ServiceMonitor, PodMonitor, Probe, and ScrapeConfig target summaries
-- Resolve Alertmanager labels to canonical Kubernetes resource targets
-- Support standard workload, Pod, Service, Node, and PVC alert labels
-- Support kube-state-metrics custom-resource labels
 - Support Flux, CloudNativePG, Rook, cert-manager, and External Secrets alert labels
-- Link firing alerts to their defining PrometheusRule
 - Present a target chooser when alert labels resolve ambiguously
 
 ## Networking
@@ -131,13 +93,7 @@
 - Make referenced resources in detail summaries clickable
 - Reuse category icons and colors in mobile resource trees
 - Define per-GVK mobile summary columns
-- Generate desktop and mobile actions from the same capability registry
-- Add missing mobile bulk actions for External Secrets, Kopiur, and CronJobs
 
 ## Testing
 
-- Add table-driven discovery-family and projector-coverage tests
-- Add unit tests for generic status, core, Flux, External Secrets, Gateway API, and RBAC projectors
-- Add layout integration tests for Rook, CloudNativePG, Kopiur, Tuppr, and monitoring resources
-- Install representative operator CRDs in integration tests
-- Exercise operator discovery and projected columns in browser tests
+- Add layout integration tests for Kopiur, Tuppr, and monitoring resources

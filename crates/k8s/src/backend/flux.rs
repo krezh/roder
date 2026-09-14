@@ -3,7 +3,7 @@
 
 use futures::future::join_all;
 use kube::api::{ListParams, Patch, PatchParams};
-use roder_core::Category;
+use roder_core::{ActionSummary, ResourceAction};
 use serde_json::json;
 
 use super::{api_err, now_rfc3339, Backend};
@@ -74,20 +74,12 @@ impl Backend {
         force: bool,
         reset: bool,
     ) -> Result<(), K8sError> {
-        let obj = self.dyn_api(key, ns)?.get(name).await.map_err(api_err)?;
-        let data = serde_json::to_value(&obj).map_err(api_err)?;
-        let spec = data
-            .get("spec")
-            .ok_or_else(|| K8sError::Api("resource has no spec".into()))?;
-        let source = extract_source_ref(spec)
-            .ok_or_else(|| K8sError::Api("resource has no sourceRef to reconcile".into()))?;
-        let source_entry = self.entry_by_kind(&source.kind)?;
-        let source_ns = source.namespace.as_deref().or(ns);
+        let source = self.flux_source_target(key, ns, name).await?;
         // force/reset are flags on the resource's own reconcile (matching
         // `flux reconcile --with-source --force`), not the source's.
         self.flux_reconcile(
-            &source_entry.kind.key,
-            source_ns,
+            &source.key,
+            source.namespace.as_deref(),
             &source.name,
             false,
             false,
@@ -96,12 +88,36 @@ impl Backend {
         self.flux_reconcile(key, ns, name, force, reset).await
     }
 
+    pub(crate) async fn flux_source_target(
+        &self,
+        key: &str,
+        ns: Option<&str>,
+        name: &str,
+    ) -> Result<FluxSourceTarget, K8sError> {
+        let obj = self.dyn_api(key, ns)?.get(name).await.map_err(api_err)?;
+        let data = serde_json::to_value(&obj).map_err(api_err)?;
+        let spec = data
+            .get("spec")
+            .ok_or_else(|| K8sError::Api("resource has no spec".into()))?;
+        let source = extract_source_ref(spec)
+            .ok_or_else(|| K8sError::Api("resource has no sourceRef to reconcile".into()))?;
+        let source_entry = self.entry_by_kind(&source.kind)?;
+        Ok(FluxSourceTarget {
+            key: source_entry.kind.key,
+            namespace: source.namespace.or_else(|| ns.map(String::from)),
+            name: source.name,
+        })
+    }
+
     /// `flux reconcile <kind> --all`, for every Flux kind at once: annotate every
     /// discovered `*.fluxcd.io` resource (optionally scoped to one namespace) with
     /// `reconcile.fluxcd.io/requestedAt`, requesting an immediate reconciliation.
     /// Lists/patches each kind concurrently; best-effort like `sanitize` — a
     /// failed list or patch is skipped rather than aborting the whole sweep.
-    pub async fn flux_reconcile_all(&self, namespace: Option<&str>) -> Result<usize, K8sError> {
+    pub async fn flux_reconcile_all(
+        &self,
+        namespace: Option<&str>,
+    ) -> Result<ActionSummary, K8sError> {
         let client = self.client();
         let ts = now_rfc3339();
         let catalog_store = self.shared.catalog();
@@ -109,7 +125,7 @@ impl Backend {
         let futs = catalog
             .entries
             .iter()
-            .filter(|e| e.kind.category == Category::Flux)
+            .filter(|entry| entry.kind.supports(ResourceAction::FluxReconcile))
             .map(|entry| {
                 let client = client.clone();
                 let ts = ts.clone();
@@ -120,8 +136,9 @@ impl Backend {
                         entry.kind.namespaced,
                         namespace,
                     );
-                    let Ok(list) = list_api.list(&ListParams::default()).await else {
-                        return 0usize;
+                    let list = match list_api.list(&ListParams::default()).await {
+                        Ok(list) => list,
+                        Err(error) => return summary_for_error(&error),
                     };
                     let patch = Patch::Merge(json!({ "metadata": { "annotations": {
                         "reconcile.fluxcd.io/requestedAt": ts
@@ -137,15 +154,42 @@ impl Backend {
                         );
                         let patch = patch.clone();
                         Some(async move {
-                            api.patch(&name, &PatchParams::default(), &patch)
-                                .await
-                                .is_ok()
+                            match api.patch(&name, &PatchParams::default(), &patch).await {
+                                Ok(_) => ActionSummary {
+                                    attempted: 1,
+                                    succeeded: 1,
+                                    ..Default::default()
+                                },
+                                Err(error) => summary_for_error(&error),
+                            }
                         })
                     });
-                    join_all(patches).await.into_iter().filter(|ok| *ok).count()
+                    join_all(patches).await.into_iter().fold(
+                        ActionSummary::default(),
+                        |mut total, result| {
+                            total.merge(result);
+                            total
+                        },
+                    )
                 }
             });
-        Ok(join_all(futs).await.into_iter().sum())
+        Ok(join_all(futs)
+            .await
+            .into_iter()
+            .fold(ActionSummary::default(), |mut total, result| {
+                total.merge(result);
+                total
+            }))
+    }
+}
+
+fn summary_for_error(error: &kube::Error) -> ActionSummary {
+    let forbidden = matches!(error, kube::Error::Api(status) if status.code == 403) as usize;
+    ActionSummary {
+        attempted: 1,
+        forbidden,
+        failed: 1 - forbidden,
+        ..Default::default()
     }
 }
 
@@ -154,6 +198,12 @@ struct SourceRef {
     kind: String,
     name: String,
     namespace: Option<String>,
+}
+
+pub(crate) struct FluxSourceTarget {
+    pub(crate) key: String,
+    pub(crate) namespace: Option<String>,
+    pub(crate) name: String,
 }
 
 /// Find the sourceRef a Kustomization or HelmRelease reconciles against, trying

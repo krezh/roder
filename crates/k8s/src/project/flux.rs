@@ -27,3 +27,65 @@ pub(crate) fn ready_message_cells(data: &Value) -> (Vec<String>, RowStatus) {
     };
     (vec![ready_label(&ready), reason, message], status)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn ready_and_suspension_drive_flux_projection() {
+        let cases = [
+            (
+                json!({"status": {"conditions": [{
+                    "type": "Ready",
+                    "status": "True",
+                    "reason": "ReconciliationSucceeded",
+                    "message": "Applied revision main@sha1:abc"
+                }]}}),
+                vec![
+                    "True".to_string(),
+                    "ReconciliationSucceeded".to_string(),
+                    "Applied revision main@sha1:abc".to_string(),
+                ],
+                RowStatus::Ok,
+            ),
+            (
+                json!({"status": {"conditions": [{
+                    "type": "Ready", "status": "False"
+                }]}}),
+                vec!["False".to_string(), "False".to_string(), String::new()],
+                RowStatus::Error,
+            ),
+            (
+                json!({"status": {"conditions": [{
+                    "type": "Ready", "status": "Unknown", "reason": "Progressing"
+                }]}}),
+                vec![
+                    "Unknown".to_string(),
+                    "Progressing".to_string(),
+                    String::new(),
+                ],
+                RowStatus::Pending,
+            ),
+            (
+                json!({"spec": {"suspend": true}}),
+                vec!["-".to_string(), "Suspended".to_string(), String::new()],
+                RowStatus::Warn,
+            ),
+            (
+                json!({}),
+                vec!["-".to_string(), "-".to_string(), String::new()],
+                RowStatus::Unknown,
+            ),
+        ];
+
+        for (data, expected_cells, expected_status) in cases {
+            assert_eq!(
+                ready_message_cells(&data),
+                (expected_cells, expected_status),
+                "{data}"
+            );
+        }
+    }
+}

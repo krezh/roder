@@ -10,6 +10,7 @@ use roder_core::ResourceKind;
 
 use crate::data;
 
+mod alert_utils;
 mod components;
 mod controllers;
 mod detail;
@@ -23,6 +24,8 @@ mod log_stream;
 mod logs;
 mod mobile;
 mod overlays;
+mod overview;
+mod resource_actions;
 mod search_state;
 mod state;
 mod table_logic;
@@ -343,6 +346,7 @@ pub fn App() -> impl IntoView {
     });
     provide_context(keys::ActiveLayer(active_layer));
     provide_context(keys::PendingKeys(RwSignal::new(keys::Pending::default())));
+    provide_context(overview::OverviewState::new());
     failure_watch::use_failure_watch();
 
     // Keep an end-to-end status alive independently of whichever view/SSE streams

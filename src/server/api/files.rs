@@ -7,6 +7,7 @@ use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use base64::Engine;
+use roder_core::{ResourceAction, ResourceKind};
 use roder_k8s::{normalize_file_path, Backend, K8sError};
 use serde::Deserialize;
 
@@ -85,6 +86,18 @@ fn validate(query: &FilesQuery) -> Result<(), (StatusCode, String)> {
     validate_target(&query.namespace, &query.pod, &query.container, &query.path)
 }
 
+async fn can_access_files(backend: &Backend, namespace: &str, pod: &str) -> bool {
+    backend
+        .can_action(
+            ResourceAction::Exec,
+            &ResourceKind::make_key("", "v1", "Pod"),
+            Some(namespace),
+            Some(pod),
+            None,
+        )
+        .await
+}
+
 fn validate_mutation_target(
     namespace: &str,
     pod: &str,
@@ -108,6 +121,9 @@ pub async fn list_files(
     if let Err(error) = validate(&query) {
         return error.into_response();
     }
+    if !can_access_files(&backend, &query.namespace, &query.pod).await {
+        return StatusCode::FORBIDDEN.into_response();
+    }
     match backend
         .list_container_directory(&query.namespace, &query.pod, &query.container, &query.path)
         .await
@@ -124,6 +140,9 @@ pub async fn read_file(
     if let Err(error) = validate(&query) {
         return error.into_response();
     }
+    if !can_access_files(&backend, &query.namespace, &query.pod).await {
+        return StatusCode::FORBIDDEN.into_response();
+    }
     match backend
         .read_container_file(&query.namespace, &query.pod, &query.container, &query.path)
         .await
@@ -139,6 +158,9 @@ pub async fn download_file(
 ) -> Response {
     if let Err(error) = validate(&query) {
         return error.into_response();
+    }
+    if !can_access_files(&backend, &query.namespace, &query.pod).await {
+        return StatusCode::FORBIDDEN.into_response();
     }
     match backend
         .download_container_file(&query.namespace, &query.pod, &query.container, &query.path)
@@ -173,6 +195,9 @@ pub async fn upload_file(
         &request.path,
     ) {
         return error.into_response();
+    }
+    if !can_access_files(&backend, &request.namespace, &request.pod).await {
+        return StatusCode::FORBIDDEN.into_response();
     }
     if request.content.len().saturating_mul(3) / 4 > FILE_TRANSFER_LIMIT {
         return (
@@ -239,6 +264,9 @@ pub async fn write_file(
     ) {
         return error.into_response();
     }
+    if !can_access_files(&backend, &request.namespace, &request.pod).await {
+        return StatusCode::FORBIDDEN.into_response();
+    }
     if request.content.len() > 1024 * 1024 {
         return (StatusCode::PAYLOAD_TOO_LARGE, "file content exceeds 1 MiB").into_response();
     }
@@ -269,6 +297,9 @@ pub async fn create_file(
     ) {
         return error.into_response();
     }
+    if !can_access_files(&backend, &request.namespace, &request.pod).await {
+        return StatusCode::FORBIDDEN.into_response();
+    }
     match backend
         .create_container_entry(
             &request.namespace,
@@ -295,6 +326,9 @@ pub async fn delete_file(
         &request.path,
     ) {
         return error.into_response();
+    }
+    if !can_access_files(&backend, &request.namespace, &request.pod).await {
+        return StatusCode::FORBIDDEN.into_response();
     }
     match backend
         .delete_container_entry(

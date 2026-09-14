@@ -2,14 +2,17 @@
 
 use leptos::prelude::*;
 use roder_core::{
-    ClusterOverview, NodeSummary, OverviewWarning, ResourceHealthRollup, ResourceKind, RowStatus,
+    ClusterOverview, ControllerHealthSignal, NodeSummary, OverviewWarning, ResourceHealthRollup,
+    ResourceKind, RowStatus,
 };
 
 use crate::app::components::table::StatusDot;
-use crate::app::state::{Catalog, DetailTarget, Tick};
-use crate::app::util::format::{
-    camel_label, cluster_usage_pct, fmt_cores, fmt_mem, pct, talos_version,
+use crate::app::overview::{
+    cluster_health, controller_rollup, controller_signal_state, core_kind, kind_for_target,
+    ControllerState, HealthState, OverviewState,
 };
+use crate::app::state::{Catalog, DetailTarget, Tick};
+use crate::app::util::format::{cluster_usage_pct, fmt_cores, fmt_mem, pct, talos_version};
 use crate::data;
 
 #[component]
@@ -18,43 +21,7 @@ pub(crate) fn Dashboard() -> impl IntoView {
     let selected_kind = expect_context::<RwSignal<Option<ResourceKind>>>();
     let detail = expect_context::<RwSignal<Option<DetailTarget>>>();
     let tick = expect_context::<Tick>().0;
-    let overview = RwSignal::new(None::<ClusterOverview>);
-    let load_error = RwSignal::new(None::<String>);
-
-    Effect::new(move |_| {
-        if let Some(cached) = data::storage_get("roder.overview")
-            .and_then(|value| serde_json::from_str::<ClusterOverview>(&value).ok())
-        {
-            overview.set(Some(cached));
-        }
-    });
-
-    let resource =
-        LocalResource::new(|| async { data::fetch_json::<ClusterOverview>("/api/overview").await });
-    Effect::new(move |_| {
-        let Some(result) = resource.get() else {
-            return;
-        };
-        match result {
-            Ok(value) => {
-                if let Ok(json) = serde_json::to_string(&value) {
-                    data::storage_set("roder.overview", &json);
-                }
-                overview.set(Some(value));
-                load_error.set(None);
-            }
-            Err(error) => load_error.set(Some(error)),
-        }
-    });
-
-    Effect::new(move |_| {
-        if let Ok(handle) = set_interval_with_handle(
-            move || resource.refetch(),
-            std::time::Duration::from_secs(15),
-        ) {
-            on_cleanup(move || handle.clear());
-        }
-    });
+    let overview = expect_context::<OverviewState>();
 
     view! {
         <div class="dashboard">
@@ -64,28 +31,28 @@ pub(crate) fn Dashboard() -> impl IntoView {
                     <h1>"Overview"</h1>
                 </div>
                 <div class="dashboard-actions">
-                    {move || load_error.get().map(|_| view! {
+                    {move || overview.error.get().map(|_| view! {
                         <span class="dashboard-stale" role="status">"Showing last known data"</span>
                     })}
                     <button type="button" class="dashboard-refresh"
-                        disabled=move || resource.get().is_none()
-                        on:click=move |_| resource.refetch()>
-                        {move || if resource.get().is_none() { "Refreshing" } else { "Refresh" }}
+                        disabled=move || overview.refreshing()
+                        on:click=move |_| overview.refresh()>
+                        {move || if overview.refreshing() { "Refreshing" } else { "Refresh" }}
                     </button>
                 </div>
             </header>
 
-            {move || match overview.get() {
+            {move || match overview.data.get() {
                 Some(value) => dashboard_view(value, catalog, selected_kind, detail, tick).into_any(),
-                None if load_error.get().is_some() => {
-                    let message = load_error.get().unwrap_or_default();
+                None if overview.error.get().is_some() => {
+                    let message = overview.error.get().unwrap_or_default();
                     view! {
                         <div class="dashboard-load-state dashboard-load-error" role="alert">
                             <span class="load-state-mark">"!"</span>
                             <h2>"Cluster overview unavailable"</h2>
                             <p>{message}</p>
                             <button type="button" class="dashboard-refresh"
-                                on:click=move |_| resource.refetch()>"Try again"</button>
+                                on:click=move |_| overview.refresh()>"Try again"</button>
                         </div>
                     }.into_any()
                 }
@@ -107,11 +74,7 @@ fn select_kind(
     selected_kind: RwSignal<Option<ResourceKind>>,
     key_or_kind: &str,
 ) {
-    if let Some(resource) = catalog
-        .get_untracked()
-        .into_iter()
-        .find(|resource| resource.key == key_or_kind || resource.kind == key_or_kind)
-    {
+    if let Some(resource) = kind_for_target(&catalog.get_untracked(), key_or_kind) {
         selected_kind.set(Some(resource));
     }
 }
@@ -125,6 +88,7 @@ fn dashboard_view(
 ) -> impl IntoView {
     let nodes = o.nodes.clone();
     let warnings = o.warnings.clone();
+    let controller_groups = o.controller_groups.clone();
     let (cpu_p, mem_p) = cluster_usage_pct(&nodes);
     let cpu_available = nodes
         .iter()
@@ -132,88 +96,25 @@ fn dashboard_view(
     let mem_available = nodes
         .iter()
         .any(|node| node.mem_used.is_some() && node.mem_bytes.is_some());
-    let ready_nodes = nodes.iter().filter(|node| node.ready).count();
-    let unready_nodes = nodes.len().saturating_sub(ready_nodes);
-    let controller_failing: usize = o
-        .flux_resources
-        .iter()
-        .chain(&o.external_secret_resources)
-        .chain(&o.kopiur_resources)
-        .chain(&o.tuppr_resources)
-        .map(|resource| resource.health.failing as usize)
-        .sum();
-    let controller_suspended: usize = o
-        .flux_resources
-        .iter()
-        .chain(&o.external_secret_resources)
-        .chain(&o.kopiur_resources)
-        .chain(&o.tuppr_resources)
-        .map(|resource| resource.health.suspended as usize)
-        .sum();
-    let controller_warning: usize = o
-        .flux_resources
-        .iter()
-        .chain(&o.external_secret_resources)
-        .chain(&o.kopiur_resources)
-        .chain(&o.tuppr_resources)
-        .map(|resource| (resource.health.warning + resource.health.unknown) as usize)
-        .sum();
-    let controller_unreadable = o
-        .flux_resources
-        .iter()
-        .chain(&o.external_secret_resources)
-        .chain(&o.kopiur_resources)
-        .chain(&o.tuppr_resources)
-        .filter(|resource| resource.error.is_some())
-        .count();
-    let failing =
-        o.pod_failed as usize + controller_failing + controller_unreadable + unready_nodes;
-    let caution =
-        o.pod_pending as usize + controller_suspended + controller_warning + warnings.len();
-    let (health_class, health_label, health_summary) = if failing > 0 {
-        (
-            "health-error",
-            "Attention needed",
-            format!(
-                "{failing} failing signal{} across the cluster",
-                if failing == 1 { "" } else { "s" }
-            ),
-        )
-    } else if caution > 0 {
-        (
-            "health-warn",
-            "Review recommended",
-            format!(
-                "{caution} warning signal{} to review",
-                if caution == 1 { "" } else { "s" }
-            ),
-        )
-    } else {
-        (
-            "health-ok",
-            "Cluster healthy",
-            "All tracked systems are operating normally".to_string(),
-        )
+    let health = cluster_health(&o);
+    let health_class = match health.state {
+        HealthState::Ok => "health-ok",
+        HealthState::Warning => "health-warn",
+        HealthState::Error => "health-error",
     };
-
-    let node_kind = catalog
-        .get_untracked()
-        .into_iter()
-        .find(|resource| resource.group.is_empty() && resource.kind == "Node");
-    let event_kind = catalog
-        .get_untracked()
-        .into_iter()
-        .find(|resource| resource.group.is_empty() && resource.kind == "Event");
+    let catalog_snapshot = catalog.get_untracked();
+    let node_kind = core_kind(&catalog_snapshot, "Node");
+    let event_kind = core_kind(&catalog_snapshot, "Event");
 
     view! {
         <section class=format!("cluster-health {health_class}") aria-label="Cluster health">
             <div class="health-mark" aria-hidden="true"></div>
             <div class="health-copy">
-                <span class="health-label">{health_label}</span>
-                <strong>{health_summary}</strong>
+                <span class="health-label">{health.label}</span>
+                <strong>{health.summary}</strong>
             </div>
             <div class="health-facts">
-                <span><b>{ready_nodes}"/"{nodes.len()}</b> " nodes ready"</span>
+                <span><b>{health.ready_nodes}"/"{nodes.len()}</b> " nodes ready"</span>
                 <span><b>{o.pod_running}"/"{o.pod_total}</b> " pods running"</span>
                 <span><b>{warnings.len()}</b> " recent warnings"</span>
             </div>
@@ -264,56 +165,25 @@ fn dashboard_view(
             </button>
         </div>
 
-        {(!o.flux_resources.is_empty()
-            || !o.external_secret_resources.is_empty()
-            || !o.kopiur_resources.is_empty()
-            || !o.tuppr_resources.is_empty())
-            .then(|| view! {
+        {(!controller_groups.is_empty()).then(|| view! {
                 <section class="dashboard-section" aria-labelledby="controllers-heading">
                     <div class="section-heading">
                         <span id="controllers-heading" class="section-kicker">"Controllers"</span>
                     </div>
                     <div class="controller-groups">
-                        {(!o.flux_resources.is_empty()).then(|| view! {
+                        {controller_groups.into_iter().map(|group| view! {
                             <div class="controller-group">
-                                <h2>"Flux"</h2>
+                                <h2>{group.name}</h2>
                                 <div class="controller-grid">
-                                    {o.flux_resources.clone().into_iter().map(|resource| {
+                                    {group.resources.into_iter().map(|resource| {
                                         rollup_card(resource, catalog, selected_kind)
+                                    }).collect_view()}
+                                    {group.signals.into_iter().map(|signal| {
+                                        signal_card(signal, tick)
                                     }).collect_view()}
                                 </div>
                             </div>
-                        })}
-                        {(!o.external_secret_resources.is_empty()).then(|| view! {
-                            <div class="controller-group">
-                                <h2>"External Secrets"</h2>
-                                <div class="controller-grid">
-                                    {o.external_secret_resources.clone().into_iter().map(|resource| {
-                                        rollup_card(resource, catalog, selected_kind)
-                                    }).collect_view()}
-                                </div>
-                            </div>
-                        })}
-                        {(!o.kopiur_resources.is_empty()).then(|| view! {
-                            <div class="controller-group">
-                                <h2>"Kopiur"</h2>
-                                <div class="controller-grid">
-                                    {o.kopiur_resources.clone().into_iter().map(|resource| {
-                                        rollup_card(resource, catalog, selected_kind)
-                                    }).collect_view()}
-                                </div>
-                            </div>
-                        })}
-                        {(!o.tuppr_resources.is_empty()).then(|| view! {
-                            <div class="controller-group">
-                                <h2>"Tuppr"</h2>
-                                <div class="controller-grid">
-                                    {o.tuppr_resources.clone().into_iter().map(|resource| {
-                                        rollup_card(resource, catalog, selected_kind)
-                                    }).collect_view()}
-                                </div>
-                            </div>
-                        })}
+                        }).collect_view()}
                     </div>
                 </section>
             })}
@@ -324,7 +194,7 @@ fn dashboard_view(
                     <span class="section-kicker">"Infrastructure"</span>
                     <h2 id="nodes-heading">"Nodes"</h2>
                 </div>
-                <span class="section-caption">{ready_nodes}" of "{nodes.len()}" ready"</span>
+                <span class="section-caption">{health.ready_nodes}" of "{nodes.len()}" ready"</span>
             </div>
             <div class="nodes">
                 {nodes.into_iter().map(|node| {
@@ -436,35 +306,35 @@ fn rollup_card(
     catalog: RwSignal<Vec<ResourceKind>>,
     selected_kind: RwSignal<Option<ResourceKind>>,
 ) -> impl IntoView {
-    let label = resource_label(&resource.kind);
-    let target = if resource.key.is_empty() {
-        resource.kind.clone()
-    } else {
-        resource.key.clone()
-    };
+    let derived = controller_rollup(&resource);
+    let label = derived.label;
+    let target = derived.target;
     let rollup = resource.health;
     let error = resource.error.unwrap_or_default();
-    let unreadable = !error.is_empty();
-    let state = if unreadable || rollup.failing > 0 {
-        "controller-error"
-    } else if rollup.reconciling > 0 {
-        "controller-pending"
-    } else if rollup.suspended > 0 || rollup.warning > 0 || rollup.unknown > 0 {
-        "controller-warn"
-    } else {
-        "controller-ok"
+    let unreadable = derived.unreadable;
+    let only_unclassified = derived.only_unclassified;
+    let state = match derived.state {
+        ControllerState::Ok => "controller-ok",
+        ControllerState::Neutral => "controller-neutral",
+        ControllerState::Warning => "controller-warn",
+        ControllerState::Pending => "controller-pending",
+        ControllerState::Error => "controller-error",
     };
     view! {
         <button type="button" class=format!("card controller-card {state}")
-            title=error
+            data-tip=error
             on:click=move |_| select_kind(catalog, selected_kind, &target)>
             <div class="controller-status" aria-hidden="true"></div>
             <div class="controller-main">
                 <div class="card-heading">
                     <h3>{label}</h3>
                 </div>
-                <strong>{rollup.ready}" / "{rollup.total}</strong>
-                <span>"ready"</span>
+                <strong>{if only_unclassified {
+                    rollup.total.to_string()
+                } else {
+                    format!("{} / {}", rollup.ready, rollup.total)
+                }}</strong>
+                <span>{if only_unclassified { "resources" } else { "ready" }}</span>
             </div>
             <div class="controller-counts">
                 {(rollup.reconciling > 0).then(|| view! {
@@ -480,12 +350,15 @@ fn rollup_card(
                     <span class="error">{rollup.failing}" failing"</span>
                 })}
                 {(rollup.unknown > 0).then(|| view! {
-                    <span class="unknown">{rollup.unknown}" status unknown"</span>
+                    <span class="warn">{rollup.unknown}" health status unrecognized"</span>
+                })}
+                {(rollup.unreported > 0).then(|| view! {
+                    <span class="unknown">{rollup.unreported}" health status not reported"</span>
                 })}
                 {unreadable.then(|| view! {
                     <span class="error">"unreadable"</span>
                 })}
-                {(rollup.reconciling == 0 && rollup.suspended == 0 && rollup.warning == 0 && rollup.failing == 0 && rollup.unknown == 0 && !unreadable).then(|| view! {
+                {(rollup.reconciling == 0 && rollup.suspended == 0 && rollup.warning == 0 && rollup.failing == 0 && rollup.unknown == 0 && rollup.unreported == 0 && !unreadable).then(|| view! {
                     <span class="ok">"All reconciled"</span>
                 })}
             </div>
@@ -493,16 +366,30 @@ fn rollup_card(
     }
 }
 
-fn resource_label(kind: &str) -> String {
-    let label = camel_label(kind);
-    if let Some(stem) = label.strip_suffix("Policy") {
-        format!("{stem}Policies")
-    } else if let Some(stem) = label.strip_suffix("Repository") {
-        format!("{stem}Repositories")
-    } else if let Some(stem) = label.strip_suffix("Class") {
-        format!("{stem}Classes")
-    } else {
-        format!("{label}s")
+fn signal_card(signal: ControllerHealthSignal, tick: RwSignal<u32>) -> impl IntoView {
+    let state = match controller_signal_state(signal.status) {
+        ControllerState::Ok => "controller-ok",
+        ControllerState::Neutral => "controller-neutral",
+        ControllerState::Warning => "controller-warn",
+        ControllerState::Pending => "controller-pending",
+        ControllerState::Error => "controller-error",
+    };
+    let timestamp = signal.timestamp;
+    let fallback = signal.value;
+    view! {
+        <article class=format!("card controller-card controller-signal {state}") data-tip=signal.message>
+            <div class="controller-status" aria-hidden="true"></div>
+            <div class="controller-main">
+                <div class="card-heading"><h3>{signal.label}</h3></div>
+                <strong>{move || {
+                    tick.get();
+                    timestamp
+                        .as_ref()
+                        .map(|value| data::humanize_age(&Some(value.clone())))
+                        .unwrap_or_else(|| fallback.clone())
+                }}</strong>
+            </div>
+        </article>
     }
 }
 

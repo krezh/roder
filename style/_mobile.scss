@@ -328,9 +328,9 @@
     inset: 0;
     background: rgba(0, 0, 0, 0.5);
     z-index: 20;
-    animation: sheet-scrim-in 0.15s ease;
+    animation: scrim-in 0.15s ease;
     &.closing {
-      animation: sheet-scrim-out 0.15s ease forwards;
+      animation: scrim-out 0.15s ease forwards;
     }
   }
 
@@ -2354,6 +2354,7 @@
     > i { grid-row: 1 / 3; background: var(--ok); }
     &.warning > i, &.pending > i { background: var(--warn); }
     &.error > i { background: var(--error); }
+    &.neutral > i { background: var(--muted); }
     > span { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
     > span strong { grid-row: 1 / 3; }
     > span b, > span small { grid-column: 2; text-align: right; }
@@ -2398,9 +2399,9 @@
     inset: 0;
     z-index: 80;
     background: rgba(0, 0, 0, 0.62);
-    animation: sheet-scrim-in 0.16s ease;
+    animation: scrim-in 0.16s ease;
 
-    &.closing { animation: sheet-scrim-out 0.16s ease forwards; }
+    &.closing { animation: scrim-out 0.16s ease forwards; }
   }
 
   .mobile-dialog,
@@ -2552,6 +2553,12 @@
   .mobile-alert-row .silenced { padding: 0.15rem 0.4rem; border-radius: 999px; background: var(--mobile-surface-raised); font-size: 0.68rem; }
   .mobile-alert-labels { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.6rem; }
   .mobile-alert-labels span { max-width: 100%; padding: 0.2rem 0.4rem; border-radius: 6px; background: var(--mobile-surface-raised); color: var(--muted); font-size: 0.65rem; overflow-wrap: anywhere; }
+  .mobile-alert-targets { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.65rem; }
+  .mobile-alert-targets > small { flex: 1 0 100%; color: var(--muted); font-size: 0.65rem; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; }
+  .mobile-alert-targets button { display: grid; min-width: 0; min-height: 42px; padding: 0.35rem 0.55rem; border: 1px solid var(--mobile-hairline); border-radius: 9px; background: var(--mobile-surface-raised); color: var(--fg); text-align: left; }
+  .mobile-alert-targets button:focus-visible { border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: 2px; }
+  .mobile-alert-targets button strong { font-size: 0.72rem; }
+  .mobile-alert-targets button span { color: var(--muted); font-family: monospace; font-size: 0.66rem; overflow-wrap: anywhere; }
   .mobile-silence-actions { display: flex; justify-content: flex-end; margin-top: 0.65rem; }
   .mobile-silence-actions button { min-height: 38px; padding: 0 0.8rem; border: 1px solid var(--mobile-hairline); border-radius: 10px; background: var(--mobile-surface-raised); color: var(--fg); }
   .mobile-silence-scrim { z-index: 83; }
@@ -2714,12 +2721,6 @@
   }
 }
 
-@keyframes sheet-scrim-in {
-  from { opacity: 0; }
-}
-@keyframes sheet-scrim-out {
-  to { opacity: 0; }
-}
 @keyframes sheet-slide-in {
   from { transform: translateY(100%); }
 }

@@ -1,12 +1,14 @@
 use leptos::prelude::*;
-use roder_core::{ResourceKind, RowStatus, Trend};
+use roder_core::{ResourceAction, ResourceKind, RowStatus, Trend};
 
 use crate::app::components::dropdown::{Dropdown, DropdownItem};
 use crate::app::components::table::{cell_value_changed, sortable_th, FlashTd};
 use crate::app::components::table_row::{NameCell, ResourceRow as ResourceRowView};
+use crate::app::controllers::detail::selection_permissions_resource;
 use crate::app::events::{make_bulk_open_logs, make_do_bulk, make_do_delete, RowMap};
 use crate::app::hooks::{
     table_column_truncation, table_window, use_sse_subscription, use_table_state,
+    variable_window_layout,
 };
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::overlays::delete::{ask_delete, DeleteRequest};
@@ -128,12 +130,51 @@ pub(crate) fn KindTable(
         })
     });
 
-    let window = table_window(t, shown_uids);
+    let fixed_window = table_window(t, shown_uids);
+    let event_heights = RwSignal::new(std::collections::HashMap::<String, f64>::new());
+    let layout = Memo::new(move |_| {
+        if is_events {
+            shown_uids.with(|uids| {
+                event_heights.with(|heights| {
+                    let (measured_total, measured_count) = uids
+                        .iter()
+                        .filter_map(|uid| heights.get(uid))
+                        .fold((0.0, 0usize), |(total, count), height| {
+                            (total + height, count + 1)
+                        });
+                    let estimate = if measured_count == 0 {
+                        t.row_h.get()
+                    } else {
+                        measured_total / measured_count as f64
+                    };
+                    variable_window_layout(
+                        uids,
+                        heights,
+                        &t.removing.get(),
+                        estimate,
+                        t.scroll_top.get(),
+                        t.viewport_h.get(),
+                    )
+                })
+            })
+        } else {
+            fixed_window.get()
+        }
+    });
+    let window = Memo::new(move |_| {
+        let (first, last, _, _) = layout.get();
+        (first, last)
+    });
 
     // Reflow when a relist publishes a changed Table schema.
     let namespaced = kind.namespaced;
     let key = kind.key.clone();
     let title = kind.kind.clone();
+    let view_title = if is_events {
+        "Events".to_string()
+    } else {
+        title.clone()
+    };
     let is_pod_kind = kind.group.is_empty() && kind.kind == "Pod";
     let node_col = Memo::new(move |_| columns.get().iter().position(|c| c == "Node"));
 
@@ -198,17 +239,43 @@ pub(crate) fn KindTable(
             .map(|(i, _)| i)
             .collect::<std::collections::HashSet<usize>>()
     });
-    let kk = KindKind::new(&kind.group, &kind.kind);
-    let bulk_workload = kk.is_workload();
-    let bulk_job = kk.is_job();
-    let bulk_flux = kk.is_flux();
-    let bulk_certificate = kk.is_certificate();
-    let bulk_helmrelease = kk.is_helmrelease();
-    let bulk_has_source_ref = kk.has_source_ref();
+    let kk = KindKind::new(&kind.group, &kind.version, &kind.kind);
+    let bulk_workload = kk.supports(ResourceAction::Restart);
+    let bulk_job = kk.supports(ResourceAction::JobRerun);
+    let bulk_flux_reconcile = kk.supports(ResourceAction::FluxReconcile);
+    let bulk_flux_suspend = kk.supports(ResourceAction::FluxSuspend);
+    let bulk_certificate = kk.supports(ResourceAction::CertificateRenew);
+    let bulk_helmrelease = kk.supports(ResourceAction::FluxForce);
+    let bulk_has_source_ref = kk.supports(ResourceAction::FluxReconcileWithSource);
+    let bulk_logs = kk.supports(ResourceAction::Logs);
+    let bulk_eso = kk.supports(ResourceAction::ExternalSecretsRefresh);
+    let bulk_cronjob = kk.supports(ResourceAction::CronJobTrigger);
+    let bulk_kopiur = kk.supports(ResourceAction::KopiurSnapshotNow);
     let key_sv = StoredValue::new(kind.key.clone());
 
     let rows = t.rows;
     let selected = t.selected;
+    let bulk_permissions = selection_permissions_resource(move || {
+        let key = key_sv.get_value();
+        let uids = selected.get();
+        rows.with(|rows| table_logic::bulk_targets(&key, rows, &uids))
+    });
+    let bulk_allowed = move |action| {
+        bulk_permissions
+            .get()
+            .is_some_and(|permissions| permissions.allows_all(action))
+    };
+    let bulk_label = move |action, label: &'static str| {
+        let Some(permissions) = bulk_permissions.get() else {
+            return label.to_string();
+        };
+        let (allowed, total) = permissions.count(action);
+        if total > 0 && allowed < total {
+            format!("{label} {allowed}/{total}")
+        } else {
+            label.to_string()
+        }
+    };
     let can_rerun_selected_jobs = move || {
         let selected = selected.get();
         !selected.is_empty()
@@ -245,9 +312,81 @@ pub(crate) fn KindTable(
     let sort = t.sort;
     let entering = t.entering;
     let removing = t.removing;
-    let row_h = t.row_h;
     let press = t.press;
     let table_ref = t.table_ref;
+
+    #[cfg(target_arch = "wasm32")]
+    if is_events {
+        use wasm_bindgen::JsCast;
+
+        let measure_rows = move || {
+            request_animation_frame(move || {
+                let Some(Some(wrap)) = table_ref.try_get_untracked() else {
+                    return;
+                };
+                let Ok(nodes) = wrap.query_selector_all(".grid-row.row[data-row-uid]") else {
+                    return;
+                };
+                let measured = (0..nodes.length())
+                    .filter_map(|i| nodes.item(i))
+                    .filter_map(|node| node.dyn_into::<web_sys::Element>().ok())
+                    .filter_map(|row| {
+                        let classes = row.get_attribute("class").unwrap_or_default();
+                        if classes
+                            .split_ascii_whitespace()
+                            .any(|class| matches!(class, "entering" | "removing"))
+                        {
+                            return None;
+                        }
+                        let uid = row.get_attribute("data-row-uid")?;
+                        Some((uid, row.get_bounding_client_rect().height()))
+                    })
+                    .filter(|(_, height)| *height > 1.0)
+                    .collect::<Vec<_>>();
+                let changed = event_heights.with_untracked(|heights| {
+                    measured.iter().any(|(uid, height)| {
+                        heights
+                            .get(uid)
+                            .is_none_or(|known| (known - height).abs() > 0.5)
+                    })
+                });
+                if changed {
+                    event_heights.update(|heights| {
+                        heights.extend(measured);
+                    });
+                }
+            });
+        };
+
+        Effect::new(move |_| {
+            layout.track();
+            rows.track();
+            entering.track();
+            removing.track();
+            measure_rows();
+        });
+
+        Effect::new(move |_| {
+            use send_wrapper::SendWrapper;
+            use wasm_bindgen::closure::Closure;
+
+            let Some(wrap) = table_ref.get() else { return };
+            let callback = Closure::<dyn FnMut()>::new(measure_rows);
+            let callback_fn: js_sys::Function = callback
+                .as_ref()
+                .unchecked_ref::<js_sys::Function>()
+                .clone();
+            let observer =
+                web_sys::ResizeObserver::new(&callback_fn).expect("ResizeObserver constructor");
+            observer.observe(&wrap);
+            let cleanup = SendWrapper::new((observer, callback));
+            on_cleanup(move || {
+                let (observer, callback) = cleanup.take();
+                observer.disconnect();
+                drop(callback);
+            });
+        });
+    }
 
     let reset_selection = move || selected.set(std::collections::BTreeSet::new());
     let do_bulk = make_do_bulk(toast, key_sv, rows, selected, reset_selection);
@@ -327,12 +466,24 @@ pub(crate) fn KindTable(
     // fit `.table-wrap` — see `table_column_truncation` for the mechanism.
     let truncate_col = table_column_truncation(table_ref, sizer, columns);
 
-    // Grid track count follows the live column count, so the grid reflows when
-    // columns change. The single widest generic column may be capped to a fixed
-    // pixel width (`truncate_col`) so it truncates with an ellipsis instead of
-    // blowing the table out past its container — every other track keeps its
-    // natural `max-content` size.
+    // Grid track count follows the live column count. Events use a stable layout
+    // so long object names cannot squeeze the message out of view.
     let tmpl = move || {
+        if is_events {
+            let tracks = sizer.with(|values| {
+                values
+                    .iter()
+                    .take(5)
+                    .enumerate()
+                    .map(|(i, value)| {
+                        let extra = if i == 2 { 36.0 } else { 24.0 };
+                        format!("{:.0}px", text_width(value) + extra)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            });
+            return format!("--event-cols:{tracks} minmax(30rem,1fr);");
+        }
         let n = columns.with(|c| c.len());
         let cap = truncate_col.get();
         let tracks: String = (0..n)
@@ -367,9 +518,9 @@ pub(crate) fn KindTable(
     let sel_sv = StoredValue::new(selector);
 
     view! {
-        <div class="resource-view">
+        <div class="resource-view" class:events-view=is_events>
             <div class="view-head">
-                <h2 class="view-title">{title.clone()}</h2>
+                <h2 class="view-title">{view_title}</h2>
                 {if let Some(nf) = ns_filter.filter(|_| namespaced) {
                     let nl = ns_list.unwrap();
                     let select_namespace = Callback::new(move |value: String| {
@@ -447,7 +598,10 @@ pub(crate) fn KindTable(
                         </div>
                     }
                 })}
-                <span class="count">{move || format!("{} items", shown_uids.with(|v| v.len()))}</span>
+                <span class="count">{move || {
+                    let count = shown_uids.with(|v| v.len());
+                    if is_events { format!("{count} events") } else { format!("{count} items") }
+                }}</span>
                 {on_close.map(|cb| view! {
                     <button class="view-close" on:click=move |_| cb.run(())>"×"</button>
                 })}
@@ -463,7 +617,7 @@ pub(crate) fn KindTable(
                     on:click=move |_| status_filter.update(|f| *f = if *f == Some(RowStatus::Ok) { None } else { Some(RowStatus::Ok) })
                 >
                     <span class="strip-marker ok" aria-hidden="true"></span>
-                    <span class="strip-lbl">"OK"</span>
+                    <span class="strip-lbl">{if is_events { "Normal" } else { "OK" }}</span>
                     <span class="strip-val ok">{move || status_counts.get().1[0]}</span>
                     <span class="strip-share ok" aria-hidden="true" style=move || {
                         let (total, counts) = status_counts.get();
@@ -489,7 +643,7 @@ pub(crate) fn KindTable(
                     on:click=move |_| status_filter.update(|f| *f = if *f == Some(RowStatus::Warn) { None } else { Some(RowStatus::Warn) })
                 >
                     <span class="strip-marker warn" aria-hidden="true"></span>
-                    <span class="strip-lbl">"Warn"</span>
+                    <span class="strip-lbl">{if is_events { "Warnings" } else { "Warn" }}</span>
                     <span class="strip-val warn">{move || status_counts.get().1[2]}</span>
                     <span class="strip-share warn" aria-hidden="true" style=move || {
                         let (total, counts) = status_counts.get();
@@ -528,35 +682,37 @@ pub(crate) fn KindTable(
                     <span class="bulk-count">{move || format!("{} selected", selected.get().len())}</span>
                     <button class="act" on:click=move |_| selected.set(shown_uids.get().into_iter().collect())>"Select all"</button>
                     <button class="act" on:click=move |_| selected.set(std::collections::BTreeSet::new())>"Clear"</button>
-                    {(is_pod_kind || bulk_workload).then(|| view! {
-                        <button class="act" on:click=move |_| do_logs()>"Logs"</button>
+                    {bulk_logs.then(|| view! {
+                        <button class="act" disabled=move || !bulk_allowed(ResourceAction::Logs) on:click=move |_| do_logs()>{move || bulk_label(ResourceAction::Logs, "Logs")}</button>
                     })}
                     {bulk_workload.then(|| view! {
-                        <button class="act" on:click=move |_| do_bulk("restart")>"Restart"</button>
+                        <button class="act" disabled=move || !bulk_allowed(ResourceAction::Restart) on:click=move |_| do_bulk("restart")>{move || bulk_label(ResourceAction::Restart, "Restart")}</button>
                     })}
                     {bulk_job.then(|| view! {
-                        <button class="act" disabled=move || !can_rerun_selected_jobs()
-                            title="Only completed or failed Jobs can be re-run"
-                            on:click=move |_| do_bulk("job-rerun")>"Re-run"</button>
+                        <button class="act" disabled=move || !can_rerun_selected_jobs() || !bulk_allowed(ResourceAction::JobRerun)
+                            data-tip="Only completed or failed Jobs can be re-run"
+                            on:click=move |_| do_bulk("job-rerun")>{move || bulk_label(ResourceAction::JobRerun, "Re-run")}</button>
                     })}
-                    {bulk_flux.then(|| view! {
-                        <button class="act" on:click=move |_| do_bulk("flux-reconcile")>"Reconcile"</button>
+                    {bulk_flux_reconcile.then(|| view! {
+                        <button class="act" disabled=move || !bulk_allowed(ResourceAction::FluxReconcile) on:click=move |_| do_bulk("flux-reconcile")>{move || bulk_label(ResourceAction::FluxReconcile, "Reconcile")}</button>
                         {bulk_has_source_ref.then(|| view! {
-                            <button class="act" on:click=move |_| do_bulk("flux-reconcile-with-source")>"Reconcile w/ source"</button>
+                            <button class="act" disabled=move || !bulk_allowed(ResourceAction::FluxReconcileWithSource) on:click=move |_| do_bulk("flux-reconcile-with-source")>{move || bulk_label(ResourceAction::FluxReconcileWithSource, "Reconcile w/ source")}</button>
                         })}
                         {bulk_helmrelease.then(|| view! {
-                            <button class="act" on:click=move |_| do_bulk("flux-force")>"Force"</button>
-                            <button class="act" on:click=move |_| do_bulk("flux-reset")>"Reset"</button>
+                            <button class="act" disabled=move || !bulk_allowed(ResourceAction::FluxForce) on:click=move |_| do_bulk("flux-force")>{move || bulk_label(ResourceAction::FluxForce, "Force")}</button>
+                            <button class="act" disabled=move || !bulk_allowed(ResourceAction::FluxReset) on:click=move |_| do_bulk("flux-reset")>{move || bulk_label(ResourceAction::FluxReset, "Reset")}</button>
                         })}
+                    })}
+                    {bulk_flux_suspend.then(|| view! {
                         {move || bulk_show_suspend().then(|| view! {
-                            <button class="act" on:click=move |_| do_bulk("flux-suspend")>"Suspend"</button>
+                            <button class="act" disabled=move || !bulk_allowed(ResourceAction::FluxSuspend) on:click=move |_| do_bulk("flux-suspend")>{move || bulk_label(ResourceAction::FluxSuspend, "Suspend")}</button>
                         })}
                         {move || bulk_show_resume().then(|| view! {
-                            <button class="act" on:click=move |_| do_bulk("flux-resume")>"Resume"</button>
+                            <button class="act" disabled=move || !bulk_allowed(ResourceAction::FluxSuspend) on:click=move |_| do_bulk("flux-resume")>{move || bulk_label(ResourceAction::FluxSuspend, "Resume")}</button>
                         })}
                     })}
                     {bulk_certificate.then(|| view! {
-                        <button class="act" on:click=move |_| {
+                        <button class="act" disabled=move || !bulk_allowed(ResourceAction::CertificateRenew) on:click=move |_| {
                             let n = selected.get_untracked().len();
                             ask_confirm(
                                 confirm,
@@ -564,22 +720,31 @@ pub(crate) fn KindTable(
                                 "Renew",
                                 move || do_bulk("certificate-renew"),
                             );
-                        }>"Force renew"</button>
+                        }>{move || bulk_label(ResourceAction::CertificateRenew, "Force renew")}</button>
                     })}
-                    <button class="act danger" on:click=move |_| {
+                    {bulk_eso.then(|| view! {
+                        <button class="act" disabled=move || !bulk_allowed(ResourceAction::ExternalSecretsRefresh) on:click=move |_| do_bulk("eso-refresh")>{move || bulk_label(ResourceAction::ExternalSecretsRefresh, "Refresh")}</button>
+                    })}
+                    {bulk_cronjob.then(|| view! {
+                        <button class="act" disabled=move || !bulk_allowed(ResourceAction::CronJobTrigger) on:click=move |_| do_bulk("cronjob-trigger")>{move || bulk_label(ResourceAction::CronJobTrigger, "Trigger")}</button>
+                    })}
+                    {bulk_kopiur.then(|| view! {
+                        <button class="act" disabled=move || !bulk_allowed(ResourceAction::KopiurSnapshotNow) on:click=move |_| do_bulk("kopiur-snapshot-now")>{move || bulk_label(ResourceAction::KopiurSnapshotNow, "Snapshot now")}</button>
+                    })}
+                    <button class="act danger" disabled=move || !bulk_allowed(ResourceAction::Delete) on:click=move |_| {
                         let n = selected.get_untracked().len();
                         ask_delete(delete_confirm, format!("Delete {n} resources?"), do_delete);
-                    }>"Delete"</button>
+                    }>{move || bulk_label(ResourceAction::Delete, "Delete")}</button>
                 </div>
             </div>
             <div class="table-wrap" node_ref=table_ref>
-                <div class="grid-table" style=tmpl class:selecting=move || !selected.get().is_empty()>
+                <div class="grid-table" class:event-table=is_events style=tmpl class:selecting=move || !selected.get().is_empty()>
                     {header}
                     <div class="grid-row sizer" aria-hidden="true">
                         {move || sizer.get().into_iter().map(|s| view! { <div class="cell">{s}</div> }).collect_view()}
                     </div>
                     <div class="vpad" style=move || {
-                        format!("grid-column:1/-1;height:{}px", window.get().0 as f64 * row_h.get())
+                        format!("grid-column:1/-1;height:{}px", layout.get().2)
                     }></div>
                     <For
                         // Schema changes remount rows so special cell renderers stay aligned.
@@ -676,12 +841,26 @@ pub(crate) fn KindTable(
                                             }.into_any()
                                         } else if column == "Namespace" {
                                             view! { <FlashTd value=val class="cell-ns" flash=flash /> }.into_any()
-                                        } else if column == "Age" {
+                                        } else if column == "Age" || (is_events && column == "Last Seen") {
                                             view! {
-                                                <div class="cell cell-age"><div class="cw"><div class="cwi">
-                                                    {move || { tick.get(); data::humanize_cell(&val()) }}
-                                                </div></div></div>
+                                                <FlashTd value=val class="cell-age" no_flash=true />
                                             }.into_any()
+                                        } else if is_events && column == "Type" {
+                                            view! {
+                                                <div class="cell cell-event-type" class:flash=move || flash.get()>
+                                                    <div class="cw"><div class="cwi"><span
+                                                        class:event-type-warning=move || val().eq_ignore_ascii_case("warning")
+                                                        class:event-type-normal=move || !val().eq_ignore_ascii_case("warning")>
+                                                        {val}
+                                                    </span></div></div>
+                                                </div>
+                                            }.into_any()
+                                        } else if is_events && column == "Reason" {
+                                            view! { <FlashTd value=val class="cell-event-reason" flash=flash /> }.into_any()
+                                        } else if is_events && column == "Object" {
+                                            view! { <FlashTd value=val class="cell-event-object" flash=flash /> }.into_any()
+                                        } else if is_events && column == "Message" {
+                                            view! { <FlashTd value=val class="cell-event-message" flash=flash /> }.into_any()
                                         } else if bool_cols.with_untracked(|v| v.contains(&i)) {
                                             view! { <FlashTd value=val no_flash=true
                                                 color=Signal::derive(move || match val().as_str() {
@@ -717,9 +896,7 @@ pub(crate) fn KindTable(
                         }
                     </For>
                     <div class="vpad" style=move || {
-                        let (_, last) = window.get();
-                        let total = shown_uids.with(|v| v.len());
-                        format!("grid-column:1/-1;height:{}px", total.saturating_sub(last) as f64 * row_h.get())
+                        format!("grid-column:1/-1;height:{}px", layout.get().3)
                     }></div>
                 </div>
                 {move || {

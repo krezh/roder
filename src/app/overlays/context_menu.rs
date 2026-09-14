@@ -1,18 +1,20 @@
 //! Right-click context menu with resource-type-specific actions.
 
 use leptos::prelude::*;
-use roder_core::{ResourceKind, RowStatus};
+use roder_core::ResourceKind;
 
+use crate::app::controllers::detail::fetch_selection_permissions;
 use crate::app::events::{fire_action, fire_action_with};
 use crate::app::overlays::confirm::{ask_confirm, Confirm};
 use crate::app::overlays::delete::{ask_delete, delete_extra, DeleteRequest};
 use crate::app::overlays::toast::{show_toast, show_toast_detail, Toast, ToastKind};
+use crate::app::resource_actions::{ActionSurface, ResourceActionModel, ResourceMenuAction};
 use crate::app::state::{
     open_logs, Catalog, CtxMenu, DebugImage, DetailTarget, DrainOpen, DrainTarget, ExecOpen,
     ExecTarget, FileBrowserOpen, LogPods, LogTarget, TableRows, TableSelected, TableTargets,
     TalosFeatures, TreeOpen,
 };
-use crate::app::table_logic::{node_is_control_plane, resolve_action_targets, targets_all};
+use crate::app::table_logic::resolve_current_action_targets;
 use crate::app::util::clipboard::copy_to_clipboard;
 use crate::app::util::format::parse_key;
 use crate::app::util::predicate::KindKind;
@@ -40,6 +42,16 @@ pub(crate) fn ContextMenu() -> impl IntoView {
     let toast = expect_context::<RwSignal<Option<Toast>>>();
 
     let (snapshot, closing, do_close) = super::use_option_overlay(ctx);
+    let action_permissions = LocalResource::new(move || {
+        let targets = snapshot
+            .get()
+            .map(|menu| {
+                resolve_current_action_targets(&menu, table_selected, table_rows, table_targets)
+                    .targets
+            })
+            .unwrap_or_default();
+        async move { fetch_selection_permissions(targets).await }
+    });
     let pos = RwSignal::new((0i32, 0i32));
     let menu_ref = NodeRef::<leptos::html::Div>::new();
 
@@ -105,6 +117,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
 
     Effect::new(move |_| {
         if let Some(menu) = snapshot.get() {
+            let _ = action_permissions.get();
             pos.set((menu.x, menu.y));
         }
     });
@@ -172,112 +185,37 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             // When the right-clicked row is part of a multi-selection, all
             // bulk-capable actions fire on every selected row.
             let rows_opt = table_rows.get_value();
-            let selected = table_selected.get_value().map(|signal| signal.get_untracked());
-            let empty_rows = Default::default();
-            let empty_targets = Default::default();
-            let resolved = match (rows_opt, table_targets.get_value()) {
-                (Some(rows), Some(row_targets)) => rows.with_untracked(|rows| {
-                    row_targets.with_untracked(|row_targets| {
-                        resolve_action_targets(
-                            &m.uid,
-                            &m.target,
-                            selected.as_ref(),
-                            rows,
-                            row_targets,
-                        )
-                    })
-                }),
-                (Some(rows), None) => rows.with_untracked(|rows| {
-                    resolve_action_targets(
-                        &m.uid,
-                        &m.target,
-                        selected.as_ref(),
-                        rows,
-                        &empty_targets,
-                    )
-                }),
-                (None, Some(row_targets)) => row_targets.with_untracked(|row_targets| {
-                    resolve_action_targets(
-                        &m.uid,
-                        &m.target,
-                        selected.as_ref(),
-                        &empty_rows,
-                        row_targets,
-                    )
-                }),
-                (None, None) => resolve_action_targets(
-                    &m.uid,
-                    &m.target,
-                    selected.as_ref(),
-                    &empty_rows,
-                    &empty_targets,
-                ),
-            };
+            let resolved = resolve_current_action_targets(&m, table_selected, table_rows, table_targets);
             let target_uids = resolved.uids;
             let targets = resolved.targets;
             let is_bulk = targets.len() > 1;
-            let is_pod = targets_all(&targets, |kind| kind.is_pod());
-            let is_workload = targets_all(&targets, |kind| kind.is_workload());
-            let is_scalable = targets_all(&targets, |kind| kind.is_scalable());
-            let is_flux = targets_all(&targets, |kind| kind.is_flux());
-            let is_helmrelease = targets_all(&targets, |kind| kind.is_helmrelease());
-            let has_source_ref = targets_all(&targets, |kind| kind.has_source_ref());
-            let is_eso = targets_all(&targets, |kind| kind.is_eso());
-            let is_certificate = targets_all(&targets, |kind| kind.is_certificate());
-            let is_cronjob = targets_all(&targets, |kind| kind.is_cronjob());
-            let is_job = targets_all(&targets, |kind| kind.is_job());
-            let is_kopiur_snapshot_policy = targets_all(&targets, |kind| kind.is_kopiur_snapshot_policy());
-            let is_node = targets_all(&targets, |kind| kind.is_node());
+            let permitted = move |action| {
+                action_permissions
+                    .get()
+                    .is_some_and(|permissions| permissions.allows_all(action))
+            };
             let talos_actions = talos_features.get().actions;
-            let suspend_state: Option<bool> = rows_opt.and_then(|rows| {
-                rows.with_untracked(|rm| {
-                    let mut states = target_uids.iter().filter_map(|uid| rm.get(uid)).map(|r| r.suspended);
-                    let first = states.next()?;
-                    states.all(|s| s == first).then_some(first)
-                })
-            });
-            let show_suspend = suspend_state != Some(true);
-            let show_resume = suspend_state != Some(false);
-            // Same `RowStatus::Warn` convention, scoped to Node rows instead of
-            // Flux rows — see `node_cells` for where it's set from `spec.unschedulable`.
-            let cordon_state: Option<bool> = rows_opt.and_then(|rows| {
-                rows.with_untracked(|rm| {
-                    let mut states = target_uids.iter().filter_map(|uid| rm.get(uid)).map(|r| r.status == RowStatus::Warn);
-                    let first = states.next()?;
-                    states.all(|s| s == first).then_some(first)
-                })
-            });
-            let show_cordon = cordon_state != Some(true);
-            let show_uncordon = cordon_state != Some(false);
-            let jobs_terminal = is_job && rows_opt.is_some_and(|rows| {
-                rows.with_untracked(|rows| {
-                    target_uids.iter().all(|uid| {
-                        rows.get(uid).is_some_and(|row| {
-                            matches!(row.status, RowStatus::Ok | RowStatus::Error)
-                        })
-                    })
-                })
-            });
-            let control_plane = rows_opt.is_some_and(|rows| {
-                rows.with_untracked(|rm| {
-                    target_uids
-                        .first()
-                        .and_then(|uid| rm.get(uid))
-                        .is_some_and(node_is_control_plane)
-                })
-            });
+            let rows_snapshot = rows_opt.map(|rows| rows.get_untracked());
+            let actions = ResourceActionModel::for_selection(
+                ActionSurface::Desktop,
+                &targets,
+                &target_uids,
+                rows_snapshot.as_ref(),
+                m.node.as_deref(),
+                talos_actions,
+                permitted,
+            );
+            let control_plane = actions.control_plane;
 
             let open = { let t = m.target.clone(); move |_| { detail.set(Some(t.clone())); do_close(); } };
             let open_tree = { let t = m.target.clone(); move |_| { tree_open.set(Some(t.clone())); do_close(); } };
-            let has_logs = targets_all(&targets, |kind| {
-                kind.is_pod() || kind.is_workload() || kind.is_job()
-            });
+            let has_logs = actions.supports(ResourceMenuAction::Logs);
             let logs = {
                 let ts = targets.clone();
                 move |_| {
                     for t in &ts {
-                        let (group, kind) = parse_key(&t.key);
-                        let aggregate = !KindKind::new(&group, &kind).is_pod();
+                        let (group, version, kind) = parse_key(&t.key);
+                        let aggregate = !KindKind::new(&group, &version, &kind).is_pod();
                         open_logs(log_pods, LogTarget::from_detail(t, aggregate));
                     }
                     if let Some(sel) = table_selected.get_value() { sel.set(Default::default()); }
@@ -456,7 +394,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
             };
 
             let scale_n = RwSignal::new(1i32);
-            let shell = (!is_bulk && is_pod).then(|| {
+            let shell = actions.supports(ResourceMenuAction::Shell).then(|| {
                 let ns  = m.target.namespace.clone().unwrap_or_default();
                 let pod = m.target.name.clone();
                 move |_| {
@@ -471,7 +409,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                     do_close();
                 }
             });
-            let files = (!is_bulk && is_pod).then(|| {
+            let files = actions.supports(ResourceMenuAction::BrowseFiles).then(|| {
                 let target = m.target.clone();
                 move |_| {
                     file_browser_open.set(Some(target.clone()));
@@ -479,17 +417,25 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                 }
             });
 
-            let ns_item = (!is_bulk).then(|| m.target.namespace.clone()).flatten();
-            let node_item = (!is_bulk && is_pod).then(|| m.node.clone()).flatten();
-            let has_operate = is_workload
-                || (!is_bulk && is_scalable)
-                || is_cronjob
-                || jobs_terminal
-                || is_kopiur_snapshot_policy
-                || is_flux
-                || is_eso
-                || is_certificate
-                || is_node;
+            let ns_item = actions.supports(ResourceMenuAction::GoToNamespace).then(|| m.target.namespace.clone()).flatten();
+            let node_item = actions.supports(ResourceMenuAction::GoToNode).then(|| m.node.clone()).flatten();
+            let operate_actions = [
+                ResourceMenuAction::Restart, ResourceMenuAction::Scale,
+                ResourceMenuAction::CronJobTrigger, ResourceMenuAction::JobRerun,
+                ResourceMenuAction::KopiurSnapshotNow, ResourceMenuAction::FluxReconcile,
+                ResourceMenuAction::FluxSuspend, ResourceMenuAction::FluxResume,
+                ResourceMenuAction::ExternalSecretsRefresh, ResourceMenuAction::CertificateRenew,
+                ResourceMenuAction::Cordon, ResourceMenuAction::Uncordon, ResourceMenuAction::Drain,
+            ];
+            let has_operate = actions.supports_any(&operate_actions);
+            let has_flux = actions.supports_any(&[
+                ResourceMenuAction::FluxReconcile,
+                ResourceMenuAction::FluxReconcileWithSource,
+                ResourceMenuAction::FluxForce,
+                ResourceMenuAction::FluxReset,
+                ResourceMenuAction::FluxSuspend,
+                ResourceMenuAction::FluxResume,
+            ]);
             let header_label = if is_bulk {
                 format!("{} selected", targets.len())
             } else {
@@ -503,19 +449,19 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                     on:contextmenu=move |e: leptos::ev::MouseEvent| { e.prevent_default(); do_close(); }></div>
                 <div class="ctx-menu" role="menu" node_ref=menu_ref class:closing=move || closing.get()
                     style=move || { let (x, y) = pos.get(); format!("left:{x}px;top:{y}px") }>
-                    <div class="ctx-header" title=header_title>
+                    <div class="ctx-header" data-tip=header_title>
                         {header_label}
                     </div>
 
                     {(!is_bulk || has_logs).then(|| view! { <div class="ctx-section-label">"Inspect"</div> })}
-                    {(!is_bulk).then(|| view! { <button class="ctx-item" role="menuitem" on:click=open>"Open details"</button> })}
-                    {(!is_bulk).then(|| view! {
+                    {actions.supports(ResourceMenuAction::OpenDetails).then(|| view! { <button class="ctx-item" role="menuitem" on:click=open>"Open details"</button> })}
+                    {actions.supports(ResourceMenuAction::Relationships).then(|| view! {
                         <button class="ctx-item" role="menuitem" on:click=open_tree>"View relationships"</button>
                     })}
                     {has_logs.then(|| view! { <button class="ctx-item" role="menuitem" on:click=logs>"View logs"</button> })}
                     {shell.map(|s| view! { <button class="ctx-item" role="menuitem" on:click=s>"Open shell"</button> })}
                     {files.map(|open| view! { <button class="ctx-item" role="menuitem" on:click=open>"Browse files"</button> })}
-                    {(!is_bulk && is_pod).then(|| {
+                    {actions.supports(ResourceMenuAction::DebugShell).then(|| {
                         let ns  = m.target.namespace.clone().unwrap_or_default();
                         let pod = m.target.name.clone();
                         move |_: leptos::ev::MouseEvent| {
@@ -579,7 +525,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                             });
                         }
                     }).map(|h| view! { <button class="ctx-item" role="menuitem" on:click=h>"Open debug shell"</button> })}
-                    {(!is_bulk && is_node).then(|| {
+                    {actions.supports(ResourceMenuAction::NodeShell).then(|| {
                         let node = m.target.name.clone();
                         move |_: leptos::ev::MouseEvent| {
                             let node = node.clone();
@@ -646,8 +592,8 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                     <button class="ctx-item" role="menuitem" on:click=copy>{if is_bulk { "Copy resource names" } else { "Copy resource name" }}</button>
 
                     {has_operate.then(|| view! { <div class="ctx-section-label">"Operate"</div> })}
-                    {is_workload.then(|| view! { <button class="ctx-item" role="menuitem" on:click=restart>"Restart workload"</button> })}
-                    {(!is_bulk && is_scalable).then(|| {
+                    {actions.supports(ResourceMenuAction::Restart).then(|| view! { <button class="ctx-item" role="menuitem" on:click=restart>"Restart workload"</button> })}
+                    {actions.supports(ResourceMenuAction::Scale).then(|| {
                         let t = m.target.clone();
                         view! {
                             <div class="ctx-item ctx-scale">
@@ -667,46 +613,50 @@ pub(crate) fn ContextMenu() -> impl IntoView {
                             </div>
                         }
                     })}
-                    {is_cronjob.then(|| view! { <button class="ctx-item" role="menuitem" on:click=trigger>"Trigger job"</button> })}
-                    {jobs_terminal.then(|| view! { <button class="ctx-item" role="menuitem" on:click=rerun>"Re-run job"</button> })}
-                    {is_kopiur_snapshot_policy.then(|| view! { <button class="ctx-item" role="menuitem" on:click=snapshot_now>"Snapshot now"</button> })}
-                    {is_flux.then(|| view! {
+                    {actions.supports(ResourceMenuAction::CronJobTrigger).then(|| view! { <button class="ctx-item" role="menuitem" on:click=trigger>"Trigger job"</button> })}
+                    {actions.supports(ResourceMenuAction::JobRerun).then(|| view! { <button class="ctx-item" role="menuitem" on:click=rerun>"Re-run job"</button> })}
+                    {actions.supports(ResourceMenuAction::KopiurSnapshotNow).then(|| view! { <button class="ctx-item" role="menuitem" on:click=snapshot_now>"Snapshot now"</button> })}
+                    {has_flux.then(|| view! {
+                        {actions.supports(ResourceMenuAction::FluxReconcile).then(|| view! {
                         <div class="ctx-item ctx-reconcile">
                             <button class="ctx-reconcile-btn" on:click=reconcile>"Reconcile"</button>
                             <span class="ctx-chips">
-                                {has_source_ref.then(|| view! {
+                                {actions.supports(ResourceMenuAction::FluxReconcileWithSource).then(|| view! {
                                     <button type="button" class="ctx-chip" class:active=move || with_source_checked.get()
                                         on:click=move |e: leptos::ev::MouseEvent| { e.stop_propagation(); with_source_checked.update(|v| *v = !*v); }>"src"</button>
                                 })}
-                                {is_helmrelease.then(|| view! {
+                                {actions.supports(ResourceMenuAction::FluxForce).then(|| view! {
                                     <button type="button" class="ctx-chip" class:active=move || force_checked.get()
                                         on:click=move |e: leptos::ev::MouseEvent| { e.stop_propagation(); force_checked.update(|v| *v = !*v); }>"force"</button>
+                                })}
+                                {actions.supports(ResourceMenuAction::FluxReset).then(|| view! {
                                     <button type="button" class="ctx-chip" class:active=move || reset_checked.get()
                                         on:click=move |e: leptos::ev::MouseEvent| { e.stop_propagation(); reset_checked.update(|v| *v = !*v); }>"reset"</button>
                                 })}
                             </span>
                         </div>
-                        {show_suspend.then(|| view! { <button class="ctx-item" role="menuitem" on:click=suspend>"Suspend"</button> })}
-                        {show_resume.then(|| view! { <button class="ctx-item" role="menuitem" on:click=resume>"Resume"</button> })}
+                        })}
+                        {actions.supports(ResourceMenuAction::FluxSuspend).then(|| view! { <button class="ctx-item" role="menuitem" on:click=suspend>"Suspend"</button> })}
+                        {actions.supports(ResourceMenuAction::FluxResume).then(|| view! { <button class="ctx-item" role="menuitem" on:click=resume>"Resume"</button> })}
                     })}
-                    {is_eso.then(|| view! { <button class="ctx-item" role="menuitem" on:click=refresh>"Refresh secret"</button> })}
-                    {is_certificate.then(|| view! { <button class="ctx-item" role="menuitem" on:click=renew_certificate>"Force renewal"</button> })}
-                    {(is_node && show_cordon).then(|| view! { <button class="ctx-item" role="menuitem" on:click=cordon>"Cordon node"</button> })}
-                    {(is_node && show_uncordon).then(|| view! { <button class="ctx-item" role="menuitem" on:click=uncordon>"Uncordon node"</button> })}
-                    {(!is_bulk && is_node).then(|| view! { <button class="ctx-item caution" role="menuitem" on:click=drain>"Drain node…"</button> })}
+                    {actions.supports(ResourceMenuAction::ExternalSecretsRefresh).then(|| view! { <button class="ctx-item" role="menuitem" on:click=refresh>"Refresh secret"</button> })}
+                    {actions.supports(ResourceMenuAction::CertificateRenew).then(|| view! { <button class="ctx-item" role="menuitem" on:click=renew_certificate>"Force renewal"</button> })}
+                    {actions.supports(ResourceMenuAction::Cordon).then(|| view! { <button class="ctx-item" role="menuitem" on:click=cordon>"Cordon node"</button> })}
+                    {actions.supports(ResourceMenuAction::Uncordon).then(|| view! { <button class="ctx-item" role="menuitem" on:click=uncordon>"Uncordon node"</button> })}
+                    {actions.supports(ResourceMenuAction::Drain).then(|| view! { <button class="ctx-item caution" role="menuitem" on:click=drain>"Drain node…"</button> })}
 
-                    {(!is_bulk && is_node && talos_actions).then(|| view! {
+                    {actions.supports_any(&[ResourceMenuAction::TalosEtcdDefrag, ResourceMenuAction::TalosReboot, ResourceMenuAction::TalosShutdown]).then(|| view! {
                         <div class="ctx-section-label">"Talos"</div>
-                        {control_plane.then(|| view! {
+                        {actions.supports(ResourceMenuAction::TalosEtcdDefrag).then(|| view! {
                             <button class="ctx-item caution" role="menuitem" on:click=talos_etcd_defrag>"Defragment etcd…"</button>
                         })}
-                        <button class="ctx-item caution" role="menuitem" on:click=talos_reboot>"Reboot node…"</button>
-                        <button class="ctx-item danger" role="menuitem" on:click=talos_shutdown>"Shut down node…"</button>
+                        {actions.supports(ResourceMenuAction::TalosReboot).then(|| view! { <button class="ctx-item caution" role="menuitem" on:click=talos_reboot>"Reboot node…"</button> })}
+                        {actions.supports(ResourceMenuAction::TalosShutdown).then(|| view! { <button class="ctx-item danger" role="menuitem" on:click=talos_shutdown>"Shut down node…"</button> })}
                     })}
 
                     <div class="ctx-section-label danger">"Danger"</div>
-                    {is_pod.then(|| view! { <button class="ctx-item caution" role="menuitem" on:click=evict>"Evict pod…"</button> })}
-                    <button class="ctx-item danger" role="menuitem" on:click=delete>"Delete resource…"</button>
+                    {actions.supports(ResourceMenuAction::Evict).then(|| view! { <button class="ctx-item caution" role="menuitem" on:click=evict>"Evict pod…"</button> })}
+                    {actions.supports(ResourceMenuAction::Delete).then(|| view! { <button class="ctx-item danger" role="menuitem" on:click=delete>"Delete resource…"</button> })}
                 </div>
             }
         })}

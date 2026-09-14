@@ -200,6 +200,123 @@
 .cell-age {
   color: var(--muted);
 }
+
+.events-view .stat-strip {
+  .strip-seg:nth-child(3),
+  .strip-seg:nth-child(5),
+  .strip-seg:nth-child(6) {
+    display: none;
+  }
+}
+
+.event-table {
+  display: block;
+  --row-h: 3.15rem;
+  min-width: 52rem;
+
+  .grid-row {
+    grid-template-columns: var(--event-cols);
+  }
+
+  .grid-row.row {
+    height: auto;
+    interpolate-size: allow-keywords;
+  }
+
+  .grid-row.entering {
+    animation: event-row-grow 0.24s ease;
+  }
+
+  .grid-row.entering > .cell,
+  .grid-row.removing > .cell {
+    overflow: hidden;
+  }
+
+  .grid-row.entering > .cell > .cw {
+    animation: none;
+  }
+
+  .grid-row.removing {
+    height: 0;
+    transition: height 0.26s ease;
+  }
+
+  .grid-row.removing > .cell > .cw {
+    grid-template-rows: minmax(var(--row-h), auto);
+    transition: none;
+  }
+
+  .cw {
+    grid-template-rows: minmax(var(--row-h), auto);
+  }
+
+  .cwi {
+    align-self: center;
+    line-height: 1.35;
+  }
+
+  .grid-row.row > .cell {
+    border-top: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  }
+
+  .cell-event-type .cwi {
+    display: flex;
+    align-items: center;
+  }
+
+  .cell-event-type span {
+    padding: 0.18rem 0.48rem;
+    border: 1px solid color-mix(in srgb, var(--ok) 35%, var(--border));
+    background: color-mix(in srgb, var(--ok) 9%, transparent);
+    color: var(--ok);
+    font-family: "Rubik", ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+
+    &.event-type-warning {
+      border-color: color-mix(in srgb, var(--warn) 45%, var(--border));
+      background: color-mix(in srgb, var(--warn) 12%, transparent);
+      color: var(--warn);
+    }
+  }
+
+  .cell-event-reason {
+    color: color-mix(in srgb, var(--fg) 92%, var(--accent));
+    font-family: "Rubik", ui-sans-serif, system-ui, sans-serif;
+    font-weight: 700;
+  }
+
+  .cell-event-object {
+    color: color-mix(in srgb, var(--fg) 76%, var(--muted));
+  }
+
+  .cell-event-message {
+    white-space: normal;
+    color: color-mix(in srgb, var(--fg) 88%, var(--muted));
+    font-family: "Rubik", ui-sans-serif, system-ui, sans-serif;
+    font-weight: 400;
+
+    .cw {
+      display: block;
+      min-height: var(--row-h);
+    }
+
+    .cwi {
+      align-self: auto;
+      min-height: var(--row-h);
+      padding-block: calc((var(--row-h) - 1.35em) / 2);
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+      white-space: normal;
+    }
+  }
+}
+@keyframes event-row-grow {
+  from { height: 0; }
+}
 @keyframes trend-fade {
   0% { opacity: 1; }
   70% { opacity: 1; }

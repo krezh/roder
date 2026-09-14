@@ -24,6 +24,9 @@ flake.lock
 # opencode session state
 .opencode
 
+# playwright-mcp scratch output (screenshots / console logs)
+.playwright-mcp
+
 # CI / release tooling
 .github
 .release-please-manifest.json

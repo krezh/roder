@@ -1,9 +1,12 @@
 use leptos::prelude::*;
-use roder_core::FiringAlert;
+use roder_core::{AlertResourceTarget, FiringAlert};
 
 use super::use_bool_overlay;
+use crate::app::alert_utils::{elapsed_since, elapsed_since_ms, sort_alerts};
 use crate::app::components::dropdown::{Dropdown, DropdownClose};
-use crate::app::state::{AlertSilencesEnabled, AlertsData, AlertsLastRefresh, AlertsOpen, Tick};
+use crate::app::state::{
+    AlertSilencesEnabled, AlertsData, AlertsLastRefresh, AlertsOpen, DetailTarget, Tick,
+};
 
 #[component]
 pub(crate) fn AlertsPanel() -> impl IntoView {
@@ -50,12 +53,7 @@ pub(crate) fn AlertsPanel() -> impl IntoView {
             .into_iter()
             .filter(|a| show_sil || !a.silenced)
             .collect();
-        alerts.sort_by(|a, b| {
-            sev_order(&a.severity)
-                .cmp(&sev_order(&b.severity))
-                .then_with(|| a.name.cmp(&b.name))
-                .then_with(|| a.fingerprint.cmp(&b.fingerprint))
-        });
+        sort_alerts(&mut alerts);
         alerts
     });
 
@@ -119,19 +117,10 @@ fn refresh_status(last_refresh_ms: Option<f64>, failed: bool) -> String {
         return "Not refreshed yet".to_string();
     };
 
-    #[cfg(target_arch = "wasm32")]
-    {
-        let elapsed_secs = ((js_sys::Date::now() - ms) / 1000.0).max(0.0) as u64;
-        return format!(
-            "Last refreshed {} ago",
-            roder_core::format_age_secs(elapsed_secs)
-        );
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let _ = ms;
-        "Last refreshed".to_string()
-    }
+    elapsed_since_ms(ms).map_or_else(
+        || "Last refreshed".into(),
+        |age| format!("Last refreshed {age} ago"),
+    )
 }
 
 #[component]
@@ -178,7 +167,7 @@ fn AlertRow(
     let dialog_matchers = StoredValue::new(available_matchers.clone());
     let duration_str = move || {
         tick.map(|t| t.get());
-        format_duration(&starts_at)
+        elapsed_since(&starts_at)
     };
 
     let sev_class = format!("alert-sev sev-{}", alert.severity);
@@ -255,6 +244,8 @@ fn AlertRow(
             {(!alert.description.is_empty()).then(|| view! {
                 <p class="alert-desc">{alert.description.clone()}</p>
             })}
+            <AlertTargetLinks label="Affected resources" targets=alert.targets.clone() />
+            <AlertTargetLinks label="Defined by" targets=alert.defining_rules.clone() />
             <div class="alert-labels">
                 {available_matchers.clone().into_iter()
                     .filter(|(name, _)| name != "alertname" && name != "severity")
@@ -330,6 +321,41 @@ fn AlertRow(
 }
 
 #[component]
+fn AlertTargetLinks(label: &'static str, targets: Vec<AlertResourceTarget>) -> impl IntoView {
+    let detail = expect_context::<RwSignal<Option<DetailTarget>>>();
+    let alerts_open = expect_context::<AlertsOpen>().0;
+    (!targets.is_empty()).then(|| {
+        view! {
+            <div class="alert-targets">
+                <span>{label}</span>
+                <div>
+                    {targets.into_iter().map(|target| {
+                        let clicked = target.clone();
+                        let location = target.namespace.as_deref().map_or_else(
+                            || target.name.clone(),
+                            |namespace| format!("{namespace}/{}", target.name),
+                        );
+                        view! {
+                            <button type="button" on:click=move |_| {
+                                alerts_open.set(false);
+                                detail.set(Some(DetailTarget {
+                                    key: clicked.key.clone(),
+                                    namespace: clicked.namespace.clone(),
+                                    name: clicked.name.clone(),
+                                }));
+                            }>
+                                <strong>{target.kind}</strong>
+                                <span>{location}</span>
+                            </button>
+                        }
+                    }).collect_view()}
+                </div>
+            </div>
+        }
+    })
+}
+
+#[component]
 fn SilenceMatcherItem(
     selected: RwSignal<std::collections::HashSet<String>>,
     name: String,
@@ -365,36 +391,5 @@ fn SilenceMenuItem(
             selection.set(value.to_string());
             close.run(());
         }>{label}</button>
-    }
-}
-
-fn sev_order(sev: &str) -> u8 {
-    match sev {
-        "critical" => 0,
-        "warning" => 1,
-        "info" => 2,
-        _ => 3,
-    }
-}
-
-/// Compute a human-readable elapsed duration from an ISO 8601 `starts_at` string.
-///
-/// On wasm32 we use `js_sys::Date` to parse the timestamp and compute elapsed
-/// seconds, then delegate to `roder_core::format_age_secs` for formatting
-/// (e.g. "3d1h", "1h30m", "5m", "45s"). On SSR we have no wall clock, so we
-/// return the raw `starts_at` string as a fallback.
-fn format_duration(iso: &str) -> String {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let parsed = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(iso)).get_time();
-        if parsed.is_nan() {
-            return iso.to_string();
-        }
-        let secs = ((js_sys::Date::now() - parsed) / 1000.0).max(0.0) as u64;
-        roder_core::format_age_secs(secs)
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        iso.to_string()
     }
 }

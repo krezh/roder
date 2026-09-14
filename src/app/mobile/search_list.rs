@@ -5,8 +5,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use leptos::prelude::*;
-use roder_core::{ResourceKind, WatchEvent};
+use roder_core::{ResourceAction, ResourceKind, WatchEvent};
 
+use crate::app::controllers::detail::selection_permissions_resource;
 use crate::app::events::make_do_delete_multi;
 use crate::app::hooks::{use_table_state, Coalescer};
 use crate::app::mobile::bulk_bar::MobileBulkBar;
@@ -187,9 +188,34 @@ pub(crate) fn MobileSearchList() -> impl IntoView {
 
     let selected = t.selected;
     let select_mode = use_select_mode(selected);
+    let show_logs = Signal::derive(move || {
+        let selected = selected.get();
+        !selected.is_empty()
+            && merged_rows.with(|rows| {
+                selected.iter().all(|uid| {
+                    rows.get(uid)
+                        .is_some_and(|row| row.kind.supports(ResourceAction::Logs))
+                })
+            })
+    });
 
     let do_delete =
         make_do_delete_multi(toast, merged_rows, selected, move || select_mode.set(false));
+    let bulk_permissions = selection_permissions_resource(move || {
+        let selected = selected.get();
+        merged_rows.with(|rows| {
+            selected
+                .iter()
+                .filter_map(|uid| {
+                    rows.get(uid).map(|row| DetailTarget {
+                        key: row.kind.key.clone(),
+                        namespace: row.row.namespace.clone(),
+                        name: row.row.name.clone(),
+                    })
+                })
+                .collect()
+        })
+    });
     let on_logs = Callback::new(move |_| {
         let uids = selected.get_untracked();
         merged_rows.with_untracked(|m| {
@@ -279,7 +305,9 @@ pub(crate) fn MobileSearchList() -> impl IntoView {
                 all_uids=move || shown_uids.get()
                 do_bulk=move |_: &'static str| {}
                 do_delete=do_delete
-                on_logs=on_logs />
+                permissions=bulk_permissions
+                on_logs=on_logs
+                show_logs=show_logs />
         </div>
     }
 }

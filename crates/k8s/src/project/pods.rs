@@ -4,7 +4,8 @@
 use roder_core::{RowStatus, Trend};
 use serde_json::Value;
 
-use super::accessors::str_at;
+use super::accessors::{parse_timestamp, str_at};
+use super::status::condition_is;
 use crate::informers::UsageEntry;
 
 /// Sum the pod's container resource requests/limits → ((cpu_req, cpu_lim) cores,
@@ -99,15 +100,7 @@ fn is_restartable_init(data: &Value, status: &Value) -> bool {
 }
 
 fn initialized(data: &Value) -> bool {
-    data.get("status")
-        .and_then(|status| status.get("conditions"))
-        .and_then(Value::as_array)
-        .is_some_and(|conditions| {
-            conditions.iter().any(|condition| {
-                condition.get("type").and_then(Value::as_str) == Some("Initialized")
-                    && condition.get("status").and_then(Value::as_str) == Some("True")
-            })
-        })
+    condition_is(data, "Initialized", "True")
 }
 
 fn init_container_complete(data: &Value, status: &Value) -> bool {
@@ -169,9 +162,7 @@ fn restart_info(data: &Value) -> (i64, Option<time::OffsetDateTime>) {
         else {
             continue;
         };
-        if let Ok(timestamp) =
-            time::OffsetDateTime::parse(finished_at, &time::format_description::well_known::Rfc3339)
-        {
+        if let Some(timestamp) = parse_timestamp(finished_at) {
             if latest.is_none_or(|current| timestamp > current) {
                 latest = Some(timestamp);
             }

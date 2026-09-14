@@ -90,8 +90,18 @@ impl Backend {
         ns: Option<&str>,
         name: &str,
     ) -> Result<(), K8sError> {
+        let kind = self.resource_kind(key)?;
+        let annotation = match kind.kind.as_str() {
+            "ExternalSecret" => "force-sync",
+            "ClusterExternalSecret" => "external-secrets.io/force-sync",
+            _ => {
+                return Err(K8sError::Api(
+                    "refresh requires an ExternalSecret or ClusterExternalSecret".into(),
+                ))
+            }
+        };
         let patch = json!({ "metadata": { "annotations": {
-            "force-sync": now_rfc3339()
+            (annotation): now_rfc3339()
         }}});
         self.merge_patch(key, ns, name, patch).await
     }
@@ -237,19 +247,7 @@ fn build_rerun_job(
     source_name: &str,
 ) -> Result<DynamicObject, K8sError> {
     let data = serde_json::to_value(source).map_err(api_err)?;
-    let terminal = data
-        .get("status")
-        .and_then(|status| status.get("conditions"))
-        .and_then(serde_json::Value::as_array)
-        .is_some_and(|conditions| {
-            conditions.iter().any(|condition| {
-                matches!(
-                    condition.get("type").and_then(serde_json::Value::as_str),
-                    Some("Complete" | "Failed")
-                ) && condition.get("status").and_then(serde_json::Value::as_str) == Some("True")
-            })
-        });
-    if !terminal {
+    if !crate::project::job_lifecycle(&data).is_terminal() {
         return Err(K8sError::Api(
             "only completed or failed Jobs can be re-run".into(),
         ));

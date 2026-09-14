@@ -3,7 +3,7 @@
 use roder_core::RowStatus;
 use serde_json::Value;
 
-use super::accessors::{int_at, str_at};
+use super::accessors::{int_at, parse_timestamp, str_at};
 
 pub(crate) fn cluster_cells(data: &Value) -> (Vec<String>, RowStatus) {
     let instances = int_at(data, &["status", "instances"])
@@ -41,6 +41,10 @@ pub(crate) fn backup_cells(data: &Value) -> (Vec<String>, RowStatus) {
 }
 
 pub(crate) fn scheduled_backup_cells(data: &Value) -> (Vec<String>, RowStatus) {
+    scheduled_backup_cells_at(data, time::OffsetDateTime::now_utc())
+}
+
+fn scheduled_backup_cells_at(data: &Value, now: time::OffsetDateTime) -> (Vec<String>, RowStatus) {
     let cluster = str_at(data, &["spec", "cluster", "name"]).unwrap_or_default();
     let schedule = str_at(data, &["spec", "schedule"]).unwrap_or_default();
     let suspended = data
@@ -50,9 +54,10 @@ pub(crate) fn scheduled_backup_cells(data: &Value) -> (Vec<String>, RowStatus) {
     let last_schedule = str_at(data, &["status", "lastScheduleTime"]).unwrap_or_default();
     let next_schedule = str_at(data, &["status", "nextScheduleTime"]).unwrap_or_default();
     let error = str_at(data, &["status", "error"]).unwrap_or_default();
+    let missed_schedule = parse_timestamp(&next_schedule).is_some_and(|next| next < now);
     let status = if !error.is_empty() {
         RowStatus::Error
-    } else if suspended {
+    } else if suspended || missed_schedule {
         RowStatus::Warn
     } else if last_schedule.is_empty() && next_schedule.is_empty() {
         RowStatus::Pending
@@ -210,6 +215,20 @@ mod tests {
             ["app", "0 0 2 * * *", "true", "2026-09-04T02:00:00Z", "", ""]
         );
         assert_eq!(status, RowStatus::Warn);
+    }
+
+    #[test]
+    fn overdue_schedule_is_a_warning() {
+        let data = json!({
+            "spec": {"cluster": {"name": "app"}, "schedule": "0 0 2 * * *"},
+            "status": {
+                "lastScheduleTime": "2026-09-03T02:00:00Z",
+                "nextScheduleTime": "2026-09-04T02:00:00Z"
+            }
+        });
+        let now = parse_timestamp("2026-09-05T00:00:00Z").unwrap();
+
+        assert_eq!(scheduled_backup_cells_at(&data, now).1, RowStatus::Warn);
     }
 
     #[test]

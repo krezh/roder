@@ -110,6 +110,351 @@ impl ResourceKind {
     pub fn make_key(group: &str, version: &str, kind: &str) -> String {
         format!("{group}/{version}/{kind}")
     }
+
+    pub fn capabilities(&self) -> ResourceCapabilities {
+        ResourceCapabilities::for_gvk(&self.group, &self.version, &self.kind)
+    }
+
+    pub fn supports(&self, action: ResourceAction) -> bool {
+        self.capabilities().supports(action)
+    }
+}
+
+/// A resource-scoped operation exposed by Roder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum ResourceAction {
+    Delete,
+    Evict,
+    Scale,
+    Restart,
+    Cordon,
+    Drain,
+    Logs,
+    Exec,
+    DebugExec,
+    NodeShell,
+    FluxReconcile,
+    FluxReconcileWithSource,
+    FluxSuspend,
+    FluxForce,
+    FluxReset,
+    ExternalSecretsRefresh,
+    CertificateRenew,
+    CronJobTrigger,
+    JobRerun,
+    KopiurSnapshotNow,
+}
+
+impl ResourceAction {
+    pub const ALL: [Self; 20] = [
+        Self::Delete,
+        Self::Evict,
+        Self::Scale,
+        Self::Restart,
+        Self::Cordon,
+        Self::Drain,
+        Self::Logs,
+        Self::Exec,
+        Self::DebugExec,
+        Self::NodeShell,
+        Self::FluxReconcile,
+        Self::FluxReconcileWithSource,
+        Self::FluxSuspend,
+        Self::FluxForce,
+        Self::FluxReset,
+        Self::ExternalSecretsRefresh,
+        Self::CertificateRenew,
+        Self::CronJobTrigger,
+        Self::JobRerun,
+        Self::KopiurSnapshotNow,
+    ];
+
+    pub const fn api_name(self) -> &'static str {
+        match self {
+            Self::Delete => "delete",
+            Self::Evict => "evict",
+            Self::Scale => "scale",
+            Self::Restart => "restart",
+            Self::Cordon => "cordon",
+            Self::Drain => "drain",
+            Self::Logs => "logs",
+            Self::Exec => "exec",
+            Self::DebugExec => "debug-exec",
+            Self::NodeShell => "node-shell",
+            Self::FluxReconcile => "flux-reconcile",
+            Self::FluxReconcileWithSource => "flux-reconcile-with-source",
+            Self::FluxSuspend => "flux-suspend",
+            Self::FluxForce => "flux-force",
+            Self::FluxReset => "flux-reset",
+            Self::ExternalSecretsRefresh => "eso-refresh",
+            Self::CertificateRenew => "certificate-renew",
+            Self::CronJobTrigger => "cronjob-trigger",
+            Self::JobRerun => "job-rerun",
+            Self::KopiurSnapshotNow => "kopiur-snapshot-now",
+        }
+    }
+
+    pub fn from_api_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "delete" => Self::Delete,
+            "evict" => Self::Evict,
+            "scale" => Self::Scale,
+            "restart" => Self::Restart,
+            "cordon" | "uncordon" => Self::Cordon,
+            "drain" => Self::Drain,
+            "flux-reconcile" => Self::FluxReconcile,
+            "flux-reconcile-with-source" => Self::FluxReconcileWithSource,
+            "flux-suspend" | "flux-resume" => Self::FluxSuspend,
+            "flux-force" => Self::FluxForce,
+            "flux-reset" => Self::FluxReset,
+            "eso-refresh" => Self::ExternalSecretsRefresh,
+            "certificate-renew" => Self::CertificateRenew,
+            "cronjob-trigger" => Self::CronJobTrigger,
+            "job-rerun" => Self::JobRerun,
+            "kopiur-snapshot-now" => Self::KopiurSnapshotNow,
+            _ => return None,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JobLifecycle {
+    Complete,
+    Failed,
+    Failing,
+    Suspended,
+    Completing,
+    Running,
+}
+
+impl JobLifecycle {
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Complete | Self::Failed)
+    }
+}
+
+pub fn job_lifecycle(data: &serde_json::Value) -> JobLifecycle {
+    if condition_is(data, "Failed", "True") {
+        JobLifecycle::Failed
+    } else if condition_is(data, "FailureTarget", "True") {
+        JobLifecycle::Failing
+    } else if condition_is(data, "Complete", "True") {
+        JobLifecycle::Complete
+    } else if data
+        .pointer("/spec/suspend")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+        || condition_is(data, "Suspended", "True")
+    {
+        JobLifecycle::Suspended
+    } else if condition_is(data, "SuccessCriteriaMet", "True") {
+        JobLifecycle::Completing
+    } else {
+        JobLifecycle::Running
+    }
+}
+
+pub fn current_condition<'a>(
+    data: &'a serde_json::Value,
+    type_: &str,
+) -> Option<&'a serde_json::Value> {
+    let generation = data
+        .pointer("/metadata/generation")
+        .and_then(serde_json::Value::as_i64);
+    let conditions = data.pointer("/status/conditions")?.as_array()?;
+    let condition = current_condition_from(conditions, generation, type_)?;
+    if condition.get("observedGeneration").is_none() && status_generation_is_stale(data) {
+        None
+    } else {
+        Some(condition)
+    }
+}
+
+pub fn current_condition_from<'a>(
+    conditions: &'a [serde_json::Value],
+    generation: Option<i64>,
+    type_: &str,
+) -> Option<&'a serde_json::Value> {
+    let matching = || {
+        conditions.iter().rev().filter(|condition| {
+            condition.get("type").and_then(serde_json::Value::as_str) == Some(type_)
+        })
+    };
+    let Some(generation) = generation else {
+        return matching().next();
+    };
+    matching()
+        .find(|condition| {
+            condition
+                .get("observedGeneration")
+                .and_then(serde_json::Value::as_i64)
+                == Some(generation)
+        })
+        .or_else(|| matching().find(|condition| condition.get("observedGeneration").is_none()))
+}
+
+pub fn condition_is(data: &serde_json::Value, type_: &str, status: &str) -> bool {
+    current_condition(data, type_)
+        .and_then(|condition| condition.get("status"))
+        .and_then(serde_json::Value::as_str)
+        == Some(status)
+}
+
+pub fn status_generation_is_stale(data: &serde_json::Value) -> bool {
+    data.pointer("/metadata/generation")
+        .and_then(serde_json::Value::as_i64)
+        .zip(
+            data.pointer("/status/observedGeneration")
+                .and_then(serde_json::Value::as_i64),
+        )
+        .is_some_and(|(generation, observed)| observed < generation)
+}
+
+/// Static operations supported by one GroupVersionKind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResourceCapabilities(u32);
+
+impl ResourceCapabilities {
+    pub fn for_gvk(group: &str, _version: &str, kind: &str) -> Self {
+        let mut bits = bit(ResourceAction::Delete);
+
+        if group.is_empty() && kind == "Pod" {
+            bits |= bits_for(&[
+                ResourceAction::Evict,
+                ResourceAction::Logs,
+                ResourceAction::Exec,
+                ResourceAction::DebugExec,
+            ]);
+        }
+        if group.is_empty() && kind == "Node" {
+            bits |= bits_for(&[
+                ResourceAction::Cordon,
+                ResourceAction::Drain,
+                ResourceAction::NodeShell,
+            ]);
+        }
+        if group == "apps"
+            && matches!(
+                kind,
+                "Deployment" | "StatefulSet" | "DaemonSet" | "ReplicaSet"
+            )
+        {
+            bits |= bits_for(&[ResourceAction::Restart, ResourceAction::Logs]);
+        }
+        if group == "apps" && matches!(kind, "Deployment" | "StatefulSet" | "ReplicaSet") {
+            bits |= bit(ResourceAction::Scale);
+        }
+        if group == "batch" && kind == "Job" {
+            bits |= bits_for(&[ResourceAction::JobRerun, ResourceAction::Logs]);
+        }
+        if group == "batch" && kind == "CronJob" {
+            bits |= bit(ResourceAction::CronJobTrigger);
+        }
+        if flux_reconcile_kind(group, kind) {
+            bits |= bit(ResourceAction::FluxReconcile);
+        }
+        if flux_suspend_kind(group, kind) {
+            bits |= bit(ResourceAction::FluxSuspend);
+        }
+        if matches!(
+            (group, kind),
+            ("kustomize.toolkit.fluxcd.io", "Kustomization")
+                | ("helm.toolkit.fluxcd.io", "HelmRelease")
+        ) {
+            bits |= bit(ResourceAction::FluxReconcileWithSource);
+        }
+        if group == "helm.toolkit.fluxcd.io" && kind == "HelmRelease" {
+            bits |= bits_for(&[ResourceAction::FluxForce, ResourceAction::FluxReset]);
+        }
+        if group == "external-secrets.io"
+            && matches!(kind, "ExternalSecret" | "ClusterExternalSecret")
+        {
+            bits |= bit(ResourceAction::ExternalSecretsRefresh);
+        }
+        if group == "cert-manager.io" && kind == "Certificate" {
+            bits |= bit(ResourceAction::CertificateRenew);
+        }
+        if group == "kopiur.home-operations.com" && kind == "SnapshotPolicy" {
+            bits |= bit(ResourceAction::KopiurSnapshotNow);
+        }
+
+        Self(bits)
+    }
+
+    pub fn supports(self, action: ResourceAction) -> bool {
+        self.0 & bit(action) != 0
+    }
+}
+
+fn flux_reconcile_kind(group: &str, kind: &str) -> bool {
+    matches!(
+        (group, kind),
+        ("kustomize.toolkit.fluxcd.io", "Kustomization")
+            | ("helm.toolkit.fluxcd.io", "HelmRelease")
+            | ("source.toolkit.fluxcd.io", "GitRepository")
+            | ("source.toolkit.fluxcd.io", "OCIRepository")
+            | ("source.toolkit.fluxcd.io", "HelmRepository")
+            | ("source.toolkit.fluxcd.io", "Bucket")
+            | ("source.toolkit.fluxcd.io", "HelmChart")
+            | ("image.toolkit.fluxcd.io", "ImageRepository")
+            | ("image.toolkit.fluxcd.io", "ImagePolicy")
+            | ("image.toolkit.fluxcd.io", "ImageUpdateAutomation")
+            | ("notification.toolkit.fluxcd.io", "Receiver")
+    )
+}
+
+fn flux_suspend_kind(group: &str, kind: &str) -> bool {
+    flux_reconcile_kind(group, kind)
+        || matches!(
+            (group, kind),
+            ("notification.toolkit.fluxcd.io", "Alert")
+                | ("notification.toolkit.fluxcd.io", "Provider")
+        )
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActionPermissions {
+    pub apply: bool,
+    pub actions: BTreeMap<String, bool>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActionSummary {
+    pub attempted: usize,
+    pub succeeded: usize,
+    pub forbidden: usize,
+    pub failed: usize,
+}
+
+impl ActionSummary {
+    pub fn merge(&mut self, other: Self) {
+        self.attempted += other.attempted;
+        self.succeeded += other.succeeded;
+        self.forbidden += other.forbidden;
+        self.failed += other.failed;
+    }
+}
+
+impl ActionPermissions {
+    pub fn allows(&self, action: ResourceAction) -> bool {
+        self.actions
+            .get(action.api_name())
+            .copied()
+            .unwrap_or(false)
+    }
+
+    pub fn allows_api_name(&self, name: &str) -> bool {
+        ResourceAction::from_api_name(name).is_some_and(|action| self.allows(action))
+    }
+}
+
+fn bit(action: ResourceAction) -> u32 {
+    1 << action as u8
+}
+
+fn bits_for(actions: &[ResourceAction]) -> u32 {
+    actions.iter().fold(0, |bits, action| bits | bit(*action))
 }
 
 /// Health/severity of a row, used for coloring.
@@ -259,6 +604,10 @@ pub enum ResourceTreeRelation {
     EndpointSlice,
     FluxInventory,
     HelmManifest,
+    ReferencedResource,
+    ClusterResource,
+    GeneratedResource,
+    StorageBackend,
 }
 
 impl ResourceTreeRelation {
@@ -270,6 +619,10 @@ impl ResourceTreeRelation {
             Self::EndpointSlice => "Endpoint slice",
             Self::FluxInventory => "Flux inventory",
             Self::HelmManifest => "Helm manifest",
+            Self::ReferencedResource => "Referenced resource",
+            Self::ClusterResource => "Cluster resource",
+            Self::GeneratedResource => "Generated resource",
+            Self::StorageBackend => "Storage backend",
         }
     }
 }
@@ -321,13 +674,26 @@ pub struct ClusterOverview {
     pub pod_failed: u32,
     pub warnings: Vec<OverviewWarning>,
     #[serde(default)]
-    pub flux_resources: Vec<ResourceHealthRollup>,
+    pub controller_groups: Vec<ControllerHealthGroup>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ControllerHealthGroup {
+    pub name: String,
+    pub resources: Vec<ResourceHealthRollup>,
     #[serde(default)]
-    pub external_secret_resources: Vec<ResourceHealthRollup>,
+    pub signals: Vec<ControllerHealthSignal>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ControllerHealthSignal {
+    pub label: String,
+    pub value: String,
+    pub status: RowStatus,
     #[serde(default)]
-    pub kopiur_resources: Vec<ResourceHealthRollup>,
+    pub timestamp: Option<String>,
     #[serde(default)]
-    pub tuppr_resources: Vec<ResourceHealthRollup>,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -520,10 +886,12 @@ pub fn format_age_secs(secs: u64) -> String {
 }
 
 /// Result of a sweep/sanitize operation.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CleanupSummary {
     pub pods_deleted: usize,
     pub jobs_deleted: usize,
+    pub forbidden: Vec<String>,
+    pub failed: Vec<String>,
 }
 
 /// Resources currently matched by sweep options.
@@ -542,6 +910,12 @@ pub struct SweepOptions {
     pub restarted_pods: bool,
     pub completed_jobs: bool,
     pub failed_jobs: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SanitizeAction {
+    Preview,
+    Execute,
 }
 
 impl Default for SweepOptions {
@@ -563,6 +937,14 @@ impl SweepOptions {
             && !self.restarted_pods
             && !self.completed_jobs
             && !self.failed_jobs
+    }
+
+    pub fn includes_pods(self) -> bool {
+        self.terminal_pods || self.stuck_pods || self.restarted_pods
+    }
+
+    pub fn includes_jobs(self) -> bool {
+        self.completed_jobs || self.failed_jobs
     }
 }
 
@@ -708,19 +1090,20 @@ pub enum DrainEventKind {
     Cancelled,
 }
 
-/// One resource kind's RBAC access review row: which verbs the current
-/// identity may perform on it, in the requested namespace scope.
+/// One resource kind's RBAC access review row in the requested namespace scope.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AccessRow {
     pub kind: String,
     pub group: String,
     pub namespaced: bool,
-    /// `(verb, allowed)` pairs, in a fixed order (see `ACCESS_REVIEW_VERBS`).
-    pub verbs: Vec<(String, bool)>,
+    /// `None` means the operation does not apply to this kind.
+    pub operations: Vec<(String, Option<bool>)>,
 }
 
-/// Verbs checked by the access review, in display order.
-pub const ACCESS_REVIEW_VERBS: &[&str] = &["get", "list", "create", "patch", "delete"];
+/// Operations checked by the access review, in display order.
+pub const ACCESS_REVIEW_OPERATIONS: &[&str] = &[
+    "get", "list", "watch", "create", "patch", "delete", "status", "logs", "exec", "evict", "deps",
+];
 
 /// Counts of resources by projected health state for one resource type.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -735,6 +1118,8 @@ pub struct HealthRollup {
     pub failing: u32,
     #[serde(default)]
     pub unknown: u32,
+    #[serde(default)]
+    pub unreported: u32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -749,6 +1134,15 @@ pub struct ResourceHealthRollup {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+/// A discovered Kubernetes resource that can be opened from an alert.
+pub struct AlertResourceTarget {
+    pub key: String,
+    pub kind: String,
+    pub namespace: Option<String>,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FiringAlert {
     pub fingerprint: String,
@@ -759,6 +1153,10 @@ pub struct FiringAlert {
     pub starts_at: String,
     pub labels: std::collections::HashMap<String, String>,
     pub silenced: bool,
+    #[serde(default)]
+    pub targets: Vec<AlertResourceTarget>,
+    #[serde(default)]
+    pub defining_rules: Vec<AlertResourceTarget>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -781,6 +1179,189 @@ pub const MAX_ALERT_SILENCE_SECS: u64 = 365 * 24 * 60 * 60;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn capabilities(group: &str, version: &str, kind: &str) -> ResourceCapabilities {
+        ResourceCapabilities::for_gvk(group, version, kind)
+    }
+
+    #[test]
+    fn workload_capabilities_distinguish_scaling() {
+        let deployment = capabilities("apps", "v1", "Deployment");
+        assert!(deployment.supports(ResourceAction::Restart));
+        assert!(deployment.supports(ResourceAction::Scale));
+
+        let daemon_set = capabilities("apps", "v1", "DaemonSet");
+        assert!(daemon_set.supports(ResourceAction::Restart));
+        assert!(!daemon_set.supports(ResourceAction::Scale));
+
+        let pod = capabilities("", "v1", "Pod");
+        assert!(pod.supports(ResourceAction::Exec));
+        assert!(pod.supports(ResourceAction::DebugExec));
+
+        let node = capabilities("", "v1", "Node");
+        assert!(node.supports(ResourceAction::NodeShell));
+        assert!(!pod.supports(ResourceAction::NodeShell));
+    }
+
+    #[test]
+    fn flux_capabilities_distinguish_specialized_operations() {
+        let kustomization = capabilities("kustomize.toolkit.fluxcd.io", "v1", "Kustomization");
+        assert!(kustomization.supports(ResourceAction::FluxReconcile));
+        assert!(kustomization.supports(ResourceAction::FluxReconcileWithSource));
+        assert!(!kustomization.supports(ResourceAction::FluxForce));
+
+        let helm_release = capabilities("helm.toolkit.fluxcd.io", "v2", "HelmRelease");
+        assert!(helm_release.supports(ResourceAction::FluxForce));
+        assert!(helm_release.supports(ResourceAction::FluxReset));
+
+        let source = capabilities("source.toolkit.fluxcd.io", "v1", "GitRepository");
+        assert!(source.supports(ResourceAction::FluxReconcile));
+        assert!(source.supports(ResourceAction::FluxSuspend));
+        assert!(!source.supports(ResourceAction::FluxReconcileWithSource));
+
+        let receiver = capabilities("notification.toolkit.fluxcd.io", "v1", "Receiver");
+        assert!(receiver.supports(ResourceAction::FluxReconcile));
+        assert!(receiver.supports(ResourceAction::FluxSuspend));
+    }
+
+    #[test]
+    fn flux_actions_require_exact_groups_and_kinds() {
+        let cases = [
+            ("source.toolkit.fluxcd.io", "GitRepository", true, true),
+            ("source.toolkit.fluxcd.io", "OCIRepository", true, true),
+            ("source.toolkit.fluxcd.io", "HelmRepository", true, true),
+            ("source.toolkit.fluxcd.io", "Bucket", true, true),
+            ("source.toolkit.fluxcd.io", "HelmChart", true, true),
+            ("kustomize.toolkit.fluxcd.io", "Kustomization", true, true),
+            ("helm.toolkit.fluxcd.io", "HelmRelease", true, true),
+            ("image.toolkit.fluxcd.io", "ImageRepository", true, true),
+            ("image.toolkit.fluxcd.io", "ImagePolicy", true, true),
+            (
+                "image.toolkit.fluxcd.io",
+                "ImageUpdateAutomation",
+                true,
+                true,
+            ),
+            ("notification.toolkit.fluxcd.io", "Receiver", true, true),
+            ("notification.toolkit.fluxcd.io", "Alert", false, true),
+            ("notification.toolkit.fluxcd.io", "Provider", false, true),
+            ("example.fluxcd.io", "HelmRelease", false, false),
+        ];
+        for (group, kind, reconcile, suspend) in cases {
+            let capabilities = capabilities(group, "v1", kind);
+            assert_eq!(
+                capabilities.supports(ResourceAction::FluxReconcile),
+                reconcile,
+                "reconcile capability for {group}/{kind}"
+            );
+            assert_eq!(
+                capabilities.supports(ResourceAction::FluxSuspend),
+                suspend,
+                "suspend capability for {group}/{kind}"
+            );
+        }
+    }
+
+    #[test]
+    fn operator_actions_do_not_leak_to_other_kinds() {
+        let service = capabilities("", "v1", "Service");
+        assert!(service.supports(ResourceAction::Delete));
+        assert!(!service.supports(ResourceAction::ExternalSecretsRefresh));
+        assert!(!service.supports(ResourceAction::CertificateRenew));
+        assert!(!service.supports(ResourceAction::KopiurSnapshotNow));
+
+        let store = capabilities("external-secrets.io", "v1", "SecretStore");
+        assert!(!store.supports(ResourceAction::ExternalSecretsRefresh));
+        let external_secret = capabilities("external-secrets.io", "v1", "ExternalSecret");
+        assert!(external_secret.supports(ResourceAction::ExternalSecretsRefresh));
+        let cluster_external_secret =
+            capabilities("external-secrets.io", "v1", "ClusterExternalSecret");
+        assert!(cluster_external_secret.supports(ResourceAction::ExternalSecretsRefresh));
+    }
+
+    #[test]
+    fn api_action_names_map_to_semantic_capabilities() {
+        assert_eq!(
+            ResourceAction::from_api_name("flux-resume"),
+            Some(ResourceAction::FluxSuspend)
+        );
+        assert_eq!(
+            ResourceAction::from_api_name("uncordon"),
+            Some(ResourceAction::Cordon)
+        );
+        assert_eq!(ResourceAction::from_api_name("apply"), None);
+        assert_eq!(
+            ResourceAction::from_api_name("flux-resume")
+                .unwrap()
+                .api_name(),
+            "flux-suspend"
+        );
+    }
+
+    #[test]
+    fn action_permissions_use_canonical_names_for_aliases() {
+        let permissions = ActionPermissions {
+            apply: false,
+            actions: BTreeMap::from([("flux-suspend".into(), true)]),
+        };
+        assert!(permissions.allows_api_name("flux-suspend"));
+        assert!(permissions.allows_api_name("flux-resume"));
+        assert!(!permissions.allows_api_name("flux-reconcile"));
+    }
+
+    #[test]
+    fn job_lifecycle_uses_current_generation_conditions() {
+        let job = serde_json::json!({
+            "metadata": {"generation": 3},
+            "status": {"conditions": [
+                {"type": "Complete", "status": "True", "observedGeneration": 2},
+                {"type": "FailureTarget", "status": "True", "observedGeneration": 3}
+            ]}
+        });
+
+        assert_eq!(job_lifecycle(&job), JobLifecycle::Failing);
+        assert!(!job_lifecycle(&job).is_terminal());
+    }
+
+    #[test]
+    fn action_summaries_merge_all_outcomes() {
+        let mut summary = ActionSummary {
+            attempted: 2,
+            succeeded: 1,
+            forbidden: 1,
+            failed: 0,
+        };
+        summary.merge(ActionSummary {
+            attempted: 1,
+            succeeded: 0,
+            forbidden: 0,
+            failed: 1,
+        });
+        assert_eq!(summary.attempted, 3);
+        assert_eq!(summary.succeeded, 1);
+        assert_eq!(summary.forbidden, 1);
+        assert_eq!(summary.failed, 1);
+    }
+
+    #[test]
+    fn sweep_options_select_only_requested_resource_types() {
+        let pods = SweepOptions {
+            completed_jobs: false,
+            failed_jobs: false,
+            ..Default::default()
+        };
+        assert!(pods.includes_pods());
+        assert!(!pods.includes_jobs());
+
+        let jobs = SweepOptions {
+            terminal_pods: false,
+            stuck_pods: false,
+            completed_jobs: true,
+            ..Default::default()
+        };
+        assert!(!jobs.includes_pods());
+        assert!(jobs.includes_jobs());
+    }
 
     #[test]
     fn format_age_seconds() {
@@ -891,5 +1472,23 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn firing_alert_accepts_cached_payload_without_resource_targets() {
+        let alert: FiringAlert = serde_json::from_value(serde_json::json!({
+            "fingerprint": "abc",
+            "name": "PodDown",
+            "severity": "warning",
+            "summary": "",
+            "description": "",
+            "starts_at": "2026-01-01T00:00:00Z",
+            "labels": {},
+            "silenced": false
+        }))
+        .unwrap();
+
+        assert!(alert.targets.is_empty());
+        assert!(alert.defining_rules.is_empty());
     }
 }

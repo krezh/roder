@@ -3,7 +3,7 @@
 use roder_core::RowStatus;
 use serde_json::Value;
 
-use super::accessors::{int_at, str_at};
+use super::accessors::{int_at, parse_timestamp, str_at};
 use super::status::{
     cond_to_status, condition_reason, condition_status, ready_label, ready_reason,
 };
@@ -50,10 +50,6 @@ fn certificate_cells_at(data: &Value, now: time::OffsetDateTime) -> (Vec<String>
         ],
         status,
     )
-}
-
-fn parse_timestamp(value: &str) -> Option<time::OffsetDateTime> {
-    time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339).ok()
 }
 
 fn compact_date(value: Option<&str>) -> String {

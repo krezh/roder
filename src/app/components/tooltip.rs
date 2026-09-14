@@ -62,9 +62,10 @@ pub(crate) fn TooltipLayer() -> impl IntoView {
                 // has no visible text to compare against, so it always shows.
                 let is_list = text.contains('\n');
                 let cell_measure = host.query_selector(".cwi").ok().flatten();
-                let truncated = cell_measure
-                    .as_ref()
-                    .is_some_and(|m| m.scroll_width() > m.client_width() + 1);
+                let truncated = cell_measure.as_ref().is_some_and(|m| {
+                    m.scroll_width() > m.client_width() + 1
+                        || m.scroll_height() > m.client_height() + 1
+                });
                 if cell_measure.is_some() && !is_list && !truncated {
                     tip_content.set(None);
                     return;

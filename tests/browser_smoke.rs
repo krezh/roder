@@ -12,7 +12,7 @@
 
 use std::time::Duration;
 
-use rustwright::{chromium, GotoOptions, LaunchOptions};
+use rustwright::{chromium, ActionOptions, GotoOptions, LaunchOptions};
 
 #[test]
 fn app_loads_without_console_errors_or_failed_requests() {
@@ -36,6 +36,34 @@ fn app_loads_without_console_errors_or_failed_requests() {
         // Let post-load hydration and its follow-up fetches (catalog,
         // overview, the initial watch subscription, ...) settle.
         std::thread::sleep(Duration::from_millis(2000));
+
+        if std::env::var("RODER_E2E_OPERATOR_FIXTURES").as_deref() == Ok("1") {
+            let expected = ["Rook Ceph", "CloudNativePG", "Ceph Clusters", "Backups"];
+            let mut missing = expected.to_vec();
+            for _ in 0..20 {
+                let text = page
+                    .evaluate(
+                        "document.body.innerText",
+                        None,
+                        ActionOptions::timeout(2_000.0),
+                    )
+                    .map_err(|e| format!("could not inspect rendered operator resources: {e}"))?
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+                missing.retain(|label| !text.contains(label));
+                if missing.is_empty() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
+            if !missing.is_empty() {
+                return Err(format!(
+                    "operator discovery/rollup labels not rendered: {}",
+                    missing.join(", ")
+                ));
+            }
+        }
 
         let console = page
             .console_records(false, false)

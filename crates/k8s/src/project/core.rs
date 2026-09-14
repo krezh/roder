@@ -8,7 +8,9 @@ use crate::metrics::PvcUsage;
 
 use super::accessors::{data_count, int_at, intstr_at, str_at};
 use super::format::{endpoints_summary, hpa_targets, human_bytes, short_access_mode};
-use super::status::{cond_to_status, condition_status};
+use super::status::{
+    cond_to_status, condition_reason, condition_status, status_generation_is_stale,
+};
 
 pub(crate) fn namespace_cells(data: &Value) -> (Vec<String>, RowStatus) {
     let phase = str_at(data, &["status", "phase"]).unwrap_or_default();
@@ -53,10 +55,11 @@ pub(crate) fn pvc_cells(data: &Value, usage: Option<PvcUsage>) -> (Vec<String>, 
         _ => (total_str.clone(), String::new()),
     };
     let mount_cell = if in_use { "true" } else { "false" }.to_string();
-    let st = if phase == "Bound" {
-        RowStatus::Ok
-    } else {
-        RowStatus::Pending
+    let st = match phase.as_str() {
+        "Bound" => RowStatus::Ok,
+        "Pending" | "" => RowStatus::Pending,
+        "Lost" => RowStatus::Error,
+        _ => RowStatus::Unknown,
     };
     (vec![phase, capacity_cell, pct_cell, mount_cell], st)
 }
@@ -76,14 +79,50 @@ pub(crate) fn configmap_cells(data: &Value) -> (Vec<String>, RowStatus) {
     )
 }
 
+pub(crate) fn event_cells(data: &Value) -> (Vec<String>, RowStatus) {
+    let last_seen = str_at(data, &["eventTime"])
+        .or_else(|| str_at(data, &["series", "lastObservedTime"]))
+        .or_else(|| str_at(data, &["lastTimestamp"]))
+        .or_else(|| str_at(data, &["firstTimestamp"]))
+        .or_else(|| str_at(data, &["metadata", "creationTimestamp"]))
+        .unwrap_or_default();
+    let type_ = str_at(data, &["type"]).unwrap_or_default();
+    let reason = str_at(data, &["reason"]).unwrap_or_default();
+    let kind = str_at(data, &["involvedObject", "kind"]).unwrap_or_default();
+    let name = str_at(data, &["involvedObject", "name"]).unwrap_or_default();
+    let object = match (kind.is_empty(), name.is_empty()) {
+        (false, false) => format!("{kind}/{name}"),
+        (_, false) => name,
+        _ => String::new(),
+    };
+    let message = str_at(data, &["message"]).unwrap_or_default();
+    let status = match type_.as_str() {
+        "Normal" => RowStatus::Ok,
+        "Warning" => RowStatus::Warn,
+        _ => RowStatus::Unknown,
+    };
+    (vec![last_seen, type_, reason, object, message], status)
+}
+
 pub(crate) fn endpoints_cells(data: &Value) -> (Vec<String>, RowStatus) {
-    (vec![endpoints_summary(data)], RowStatus::Ok)
+    let summary = endpoints_summary(data);
+    let status = if summary.is_empty() {
+        RowStatus::Error
+    } else {
+        RowStatus::Ok
+    };
+    (vec![summary], status)
 }
 
 pub(crate) fn service_cells(data: &Value) -> (Vec<String>, RowStatus) {
     let ty = str_at(data, &["spec", "type"]).unwrap_or_else(|| "ClusterIP".into());
     let cluster_ip = str_at(data, &["spec", "clusterIP"]).unwrap_or_default();
-    (vec![ty, cluster_ip], RowStatus::Ok)
+    let status = if ty == "LoadBalancer" && load_balancer_addresses(data).is_empty() {
+        RowStatus::Pending
+    } else {
+        RowStatus::Ok
+    };
+    (vec![ty, cluster_ip], status)
 }
 
 pub(crate) fn node_cells(data: &Value) -> (Vec<String>, RowStatus) {
@@ -163,9 +202,21 @@ pub(crate) fn storageclass_cells(data: &Value) -> (Vec<String>, RowStatus) {
 
 pub(crate) fn endpointslice_cells(data: &Value) -> (Vec<String>, RowStatus) {
     let addr_type = str_at(data, &["addressType"]).unwrap_or_default();
-    let endpoints = data
-        .get("endpoints")
-        .and_then(|e| e.as_array())
+    let endpoint_values = data.get("endpoints").and_then(|e| e.as_array());
+    let has_ready_endpoint = endpoint_values.is_some_and(|endpoints| {
+        endpoints.iter().any(|endpoint| {
+            let has_address = endpoint
+                .get("addresses")
+                .and_then(Value::as_array)
+                .is_some_and(|addresses| !addresses.is_empty());
+            let ready = endpoint
+                .pointer("/conditions/ready")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            has_address && ready
+        })
+    });
+    let endpoints = endpoint_values
         .map(|a| {
             a.iter()
                 .flat_map(|e| {
@@ -194,7 +245,12 @@ pub(crate) fn endpointslice_cells(data: &Value) -> (Vec<String>, RowStatus) {
                 .join("\n")
         })
         .unwrap_or_default();
-    (vec![addr_type, endpoints, ports], RowStatus::Ok)
+    let status = if has_ready_endpoint {
+        RowStatus::Ok
+    } else {
+        RowStatus::Error
+    };
+    (vec![addr_type, endpoints, ports], status)
 }
 
 pub(crate) fn ingress_cells(data: &Value) -> (Vec<String>, RowStatus) {
@@ -211,8 +267,18 @@ pub(crate) fn ingress_cells(data: &Value) -> (Vec<String>, RowStatus) {
                 .join("\n")
         })
         .unwrap_or_default();
-    let address = data
-        .get("status")
+    let addresses = load_balancer_addresses(data);
+    let address = addresses.join("\n");
+    let status = if addresses.is_empty() {
+        RowStatus::Pending
+    } else {
+        RowStatus::Ok
+    };
+    (vec![class, hosts, address], status)
+}
+
+fn load_balancer_addresses(data: &Value) -> Vec<String> {
+    data.get("status")
         .and_then(|s| s.get("loadBalancer"))
         .and_then(|l| l.get("ingress"))
         .and_then(|i| i.as_array())
@@ -222,13 +288,12 @@ pub(crate) fn ingress_cells(data: &Value) -> (Vec<String>, RowStatus) {
                     x.get("ip")
                         .and_then(|v| v.as_str())
                         .or_else(|| x.get("hostname").and_then(|v| v.as_str()))
+                        .filter(|address| !address.is_empty())
                 })
                 .map(String::from)
                 .collect::<Vec<_>>()
-                .join("\n")
         })
-        .unwrap_or_default();
-    (vec![class, hosts, address], RowStatus::Ok)
+        .unwrap_or_default()
 }
 
 pub(crate) fn hpa_cells(data: &Value) -> (Vec<String>, RowStatus) {
@@ -243,11 +308,18 @@ pub(crate) fn hpa_cells(data: &Value) -> (Vec<String>, RowStatus) {
     let max = int_at(data, &["spec", "maxReplicas"]).unwrap_or(0);
     let current = int_at(data, &["status", "currentReplicas"]).unwrap_or(0);
     let targets = hpa_targets(data);
-    // At the ceiling = note it (yellow); otherwise the autoscaler is operating normally.
-    let st = if max > 0 && current >= max {
-        RowStatus::Warn
+    let st = if status_generation_is_stale(data) {
+        RowStatus::Pending
     } else {
-        RowStatus::Ok
+        let able = condition_status(data, "AbleToScale");
+        let active = condition_status(data, "ScalingActive");
+        let limited = condition_status(data, "ScalingLimited");
+        match (able.as_deref(), active.as_deref(), limited.as_deref()) {
+            (Some("False"), _, _) | (_, Some("False"), _) => RowStatus::Error,
+            (Some("True"), Some("True"), Some("True")) => RowStatus::Warn,
+            (Some("True"), Some("True"), Some("False")) => RowStatus::Ok,
+            _ => RowStatus::Pending,
+        }
     };
     (
         vec![
@@ -264,12 +336,306 @@ pub(crate) fn hpa_cells(data: &Value) -> (Vec<String>, RowStatus) {
 pub(crate) fn pdb_cells(data: &Value) -> (Vec<String>, RowStatus) {
     let min = intstr_at(data, &["spec", "minAvailable"]).unwrap_or_else(|| "N/A".into());
     let max = intstr_at(data, &["spec", "maxUnavailable"]).unwrap_or_else(|| "N/A".into());
-    let allowed = int_at(data, &["status", "disruptionsAllowed"]).unwrap_or(0);
-    // No disruptions currently allowed → the budget is blocking (yellow).
-    let st = if allowed == 0 {
-        RowStatus::Warn
+    let allowed = int_at(data, &["status", "disruptionsAllowed"]);
+    let current = int_at(data, &["status", "currentHealthy"]);
+    let desired = int_at(data, &["status", "desiredHealthy"]);
+    let condition = condition_status(data, "DisruptionAllowed");
+    let st = if status_generation_is_stale(data) {
+        RowStatus::Pending
+    } else if condition_reason(data, "DisruptionAllowed").as_deref() == Some("SyncFailed")
+        || current
+            .zip(desired)
+            .is_some_and(|(current, desired)| current < desired)
+    {
+        RowStatus::Error
     } else {
-        RowStatus::Ok
+        match (condition.as_deref(), allowed, current, desired) {
+            (Some("True"), Some(allowed), _, _) if allowed > 0 => RowStatus::Ok,
+            (Some("True" | "False"), Some(0), Some(_), Some(_)) => RowStatus::Warn,
+            (None, Some(allowed), Some(_), Some(_)) if allowed > 0 => RowStatus::Ok,
+            (Some("Unknown"), _, _, _) | (None, None, _, _) => RowStatus::Pending,
+            _ => RowStatus::Pending,
+        }
     };
-    (vec![min, max, allowed.to_string()], st)
+    (vec![min, max, allowed.unwrap_or_default().to_string()], st)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn uncovered_core_projectors_preserve_cells_and_health() {
+        assert_eq!(
+            namespace_cells(&json!({"status": {"phase": "Active"}})),
+            (vec!["Active".to_string()], RowStatus::Ok)
+        );
+        assert_eq!(
+            namespace_cells(&json!({"status": {"phase": "Terminating"}})).1,
+            RowStatus::Warn
+        );
+
+        assert_eq!(
+            secret_cells(&json!({
+                "data": {"token": "encoded"},
+                "stringData": {"username": "admin", "password": "secret"}
+            })),
+            (vec!["Opaque".to_string(), "3".to_string()], RowStatus::Ok)
+        );
+        assert_eq!(
+            configmap_cells(&json!({
+                "data": {"config": "value"},
+                "binaryData": {"archive": "encoded"}
+            }))
+            .0,
+            vec!["2".to_string()]
+        );
+
+        assert_eq!(
+            node_cells(&json!({
+                "spec": {"unschedulable": true},
+                "status": {
+                    "conditions": [{"type": "Ready", "status": "True"}],
+                    "nodeInfo": {"kubeletVersion": "v1.35.0"}
+                }
+            })),
+            (
+                vec![
+                    "Ready,SchedulingDisabled".to_string(),
+                    "v1.35.0".to_string()
+                ],
+                RowStatus::Warn
+            )
+        );
+
+        let volume = json!({
+            "spec": {
+                "capacity": {"storage": "10Gi"},
+                "accessModes": ["ReadWriteOnce", "ReadOnlyMany"],
+                "persistentVolumeReclaimPolicy": "Retain",
+                "claimRef": {"namespace": "default", "name": "data"},
+                "storageClassName": "fast"
+            },
+            "status": {"phase": "Released"}
+        });
+        assert_eq!(
+            pv_cells(&volume),
+            (
+                vec![
+                    "10Gi".to_string(),
+                    "RWO,ROX".to_string(),
+                    "Retain".to_string(),
+                    "Released".to_string(),
+                    "default/data".to_string(),
+                    "fast".to_string()
+                ],
+                RowStatus::Warn
+            )
+        );
+        assert_eq!(
+            pv_cells(&json!({"status": {"phase": "Failed"}})).1,
+            RowStatus::Error
+        );
+
+        assert_eq!(
+            storageclass_cells(&json!({"provisioner": "csi.example.com"})),
+            (
+                vec![
+                    "csi.example.com".to_string(),
+                    "Delete".to_string(),
+                    "Immediate".to_string(),
+                    "false".to_string()
+                ],
+                RowStatus::Ok
+            )
+        );
+    }
+
+    #[test]
+    fn endpoints_require_a_ready_address() {
+        let cases = [
+            (json!({}), RowStatus::Error),
+            (
+                json!({"subsets": [{"notReadyAddresses": [{"ip": "10.0.0.1"}]}]}),
+                RowStatus::Error,
+            ),
+            (
+                json!({"subsets": [{"addresses": [{"ip": "10.0.0.1"}]}]}),
+                RowStatus::Ok,
+            ),
+        ];
+
+        for (data, expected) in cases {
+            assert_eq!(endpoints_cells(&data).1, expected, "{data}");
+        }
+    }
+
+    #[test]
+    fn event_type_drives_health() {
+        for (type_, expected) in [
+            ("Normal", RowStatus::Ok),
+            ("Warning", RowStatus::Warn),
+            ("Unexpected", RowStatus::Unknown),
+        ] {
+            assert_eq!(event_cells(&json!({"type": type_})).1, expected, "{type_}");
+        }
+    }
+
+    #[test]
+    fn event_last_seen_prefers_the_latest_observation() {
+        let (cells, _) = event_cells(&json!({
+            "eventTime": "2026-09-10T10:00:00Z",
+            "lastTimestamp": "2026-09-10T09:00:00Z"
+        }));
+        assert_eq!(cells[0], "2026-09-10T10:00:00Z");
+    }
+
+    #[test]
+    fn endpoint_slices_follow_ready_condition_semantics() {
+        let cases = [
+            (json!({}), RowStatus::Error),
+            (
+                json!({"endpoints": [{
+                    "addresses": ["10.0.0.1"],
+                    "conditions": {"ready": false}
+                }]}),
+                RowStatus::Error,
+            ),
+            (
+                json!({"endpoints": [{"conditions": {"ready": true}}]}),
+                RowStatus::Error,
+            ),
+            (
+                json!({"endpoints": [{"addresses": ["10.0.0.1"]}]}),
+                RowStatus::Ok,
+            ),
+            (
+                json!({"endpoints": [{
+                    "addresses": ["10.0.0.1"],
+                    "conditions": {"ready": true}
+                }]}),
+                RowStatus::Ok,
+            ),
+        ];
+
+        for (data, expected) in cases {
+            assert_eq!(endpointslice_cells(&data).1, expected, "{data}");
+        }
+    }
+
+    #[test]
+    fn pvc_phase_drives_health() {
+        let cases = [
+            ("Bound", RowStatus::Ok),
+            ("Pending", RowStatus::Pending),
+            ("Lost", RowStatus::Error),
+            ("Unexpected", RowStatus::Unknown),
+        ];
+
+        for (phase, expected) in cases {
+            let data = json!({"status": {"phase": phase}});
+            assert_eq!(pvc_cells(&data, None).1, expected, "{phase}");
+        }
+        assert_eq!(pvc_cells(&json!({}), None).1, RowStatus::Pending);
+    }
+
+    #[test]
+    fn load_balancers_are_pending_until_they_have_an_address() {
+        let pending_service = json!({"spec": {"type": "LoadBalancer"}});
+        let ready_service = json!({
+            "spec": {"type": "LoadBalancer"},
+            "status": {"loadBalancer": {"ingress": [{"hostname": "lb.example.com"}]}}
+        });
+        assert_eq!(service_cells(&pending_service).1, RowStatus::Pending);
+        assert_eq!(service_cells(&ready_service).1, RowStatus::Ok);
+        assert_eq!(service_cells(&json!({})).1, RowStatus::Ok);
+
+        assert_eq!(ingress_cells(&json!({})).1, RowStatus::Pending);
+        assert_eq!(
+            ingress_cells(&json!({
+                "status": {"loadBalancer": {"ingress": [{"ip": "10.0.0.1"}]}}
+            }))
+            .1,
+            RowStatus::Ok
+        );
+    }
+
+    #[test]
+    fn hpa_health_follows_controller_conditions() {
+        let conditions = |able: &str, active: &str, limited: &str| {
+            json!({"status": {"conditions": [
+                {"type": "AbleToScale", "status": able},
+                {"type": "ScalingActive", "status": active},
+                {"type": "ScalingLimited", "status": limited}
+            ]}})
+        };
+        let cases = [
+            (conditions("True", "True", "False"), RowStatus::Ok),
+            (conditions("True", "True", "True"), RowStatus::Warn),
+            (conditions("False", "True", "False"), RowStatus::Error),
+            (conditions("True", "False", "False"), RowStatus::Error),
+            (conditions("Unknown", "True", "False"), RowStatus::Pending),
+            (json!({}), RowStatus::Pending),
+            (
+                json!({
+                    "metadata": {"generation": 2},
+                    "status": {"observedGeneration": 1}
+                }),
+                RowStatus::Pending,
+            ),
+        ];
+
+        for (data, expected) in cases {
+            assert_eq!(hpa_cells(&data).1, expected, "{data}");
+        }
+    }
+
+    #[test]
+    fn pdb_health_distinguishes_violations_from_blocked_disruptions() {
+        let cases = [
+            (
+                json!({"status": {
+                    "currentHealthy": 3,
+                    "desiredHealthy": 2,
+                    "disruptionsAllowed": 1,
+                    "conditions": [{"type": "DisruptionAllowed", "status": "True"}]
+                }}),
+                RowStatus::Ok,
+            ),
+            (
+                json!({"status": {
+                    "currentHealthy": 2,
+                    "desiredHealthy": 2,
+                    "disruptionsAllowed": 0,
+                    "conditions": [{"type": "DisruptionAllowed", "status": "False"}]
+                }}),
+                RowStatus::Warn,
+            ),
+            (
+                json!({"status": {
+                    "currentHealthy": 1,
+                    "desiredHealthy": 2,
+                    "disruptionsAllowed": 0,
+                    "conditions": [{"type": "DisruptionAllowed", "status": "False"}]
+                }}),
+                RowStatus::Error,
+            ),
+            (
+                json!({"status": {
+                    "conditions": [{
+                        "type": "DisruptionAllowed",
+                        "status": "False",
+                        "reason": "SyncFailed"
+                    }]
+                }}),
+                RowStatus::Error,
+            ),
+            (json!({}), RowStatus::Pending),
+        ];
+
+        for (data, expected) in cases {
+            assert_eq!(pdb_cells(&data).1, expected, "{data}");
+        }
+    }
 }

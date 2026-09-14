@@ -12,7 +12,7 @@ use crate::client::K8sError;
 
 /// Namespace the node-shell debug pod is created in. `default` mirrors
 /// `kubectl debug node/<name>`'s own default namespace.
-const NODE_SHELL_NAMESPACE: &str = "default";
+pub(super) const NODE_SHELL_NAMESPACE: &str = "default";
 const DEBUG_IMAGE_ENV: &str = "RODER_DEBUG_IMAGE";
 const DEFAULT_DEBUG_IMAGE: &str = "ghcr.io/nicolaka/netshoot:v0.16@sha256:b09d9b21381f47a79b3cbcb30da25266dc17186ea00ae65e99fdc51396f48e70";
 

@@ -25,6 +25,7 @@ use crate::shared::SharedCluster;
 
 mod drain;
 pub use drain::DrainSession;
+mod alerts;
 mod exec;
 mod files;
 pub use files::normalize_file_path;

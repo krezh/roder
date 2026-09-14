@@ -26,11 +26,11 @@ pub async fn health(Extension(b): Extension<Arc<Backend>>) -> Response {
 /// Current firing alerts from Alertmanager, with a 30-second in-process cache
 /// unless an explicit refresh is requested.
 ///
-/// Fetched via the ServiceAccount client (not the caller's token): Alertmanager
-/// returns cluster-wide alerts unfiltered by k8s identity, and the cache is
-/// shared across every user on a 30s TTL, so per-user token passthrough was
-/// incoherent. Gated by `RODER_ALERTS_GROUPS` instead — see
-/// `ServerConfig::can_read_alerts`.
+/**
+ * The base list uses the ServiceAccount Alertmanager client because its cache
+ * is shared across users. Kubernetes target and rule enrichment uses the
+ * caller's `Backend`; `RODER_ALERTS_GROUPS` still gates the cluster-wide list.
+ */
 #[derive(Default, serde::Deserialize)]
 pub struct AlertsQuery {
     #[serde(default)]
@@ -55,6 +55,7 @@ fn silence_duration(
 pub async fn alerts(
     State(state): State<AppState>,
     Extension(identity): Extension<Identity>,
+    Extension(backend): Extension<Arc<Backend>>,
     Query(query): Query<AlertsQuery>,
 ) -> Response {
     if !state.config.can_read_alerts(&identity.groups) {
@@ -70,7 +71,10 @@ pub async fn alerts(
         cache.get().await
     };
     match result {
-        Ok(alerts) => Json(alerts).into_response(),
+        Ok(mut alerts) => {
+            backend.enrich_alerts(&mut alerts).await;
+            Json(alerts).into_response()
+        }
         Err(e) => {
             tracing::warn!("alerts: {e}");
             bad_gateway(e)

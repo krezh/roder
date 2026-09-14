@@ -1,10 +1,12 @@
 use leptos::prelude::*;
-use roder_core::FiringAlert;
+use roder_core::{AlertResourceTarget, FiringAlert};
 
 use super::use_bool_overlay;
 use crate::app::alert_utils::{elapsed_since, elapsed_since_ms, sort_alerts};
 use crate::app::components::dropdown::{Dropdown, DropdownClose};
-use crate::app::state::{AlertSilencesEnabled, AlertsData, AlertsLastRefresh, AlertsOpen, Tick};
+use crate::app::state::{
+    AlertSilencesEnabled, AlertsData, AlertsLastRefresh, AlertsOpen, DetailTarget, Tick,
+};
 
 #[component]
 pub(crate) fn AlertsPanel() -> impl IntoView {
@@ -242,6 +244,8 @@ fn AlertRow(
             {(!alert.description.is_empty()).then(|| view! {
                 <p class="alert-desc">{alert.description.clone()}</p>
             })}
+            <AlertTargetLinks label="Affected resources" targets=alert.targets.clone() />
+            <AlertTargetLinks label="Defined by" targets=alert.defining_rules.clone() />
             <div class="alert-labels">
                 {available_matchers.clone().into_iter()
                     .filter(|(name, _)| name != "alertname" && name != "severity")
@@ -314,6 +318,41 @@ fn AlertRow(
             </section>
         </Show>
     }
+}
+
+#[component]
+fn AlertTargetLinks(label: &'static str, targets: Vec<AlertResourceTarget>) -> impl IntoView {
+    let detail = expect_context::<RwSignal<Option<DetailTarget>>>();
+    let alerts_open = expect_context::<AlertsOpen>().0;
+    (!targets.is_empty()).then(|| {
+        view! {
+            <div class="alert-targets">
+                <span>{label}</span>
+                <div>
+                    {targets.into_iter().map(|target| {
+                        let clicked = target.clone();
+                        let location = target.namespace.as_deref().map_or_else(
+                            || target.name.clone(),
+                            |namespace| format!("{namespace}/{}", target.name),
+                        );
+                        view! {
+                            <button type="button" on:click=move |_| {
+                                alerts_open.set(false);
+                                detail.set(Some(DetailTarget {
+                                    key: clicked.key.clone(),
+                                    namespace: clicked.namespace.clone(),
+                                    name: clicked.name.clone(),
+                                }));
+                            }>
+                                <strong>{target.kind}</strong>
+                                <span>{location}</span>
+                            </button>
+                        }
+                    }).collect_view()}
+                </div>
+            </div>
+        }
+    })
 }
 
 #[component]

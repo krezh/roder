@@ -1134,6 +1134,15 @@ pub struct ResourceHealthRollup {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+/// A discovered Kubernetes resource that can be opened from an alert.
+pub struct AlertResourceTarget {
+    pub key: String,
+    pub kind: String,
+    pub namespace: Option<String>,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FiringAlert {
     pub fingerprint: String,
@@ -1144,6 +1153,10 @@ pub struct FiringAlert {
     pub starts_at: String,
     pub labels: std::collections::HashMap<String, String>,
     pub silenced: bool,
+    #[serde(default)]
+    pub targets: Vec<AlertResourceTarget>,
+    #[serde(default)]
+    pub defining_rules: Vec<AlertResourceTarget>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1459,5 +1472,23 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn firing_alert_accepts_cached_payload_without_resource_targets() {
+        let alert: FiringAlert = serde_json::from_value(serde_json::json!({
+            "fingerprint": "abc",
+            "name": "PodDown",
+            "severity": "warning",
+            "summary": "",
+            "description": "",
+            "starts_at": "2026-01-01T00:00:00Z",
+            "labels": {},
+            "silenced": false
+        }))
+        .unwrap();
+
+        assert!(alert.targets.is_empty());
+        assert!(alert.defining_rules.is_empty());
     }
 }

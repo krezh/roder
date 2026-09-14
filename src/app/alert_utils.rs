@@ -60,6 +60,8 @@ mod tests {
             starts_at: String::new(),
             labels: HashMap::new(),
             silenced: false,
+            targets: Vec::new(),
+            defining_rules: Vec::new(),
         }
     }
 

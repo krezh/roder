@@ -64,11 +64,7 @@
 - Add Prometheus, PrometheusAgent, Alertmanager, and ThanosRuler readiness projections
 - Add PrometheusRule group, rule count, evaluation, and error summaries
 - Add ServiceMonitor, PodMonitor, Probe, and ScrapeConfig target summaries
-- Resolve Alertmanager labels to canonical Kubernetes resource targets
-- Support standard workload, Pod, Service, Node, and PVC alert labels
-- Support kube-state-metrics custom-resource labels
 - Support Flux, CloudNativePG, Rook, cert-manager, and External Secrets alert labels
-- Link firing alerts to their defining PrometheusRule
 - Present a target chooser when alert labels resolve ambiguously
 
 ## Networking

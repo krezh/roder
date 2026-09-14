@@ -155,6 +155,8 @@ impl AmAlert {
             starts_at: self.starts_at,
             silenced: !self.status.silenced_by.is_empty(),
             labels: self.labels,
+            targets: Vec::new(),
+            defining_rules: Vec::new(),
         }
     }
 }

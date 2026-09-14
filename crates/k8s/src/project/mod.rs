@@ -31,7 +31,7 @@ use self::cnpg::{backup_cells, cluster_cells, pooler_cells, scheduled_backup_cel
 use self::core::{
     configmap_cells, endpoints_cells, endpointslice_cells, event_cells, hpa_cells, ingress_cells,
     namespace_cells, node_cells, pdb_cells, pv_cells, pvc_cells, secret_cells, service_cells,
-    storageclass_cells,
+    storageclass_cells, volumeattachment_cells,
 };
 use self::eso::{cluster_external_secret_cells, eso_generic_cells, external_secret_cells};
 use self::flux::ready_message_cells;
@@ -272,6 +272,17 @@ fn explicit_view(group: &str, kind: &str) -> Option<KindView> {
         ("storage.k8s.io", "StorageClass") => view!(
             &["Provisioner", "Reclaim", "Binding Mode", "Expandable"],
             Plain(storageclass_cells)
+        ),
+        ("storage.k8s.io", "VolumeAttachment") => view!(
+            &[
+                "Attacher",
+                "PV",
+                "Node",
+                "Attached",
+                "Attach Error",
+                "Detach Error"
+            ],
+            Plain(volumeattachment_cells)
         ),
         ("", "Secret") => view!(&["Type", "Data"], Plain(secret_cells)),
         ("", "ConfigMap") => view!(&["Data"], Plain(configmap_cells)),
@@ -562,9 +573,11 @@ fn enhancement_headers(group: &str, kind: &str) -> &'static [&'static str] {
             "Restarts", "CPU", "%CPU/R", "%CPU/L", "MEM", "%MEM/R", "%MEM/L", "IP", "Node",
         ],
         ("", "PersistentVolumeClaim") => &["Usage", "Mount"],
-        ("", "Event") | ("batch", "CronJob") => explicit_view(group, kind)
-            .map(|view| view.headers)
-            .unwrap_or(&[]),
+        ("", "Event") | ("batch", "CronJob") | ("storage.k8s.io", "VolumeAttachment") => {
+            explicit_view(group, kind)
+                .map(|view| view.headers)
+                .unwrap_or(&[])
+        }
         _ => explicit_view(group, kind)
             .filter(|view| view.custom_columns)
             .map(|view| view.headers)
@@ -595,6 +608,10 @@ fn enhancement_values(
         }
         ("batch", "CronJob") => {
             let (cells, status) = cronjob_cells(data);
+            (cells, vec![], status)
+        }
+        ("storage.k8s.io", "VolumeAttachment") => {
+            let (cells, status) = volumeattachment_cells(data);
             (cells, vec![], status)
         }
         _ if explicit_view(group, kind).is_some_and(|view| view.custom_columns) => {
@@ -896,6 +913,18 @@ mod tests {
                 "storage.k8s.io",
                 "StorageClass",
                 &["Provisioner", "Reclaim", "Binding Mode", "Expandable"],
+            ),
+            (
+                "storage.k8s.io",
+                "VolumeAttachment",
+                &[
+                    "Attacher",
+                    "PV",
+                    "Node",
+                    "Attached",
+                    "Attach Error",
+                    "Detach Error",
+                ],
             ),
             ("", "Secret", &["Type", "Data"]),
             ("", "ConfigMap", &["Data"]),
@@ -1479,6 +1508,85 @@ mod tests {
                 "2099-09-14T12:00:00Z",
                 "2099-09-14T11:00:10Z",
                 "Active"
+            ]
+        );
+    }
+
+    #[test]
+    fn volume_attachment_layout_adds_errors_and_replaces_server_status() {
+        let definitions = [
+            column("Name", 0),
+            column("Attacher", 0),
+            column("PV", 0),
+            column("Node", 0),
+            column("Attached", 0),
+            column("Age", 0),
+        ];
+        let layout = table_layout("storage.k8s.io", "VolumeAttachment", false, &definitions);
+        assert_eq!(
+            layout.columns,
+            [
+                "Name",
+                "Attacher",
+                "PV",
+                "Node",
+                "Attached",
+                "Attach Error",
+                "Detach Error",
+                "Age",
+            ]
+        );
+        let table_row = TableRow {
+            cells: vec![
+                json!("csi-123"),
+                json!("stale.example.com"),
+                json!("stale-pv"),
+                json!("stale-node"),
+                json!(false),
+                json!("1h"),
+            ],
+            object: Some(
+                serde_json::from_value(json!({
+                    "apiVersion": "storage.k8s.io/v1",
+                    "kind": "VolumeAttachment",
+                    "metadata": {"name": "csi-123", "uid": "attachment-1"},
+                    "spec": {
+                        "attacher": "csi.example.com",
+                        "source": {"persistentVolumeName": "pv-data"},
+                        "nodeName": "worker-1"
+                    },
+                    "status": {
+                        "attached": false,
+                        "attachError": {"message": "attach timed out"}
+                    }
+                }))
+                .unwrap(),
+            ),
+            ..Default::default()
+        };
+        let row = project_table_row(
+            "storage.k8s.io",
+            "VolumeAttachment",
+            &layout,
+            &table_row,
+            None,
+            None,
+        )
+        .unwrap()
+        .0;
+
+        assert_eq!(row.status, RowStatus::Error);
+        assert_eq!(
+            row.cells,
+            [
+                "csi-123",
+                "csi.example.com",
+                "pv-data",
+                "worker-1",
+                "false",
+                "attach timed out",
+                "",
+                "1h",
             ]
         );
     }

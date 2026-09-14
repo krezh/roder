@@ -6,7 +6,6 @@
 
 ## Resource Relationships
 
-- Add VolumeAttachment to PV and Node relationships
 - Add ObjectBucketClaim to ObjectBucket, Secret, and ConfigMap relationships
 - Add cert-manager Certificate to target Secret and issuer relationships
 - Add cert-manager CertificateRequest to issuer, Order, and Challenge relationships
@@ -69,7 +68,6 @@
 
 ## Core Resources
 
-- Add VolumeAttachment projection with attach and detach errors
 - Add ResourceQuota used/hard utilization columns and thresholds
 - Add CertificateSigningRequest approval, denial, and failure status
 - Add safe CertificateSigningRequest approve and deny actions

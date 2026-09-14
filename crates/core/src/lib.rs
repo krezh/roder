@@ -611,6 +611,7 @@ pub enum ResourceTreeRelation {
     ClusterResource,
     GeneratedResource,
     StorageBackend,
+    VolumeAttachment,
 }
 
 impl ResourceTreeRelation {
@@ -626,6 +627,7 @@ impl ResourceTreeRelation {
             Self::ClusterResource => "Cluster resource",
             Self::GeneratedResource => "Generated resource",
             Self::StorageBackend => "Storage backend",
+            Self::VolumeAttachment => "Volume attachment",
         }
     }
 }

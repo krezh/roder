@@ -215,7 +215,7 @@ pub(crate) fn KindTable(
             .get()
             .iter()
             .enumerate()
-            .filter(|(_, c)| matches!(c.as_str(), "Mount"))
+            .filter(|(_, c)| matches!(c.as_str(), "Mount" | "Attached"))
             .map(|(i, _)| i)
             .collect::<Vec<usize>>()
     });

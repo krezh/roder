@@ -200,6 +200,40 @@ pub(crate) fn storageclass_cells(data: &Value) -> (Vec<String>, RowStatus) {
     )
 }
 
+pub(crate) fn volumeattachment_cells(data: &Value) -> (Vec<String>, RowStatus) {
+    let attacher = str_at(data, &["spec", "attacher"]).unwrap_or_default();
+    let volume = str_at(data, &["spec", "source", "persistentVolumeName"]).unwrap_or_default();
+    let node = str_at(data, &["spec", "nodeName"]).unwrap_or_default();
+    let attached = data
+        .pointer("/status/attached")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let attach_error = str_at(data, &["status", "attachError", "message"]).unwrap_or_default();
+    let detach_error = str_at(data, &["status", "detachError", "message"]).unwrap_or_default();
+    let has_error = ["/status/attachError", "/status/detachError"]
+        .into_iter()
+        .any(|path| data.pointer(path).is_some_and(|error| !error.is_null()));
+    let status = if has_error {
+        RowStatus::Error
+    } else if attached {
+        RowStatus::Ok
+    } else {
+        RowStatus::Pending
+    };
+
+    (
+        vec![
+            attacher,
+            volume,
+            node,
+            attached.to_string(),
+            attach_error,
+            detach_error,
+        ],
+        status,
+    )
+}
+
 pub(crate) fn endpointslice_cells(data: &Value) -> (Vec<String>, RowStatus) {
     let addr_type = str_at(data, &["addressType"]).unwrap_or_default();
     let endpoint_values = data.get("endpoints").and_then(|e| e.as_array());
@@ -538,6 +572,49 @@ mod tests {
             assert_eq!(pvc_cells(&data, None).1, expected, "{phase}");
         }
         assert_eq!(pvc_cells(&json!({}), None).1, RowStatus::Pending);
+    }
+
+    #[test]
+    fn volume_attachment_health_surfaces_controller_errors() {
+        let attached = json!({
+            "spec": {
+                "attacher": "csi.example.com",
+                "source": {"persistentVolumeName": "pv-data"},
+                "nodeName": "worker-1"
+            },
+            "status": {"attached": true}
+        });
+        assert_eq!(
+            volumeattachment_cells(&attached),
+            (
+                vec![
+                    "csi.example.com".to_string(),
+                    "pv-data".to_string(),
+                    "worker-1".to_string(),
+                    "true".to_string(),
+                    String::new(),
+                    String::new(),
+                ],
+                RowStatus::Ok
+            )
+        );
+
+        for (field, message) in [
+            ("attachError", "attach timed out"),
+            ("detachError", "detach timed out"),
+        ] {
+            let mut failed = attached.clone();
+            failed["status"][field] = json!({"message": message});
+            let (cells, status) = volumeattachment_cells(&failed);
+            assert_eq!(status, RowStatus::Error);
+            assert!(cells.iter().any(|cell| cell == message));
+        }
+
+        assert_eq!(
+            volumeattachment_cells(&json!({"status": {"attached": false}})).1,
+            RowStatus::Pending
+        );
+        assert_eq!(volumeattachment_cells(&json!({})).1, RowStatus::Pending);
     }
 
     #[test]

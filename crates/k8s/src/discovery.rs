@@ -167,6 +167,7 @@ mod tests {
             ),
             ("rbac.authorization.k8s.io", "Role", Category::Rbac),
             ("storage.k8s.io", "StorageClass", Category::Storage),
+            ("storage.k8s.io", "VolumeAttachment", Category::Storage),
             ("networking.k8s.io", "Ingress", Category::Network),
             ("gateway.networking.k8s.io", "HTTPRoute", Category::Network),
             ("apps", "Deployment", Category::Workloads),

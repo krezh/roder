@@ -166,7 +166,7 @@ pub(crate) fn surfaced_cells(columns: &[String], cells: &[String]) -> Vec<(Strin
     let mut idx: Vec<usize> = Vec::new();
     if let Some(i) = columns
         .iter()
-        .position(|c| matches!(c.as_str(), "Phase" | "Status" | "Ready"))
+        .position(|c| matches!(c.as_str(), "Phase" | "Status" | "Ready" | "Attached"))
     {
         idx.push(i);
     }
@@ -182,7 +182,7 @@ pub(crate) fn surfaced_cells(columns: &[String], cells: &[String]) -> Vec<(Strin
         .filter_map(|i| {
             let label = columns.get(i)?.clone();
             let value = cells.get(i).cloned().unwrap_or_default();
-            let colored = matches!(label.as_str(), "Phase" | "Status" | "Ready");
+            let colored = matches!(label.as_str(), "Phase" | "Status" | "Ready" | "Attached");
             Some((label, value, colored))
         })
         .collect()
@@ -410,6 +410,28 @@ mod tests {
             vec![
                 ("Ready".to_string(), "True".to_string(), true),
                 ("Node".to_string(), "worker-1".to_string(), false),
+            ]
+        );
+    }
+
+    #[test]
+    fn mobile_surfaced_cells_prioritize_attachment_status() {
+        let columns = ["Name", "Attacher", "PV", "Node", "Attached", "Age"].map(str::to_string);
+        let cells = [
+            "csi-123",
+            "csi.example.com",
+            "pv-data",
+            "worker-1",
+            "false",
+            "1h",
+        ]
+        .map(str::to_string);
+
+        assert_eq!(
+            surfaced_cells(&columns, &cells),
+            vec![
+                ("Attached".to_string(), "false".to_string(), true),
+                ("Attacher".to_string(), "csi.example.com".to_string(), false),
             ]
         );
     }

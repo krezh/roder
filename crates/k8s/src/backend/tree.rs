@@ -78,6 +78,7 @@ enum RelationshipProvider {
     CnpgClusterReference,
     CnpgScheduledBackup,
     KubernetesStorage,
+    VolumeAttachments,
     RookStorageClass,
     RookCephCluster,
 }
@@ -233,6 +234,24 @@ const RELATIONSHIP_PROVIDERS: &[ProviderRegistration] = &[
         group: "",
         version: Some("v1"),
         kind: "PersistentVolume",
+        provider: RelationshipProvider::KubernetesStorage,
+    },
+    ProviderRegistration {
+        group: "",
+        version: Some("v1"),
+        kind: "PersistentVolume",
+        provider: RelationshipProvider::VolumeAttachments,
+    },
+    ProviderRegistration {
+        group: "",
+        version: Some("v1"),
+        kind: "Node",
+        provider: RelationshipProvider::VolumeAttachments,
+    },
+    ProviderRegistration {
+        group: "storage.k8s.io",
+        version: Some("v1"),
+        kind: "VolumeAttachment",
         provider: RelationshipProvider::KubernetesStorage,
     },
     ProviderRegistration {
@@ -524,18 +543,42 @@ impl Backend {
                     }
                 }
                 RelationshipProvider::KubernetesStorage => {
+                    let attachment =
+                        resource.group == "storage.k8s.io" && resource.kind == "VolumeAttachment";
                     children.extend(storage_reference_targets(resource, data).into_iter().map(
                         |target| {
-                            self.resolve_resource(
+                            let mut child = self.resolve_resource(
                                 target.group.into(),
                                 target.version.into(),
                                 target.kind.into(),
                                 target.name,
                                 target.namespace,
                                 Some(ResourceTreeRelation::ReferencedResource),
-                            )
+                            );
+                            // Expanding the referenced PV would immediately link back here.
+                            if attachment {
+                                child.expandable = false;
+                            }
+                            child
                         },
                     ));
+                }
+                RelationshipProvider::VolumeAttachments => {
+                    match with_api_permit(
+                        semaphore,
+                        self.list_matching(
+                            "storage.k8s.io",
+                            "VolumeAttachment",
+                            None,
+                            ResourceTreeRelation::VolumeAttachment,
+                            |attachment| volume_attachment_matches(resource, attachment),
+                        ),
+                    )
+                    .await
+                    {
+                        Ok(mut refs) => children.append(&mut refs),
+                        Err(error) => errors.push(format!("volume attachments: {error}")),
+                    }
                 }
                 RelationshipProvider::RookStorageClass => {
                     let (mut refs, mut provider_errors) =
@@ -1121,8 +1164,47 @@ fn storage_reference_targets(resource: &ResourceRef, data: &Value) -> Vec<Storag
             }
         }
         ("", "PersistentVolume") => storage_class_reference(data).into_iter().collect(),
+        ("storage.k8s.io", "VolumeAttachment") => {
+            let mut targets = Vec::new();
+            if let Some(name) = data
+                .pointer("/spec/source/persistentVolumeName")
+                .and_then(Value::as_str)
+                .filter(|name| !name.is_empty())
+            {
+                targets.push(StorageReference {
+                    group: "",
+                    version: "v1",
+                    kind: "PersistentVolume",
+                    name: name.to_string(),
+                    namespace: None,
+                });
+            }
+            if let Some(name) = data
+                .pointer("/spec/nodeName")
+                .and_then(Value::as_str)
+                .filter(|name| !name.is_empty())
+            {
+                targets.push(StorageReference {
+                    group: "",
+                    version: "v1",
+                    kind: "Node",
+                    name: name.to_string(),
+                    namespace: None,
+                });
+            }
+            targets
+        }
         _ => Vec::new(),
     }
+}
+
+fn volume_attachment_matches(resource: &ResourceRef, attachment: &DynamicObject) -> bool {
+    let path = match (resource.group.as_str(), resource.kind.as_str()) {
+        ("", "PersistentVolume") => "/spec/source/persistentVolumeName",
+        ("", "Node") => "/spec/nodeName",
+        _ => return false,
+    };
+    attachment.data.pointer(path).and_then(Value::as_str) == Some(resource.name.as_str())
 }
 
 fn storage_class_reference(data: &Value) -> Option<StorageReference> {
@@ -1357,12 +1439,33 @@ mod tests {
             expandable: true,
         };
 
-        for kind in ["Pod", "PersistentVolumeClaim", "PersistentVolume"] {
+        for kind in ["Pod", "PersistentVolumeClaim"] {
             assert_eq!(
                 relationship_providers(&resource(kind)).collect::<Vec<_>>(),
                 [RelationshipProvider::KubernetesStorage]
             );
         }
+        assert_eq!(
+            relationship_providers(&resource("PersistentVolume")).collect::<Vec<_>>(),
+            [
+                RelationshipProvider::KubernetesStorage,
+                RelationshipProvider::VolumeAttachments,
+            ]
+        );
+        assert_eq!(
+            relationship_providers(&resource("Node")).collect::<Vec<_>>(),
+            [RelationshipProvider::VolumeAttachments]
+        );
+        let attachment = ResourceRef {
+            group: "storage.k8s.io".into(),
+            version: "v1".into(),
+            kind: "VolumeAttachment".into(),
+            ..resource("VolumeAttachment")
+        };
+        assert_eq!(
+            relationship_providers(&attachment).collect::<Vec<_>>(),
+            [RelationshipProvider::KubernetesStorage]
+        );
         assert!(reference_is_expandable(
             Some(ResourceTreeRelation::ReferencedResource),
             "",
@@ -1442,5 +1545,83 @@ mod tests {
             storage_reference_targets(&resource, &json!({"spec": {"storageClassName": "fast"}}));
         assert_eq!(class[0].group, "storage.k8s.io");
         assert_eq!(class[0].kind, "StorageClass");
+    }
+
+    #[test]
+    fn volume_attachments_reference_their_volume_and_node() {
+        let attachment = ResourceRef {
+            group: "storage.k8s.io".into(),
+            version: "v1".into(),
+            kind: "VolumeAttachment".into(),
+            name: "csi-123".into(),
+            namespace: None,
+            key: None,
+            category: Some(Category::Storage),
+            relation: None,
+            expandable: true,
+        };
+        let targets = storage_reference_targets(
+            &attachment,
+            &json!({"spec": {
+                "source": {"persistentVolumeName": "pv-data"},
+                "nodeName": "worker-1"
+            }}),
+        );
+
+        assert_eq!(targets.len(), 2);
+        assert!(targets.iter().all(|target| target.namespace.is_none()));
+        assert!(targets
+            .iter()
+            .any(|target| target.kind == "PersistentVolume" && target.name == "pv-data"));
+        assert!(targets
+            .iter()
+            .any(|target| target.kind == "Node" && target.name == "worker-1"));
+
+        let node_only =
+            storage_reference_targets(&attachment, &json!({"spec": {"nodeName": "worker-1"}}));
+        assert_eq!(node_only.len(), 1);
+        assert_eq!(node_only[0].kind, "Node");
+    }
+
+    #[test]
+    fn reverse_volume_attachment_matching_uses_the_parent_reference() {
+        let attachment: DynamicObject = serde_json::from_value(json!({
+            "apiVersion": "storage.k8s.io/v1",
+            "kind": "VolumeAttachment",
+            "metadata": {"name": "csi-123"},
+            "spec": {
+                "source": {"persistentVolumeName": "pv-data"},
+                "nodeName": "worker-1"
+            }
+        }))
+        .unwrap();
+        let resource = |kind: &str, name: &str| ResourceRef {
+            group: String::new(),
+            version: "v1".into(),
+            kind: kind.into(),
+            name: name.into(),
+            namespace: None,
+            key: None,
+            category: None,
+            relation: None,
+            expandable: true,
+        };
+
+        assert!(volume_attachment_matches(
+            &resource("PersistentVolume", "pv-data"),
+            &attachment
+        ));
+        assert!(volume_attachment_matches(
+            &resource("Node", "worker-1"),
+            &attachment
+        ));
+        assert!(!volume_attachment_matches(
+            &resource("PersistentVolume", "pv-other"),
+            &attachment
+        ));
+        assert!(!volume_attachment_matches(
+            &resource("Service", "worker-1"),
+            &attachment
+        ));
     }
 }

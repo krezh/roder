@@ -138,23 +138,62 @@ mod tests {
     use super::*;
 
     #[test]
-    fn classifies_rook_api_groups_together() {
-        assert_eq!(classify("ceph.rook.io", "CephCluster"), Category::Rook);
-        assert_eq!(
-            classify("objectbucket.io", "ObjectBucketClaim"),
-            Category::Rook
-        );
-    }
+    fn classifies_discovery_families() {
+        let cases = [
+            ("source.toolkit.fluxcd.io", "GitRepository", Category::Flux),
+            (
+                "external-secrets.io",
+                "ExternalSecret",
+                Category::ExternalSecrets,
+            ),
+            (
+                "generators.external-secrets.io",
+                "Password",
+                Category::ExternalSecrets,
+            ),
+            ("cert-manager.io", "Certificate", Category::CertManager),
+            ("acme.cert-manager.io", "Challenge", Category::CertManager),
+            ("ceph.rook.io", "CephCluster", Category::Rook),
+            ("objectbucket.io", "ObjectBucketClaim", Category::Rook),
+            ("replication.ceph.io", "VolumeReplication", Category::Rook),
+            ("postgresql.cnpg.io", "Cluster", Category::CloudNativePg),
+            (
+                "barmancloud.cnpg.io",
+                "ObjectStore",
+                Category::CloudNativePg,
+            ),
+            ("rbac.authorization.k8s.io", "Role", Category::Rbac),
+            ("storage.k8s.io", "StorageClass", Category::Storage),
+            ("networking.k8s.io", "Ingress", Category::Network),
+            ("gateway.networking.k8s.io", "HTTPRoute", Category::Network),
+            ("apps", "Deployment", Category::Workloads),
+            ("batch", "CronJob", Category::Workloads),
+            ("", "Pod", Category::Workloads),
+            ("", "ReplicationController", Category::Workloads),
+            ("", "ConfigMap", Category::Config),
+            ("", "Secret", Category::Config),
+            ("", "ResourceQuota", Category::Config),
+            ("", "LimitRange", Category::Config),
+            ("", "ServiceAccount", Category::Rbac),
+            ("", "Service", Category::Network),
+            ("", "Endpoints", Category::Network),
+            ("", "PersistentVolumeClaim", Category::Storage),
+            ("", "PersistentVolume", Category::Storage),
+            ("", "Node", Category::Cluster),
+            (
+                "monitoring.coreos.com",
+                "Prometheus",
+                Category::Custom("coreos.com".to_string()),
+            ),
+            (
+                "kyverno.io",
+                "Policy",
+                Category::Custom("kyverno.io".to_string()),
+            ),
+        ];
 
-    #[test]
-    fn classifies_cnpg_api_groups_together() {
-        assert_eq!(
-            classify("postgresql.cnpg.io", "Cluster"),
-            Category::CloudNativePg
-        );
-        assert_eq!(
-            classify("barmancloud.cnpg.io", "ObjectStore"),
-            Category::CloudNativePg
-        );
+        for (group, kind, expected) in cases {
+            assert_eq!(classify(group, kind), expected, "{group}/{kind}");
+        }
     }
 }

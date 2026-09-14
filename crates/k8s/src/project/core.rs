@@ -366,6 +366,93 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn uncovered_core_projectors_preserve_cells_and_health() {
+        assert_eq!(
+            namespace_cells(&json!({"status": {"phase": "Active"}})),
+            (vec!["Active".to_string()], RowStatus::Ok)
+        );
+        assert_eq!(
+            namespace_cells(&json!({"status": {"phase": "Terminating"}})).1,
+            RowStatus::Warn
+        );
+
+        assert_eq!(
+            secret_cells(&json!({
+                "data": {"token": "encoded"},
+                "stringData": {"username": "admin", "password": "secret"}
+            })),
+            (vec!["Opaque".to_string(), "3".to_string()], RowStatus::Ok)
+        );
+        assert_eq!(
+            configmap_cells(&json!({
+                "data": {"config": "value"},
+                "binaryData": {"archive": "encoded"}
+            }))
+            .0,
+            vec!["2".to_string()]
+        );
+
+        assert_eq!(
+            node_cells(&json!({
+                "spec": {"unschedulable": true},
+                "status": {
+                    "conditions": [{"type": "Ready", "status": "True"}],
+                    "nodeInfo": {"kubeletVersion": "v1.35.0"}
+                }
+            })),
+            (
+                vec![
+                    "Ready,SchedulingDisabled".to_string(),
+                    "v1.35.0".to_string()
+                ],
+                RowStatus::Warn
+            )
+        );
+
+        let volume = json!({
+            "spec": {
+                "capacity": {"storage": "10Gi"},
+                "accessModes": ["ReadWriteOnce", "ReadOnlyMany"],
+                "persistentVolumeReclaimPolicy": "Retain",
+                "claimRef": {"namespace": "default", "name": "data"},
+                "storageClassName": "fast"
+            },
+            "status": {"phase": "Released"}
+        });
+        assert_eq!(
+            pv_cells(&volume),
+            (
+                vec![
+                    "10Gi".to_string(),
+                    "RWO,ROX".to_string(),
+                    "Retain".to_string(),
+                    "Released".to_string(),
+                    "default/data".to_string(),
+                    "fast".to_string()
+                ],
+                RowStatus::Warn
+            )
+        );
+        assert_eq!(
+            pv_cells(&json!({"status": {"phase": "Failed"}})).1,
+            RowStatus::Error
+        );
+
+        assert_eq!(
+            storageclass_cells(&json!({"provisioner": "csi.example.com"})),
+            (
+                vec![
+                    "csi.example.com".to_string(),
+                    "Delete".to_string(),
+                    "Immediate".to_string(),
+                    "false".to_string()
+                ],
+                RowStatus::Ok
+            )
+        );
+    }
+
+    #[test]
     fn endpoints_require_a_ready_address() {
         let cases = [
             (json!({}), RowStatus::Error),

@@ -178,6 +178,35 @@ mod tests {
                 ]}}),
                 RowStatus::Pending,
             ),
+            (
+                json!({"status": {"conditions": [
+                    {"type": "Failed", "status": "True"},
+                    {"type": "Complete", "status": "True"},
+                    {"type": "Degraded", "status": "True"}
+                ]}}),
+                RowStatus::Error,
+            ),
+            (
+                json!({"status": {"conditions": [
+                    {"type": "Complete", "status": "True"},
+                    {"type": "Degraded", "status": "True"},
+                    {"type": "Progressing", "status": "True"}
+                ]}}),
+                RowStatus::Done,
+            ),
+            (
+                json!({"status": {"conditions": [
+                    {"type": "Degraded", "status": "True"},
+                    {"type": "Progressing", "status": "True"}
+                ]}}),
+                RowStatus::Warn,
+            ),
+            (
+                json!({"status": {"conditions": [
+                    {"type": "Ready", "status": "Unknown"}
+                ]}}),
+                RowStatus::Pending,
+            ),
         ];
 
         for (data, expected) in cases {

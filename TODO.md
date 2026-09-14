@@ -100,6 +100,4 @@
 
 ## Testing
 
-- Add table-driven discovery-family tests
-- Add unit tests for generic status, core, Flux, External Secrets, Gateway API, and RBAC projectors
 - Add layout integration tests for Kopiur, Tuppr, and monitoring resources

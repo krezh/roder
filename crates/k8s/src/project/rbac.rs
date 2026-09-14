@@ -15,3 +15,33 @@ pub(crate) fn rolebinding_cells(data: &Value) -> (Vec<String>, RowStatus) {
     };
     (vec![role], RowStatus::Ok)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn role_reference_formats_kind_when_present() {
+        let cases = [
+            (
+                json!({"roleRef": {"kind": "Role", "name": "admin"}}),
+                "Role/admin",
+            ),
+            (
+                json!({"roleRef": {"kind": "ClusterRole", "name": "view"}}),
+                "ClusterRole/view",
+            ),
+            (json!({"roleRef": {"name": "edit"}}), "edit"),
+            (json!({}), ""),
+        ];
+
+        for (data, expected) in cases {
+            assert_eq!(
+                rolebinding_cells(&data),
+                (vec![expected.to_string()], RowStatus::Ok),
+                "{data}"
+            );
+        }
+    }
+}

@@ -1094,18 +1094,22 @@ table.cond {
   margin-top: 0.18rem;
   font-size: 0.98rem;
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 .detail-stat-note {
   margin-top: 0.12rem;
   color: var(--muted);
   font-size: 0.74rem;
+  overflow-wrap: anywhere;
 
   &.warning { color: var(--warn); }
 }
-.certificate-detail-summary {
+.certificate-detail-summary,
+.cnpg-detail-summary {
   margin: 0.8rem 0 1rem;
 }
-.certificate-detail-heading {
+.certificate-detail-heading,
+.cnpg-detail-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1122,7 +1126,16 @@ table.cond {
   strong { font-size: 0.76rem; }
   strong.ok { color: var(--ok); }
   strong.pending { color: var(--pending); }
+  strong.warning { color: var(--warn); }
   strong.error { color: var(--error); }
+}
+.cnpg-detail-reason {
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
 }
 .talos-fingerprint {
   display: flex;

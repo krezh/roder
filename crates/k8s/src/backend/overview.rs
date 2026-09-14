@@ -136,7 +136,7 @@ impl Backend {
                 Some("tuppr.home-operations.com"),
             ),
         ];
-        let (mut controller_groups, cnpg_group) = tokio::join!(
+        let (mut controller_groups, cnpg_group, prometheus_group) = tokio::join!(
             join_all(
                 groups
                     .into_iter()
@@ -149,8 +149,10 @@ impl Backend {
                     })
             ),
             self.cnpg_group(),
+            self.prometheus_group(),
         );
         controller_groups.insert(4, cnpg_group);
+        controller_groups.insert(5, prometheus_group);
         controller_groups.retain(|group| !group.resources.is_empty() || !group.signals.is_empty());
 
         Ok(ClusterOverview {
@@ -278,6 +280,38 @@ impl Backend {
             name: "CloudNativePG".to_string(),
             resources,
             signals,
+        }
+    }
+
+    async fn prometheus_group(&self) -> ControllerHealthGroup {
+        let catalog_store = self.shared.catalog();
+        let catalog = catalog_store.load();
+        let entries = catalog
+            .entries
+            .iter()
+            .filter(|entry| {
+                entry.kind.group == "monitoring.coreos.com"
+                    && matches!(
+                        entry.kind.kind.as_str(),
+                        "Prometheus" | "PrometheusAgent" | "Alertmanager" | "ThanosRuler"
+                    )
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let resources = join_all(
+            entries
+                .into_iter()
+                .map(|entry| self.resource_snapshot(entry)),
+        )
+        .await
+        .into_iter()
+        .map(|(kind, objects)| summarize_resources(kind, objects))
+        .filter(|resource| resource.health.total > 0 || resource.error.is_some())
+        .collect();
+        ControllerHealthGroup {
+            name: "Prometheus Operator".to_string(),
+            resources,
+            signals: Vec::new(),
         }
     }
 }
@@ -629,6 +663,57 @@ mod tests {
         assert_eq!(rollup.key, "example.io/v1/Widget");
         assert_eq!(rollup.health.total, 0);
         assert_eq!(rollup.error.as_deref(), Some("403 Forbidden"));
+    }
+
+    #[test]
+    fn prometheus_rollups_use_readiness_semantics() {
+        let kind = resource_kind("monitoring.coreos.com", "Prometheus");
+        let objects = vec![
+            object(
+                "monitoring.coreos.com",
+                "Prometheus",
+                "ready",
+                serde_json::json!({
+                    "spec": {"replicas": 2},
+                    "status": {"availableReplicas": 2, "conditions": [
+                        {"type": "Reconciled", "status": "True"},
+                        {"type": "Available", "status": "True"}
+                    ]}
+                }),
+            ),
+            object(
+                "monitoring.coreos.com",
+                "Prometheus",
+                "degraded",
+                serde_json::json!({
+                    "status": {"availableReplicas": 1, "conditions": [
+                        {"type": "Available", "status": "Degraded"}
+                    ]}
+                }),
+            ),
+            object(
+                "monitoring.coreos.com",
+                "Prometheus",
+                "failed",
+                serde_json::json!({
+                    "status": {"conditions": [
+                        {"type": "Reconciled", "status": "False"}
+                    ]}
+                }),
+            ),
+            object(
+                "monitoring.coreos.com",
+                "Prometheus",
+                "unreported",
+                serde_json::json!({}),
+            ),
+        ];
+
+        let rollup = summarize_resources(kind, Ok(objects));
+        assert_eq!(rollup.health.ready, 1);
+        assert_eq!(rollup.health.warning, 1);
+        assert_eq!(rollup.health.failing, 1);
+        assert_eq!(rollup.health.unreported, 1);
     }
 
     #[test]

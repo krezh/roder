@@ -92,6 +92,9 @@ fn classify(group: &str, kind: &str) -> Category {
     if group == "cnpg.io" || group.ends_with(".cnpg.io") {
         return Category::CloudNativePg;
     }
+    if group == "monitoring.coreos.com" {
+        return Category::PrometheusOperator;
+    }
     if group == "rbac.authorization.k8s.io" {
         return Category::Rbac;
     }
@@ -183,7 +186,7 @@ mod tests {
             (
                 "monitoring.coreos.com",
                 "Prometheus",
-                Category::Custom("coreos.com".to_string()),
+                Category::PrometheusOperator,
             ),
             (
                 "kyverno.io",

@@ -3,8 +3,8 @@ use roder_core::ObjectDetail;
 use roder_core::ResourceAction;
 
 use crate::app::controllers::detail::{
-    certificate_summary, format_bytes, short_fingerprint, talos_action, talos_config_diff,
-    talos_node, use_metrics, DetailTab, ResourceDetailController,
+    certificate_summary, cnpg_cluster_summary, format_bytes, short_fingerprint, talos_action,
+    talos_config_diff, talos_node, use_metrics, DetailTab, ResourceDetailController,
 };
 use crate::app::jobs::CronJobJobs;
 use crate::app::log_stream::{extract_timestamp, use_log_stream};
@@ -250,6 +250,7 @@ fn MobileInfo(detail: ObjectDetail, kind: String) -> impl IntoView {
     let object = &detail.object;
     let is_event = kind == "Event";
     let certificate = (kind == "Certificate").then(|| certificate_summary(object));
+    let cnpg_cluster = cnpg_cluster_summary(object);
     let created = json_str(object, &["metadata", "creationTimestamp"]);
     let owners = owner_refs(object);
     let mut status = status_scalars(object);
@@ -258,6 +259,20 @@ fn MobileInfo(detail: ObjectDetail, kind: String) -> impl IntoView {
             !matches!(
                 key.as_str(),
                 "notBefore" | "notAfter" | "renewalTime" | "revision"
+            )
+        });
+    }
+    if cnpg_cluster.is_some() {
+        status.retain(|(key, _)| {
+            !matches!(
+                key.as_str(),
+                "phase"
+                    | "phaseReason"
+                    | "instances"
+                    | "readyInstances"
+                    | "currentPrimary"
+                    | "targetPrimary"
+                    | "image"
             )
         });
     }
@@ -385,6 +400,19 @@ fn MobileInfo(detail: ObjectDetail, kind: String) -> impl IntoView {
                     <div class="detail-stat"><span class="detail-stat-label">"Scheduled renewal"</span><span class="detail-stat-value" data-tip=certificate.renewal_time_raw>{certificate.renewal_time}</span></div>
                     <div class="detail-stat"><span class="detail-stat-label">"Revision"</span><span class="detail-stat-value">{certificate.revision}</span></div>
                     <div class="detail-stat"><span class="detail-stat-label">"Target Secret"</span><span class="detail-stat-value">{certificate.secret}</span></div>
+                </div>
+            </section>
+        })}
+        {cnpg_cluster.map(|cluster| view! {
+            <section class="cnpg-detail-summary" aria-label="CloudNativePG cluster health">
+                <div class="cnpg-detail-heading"><span>"Cluster health"</span><strong class=cluster.phase_class>{cluster.phase}</strong></div>
+                {(!cluster.phase_reason.is_empty()).then(|| view! { <div class="cnpg-detail-reason">{cluster.phase_reason}</div> })}
+                <div class="detail-stats">
+                    <div class="detail-stat"><span class="detail-stat-label">"Topology"</span><span class="detail-stat-value">{cluster.topology}</span><span class="detail-stat-note">{cluster.topology_note}</span></div>
+                    <div class="detail-stat"><span class="detail-stat-label">"Primary"</span><span class="detail-stat-value">{cluster.primary}</span><span class="detail-stat-note">{cluster.primary_note}</span></div>
+                    <div class="detail-stat"><span class="detail-stat-label">"Image"</span><span class="detail-stat-value">{cluster.image}</span></div>
+                    <div class="detail-stat"><span class="detail-stat-label">"Storage"</span><span class="detail-stat-value">{cluster.storage}</span><span class="detail-stat-note">{cluster.storage_note}</span></div>
+                    <div class="detail-stat"><span class="detail-stat-label">"Replication"</span><span class="detail-stat-value">{cluster.replication}</span><span class="detail-stat-note">{cluster.replication_note}</span></div>
                 </div>
             </section>
         })}

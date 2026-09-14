@@ -239,7 +239,9 @@ pub(crate) fn controller_signal_state(status: RowStatus) -> ControllerState {
 
 pub(crate) fn resource_plural_label(kind: &str) -> String {
     let label = camel_label(kind);
-    if let Some(stem) = label.strip_suffix("Policy") {
+    if kind == "Prometheus" {
+        "Prometheus Instances".to_string()
+    } else if let Some(stem) = label.strip_suffix("Policy") {
         format!("{stem}Policies")
     } else if let Some(stem) = label.strip_suffix("Repository") {
         format!("{stem}Repositories")
@@ -355,6 +357,7 @@ mod tests {
         assert_eq!(resource_plural_label("NetworkPolicy"), "Network Policies");
         assert_eq!(resource_plural_label("StorageClass"), "Storage Classes");
         assert_eq!(resource_plural_label("Pod"), "Pods");
+        assert_eq!(resource_plural_label("Prometheus"), "Prometheus Instances");
     }
 
     #[test]

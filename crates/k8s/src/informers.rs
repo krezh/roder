@@ -387,13 +387,13 @@ fn start_informer(
     let task_headers = headers.clone();
     let task_reproject = reproject.clone();
     let task_terminal = terminal.clone();
-    // Only pods and PVCs are re-projected from their full object body (live
-    // metrics / filesystem usage) — and only those need cached objects for the
+    // Pods, PVCs, and time-sensitive CronJobs are re-projected from their full
+    // object body, and only those need cached objects for the
     // detail view. For every other kind we keep just the lightweight rows and
     // let the detail handler fall back to a single GET, so large Secrets /
     // ConfigMaps / CRDs don't pin their full bodies in memory for the cluster's
     // lifetime. This is the main steady-state memory reduction.
-    let cache_objects = is_pod || is_pvc;
+    let cache_objects = is_pod || is_pvc || (group == "batch" && kind == "CronJob");
     let handle = tokio::spawn(async move {
         let mut backoff_attempt: u32 = 0;
         'relist: loop {
@@ -778,7 +778,7 @@ fn spawn_reaper(registry: std::sync::Weak<InformerRegistry>) {
     });
 }
 
-/// Background task: re-project this registry's active pod/PVC informers from
+/// Background task: re-project active enriched or time-sensitive informers from
 /// the shared `Enrichment` caches every 15s, and re-broadcast any row that
 /// changed. This is the per-user counterpart of the (now cache-only) scrape
 /// loops on `Enrichment` — one scrape fills the shared cache, and each
@@ -849,8 +849,7 @@ struct ReprojectTarget {
     schema_lock: Arc<RwLock<()>>,
 }
 
-/// One tick of per-user re-projection: re-derive pod/PVC rows from the shared
-/// `Enrichment` caches and re-broadcast whichever changed.
+/// One tick of per-user re-projection and rebroadcast of changed rows.
 ///
 /// Phased locking mirrors `spawn_reaper` ("holding the Mutex for the minimum
 /// time — no inner awaits here") and `cached_object` (clone the Arc handles
@@ -862,14 +861,17 @@ struct ReprojectTarget {
 /// concurrent scrape-loop write is blocked for at most one entry's reproject,
 /// not the whole registry's.
 async fn reproject_once(registry: &InformerRegistry) {
-    // Phase 1: snapshot the entries that actually need re-projecting (pod/PVC
+    // Phase 1: snapshot the entries that actually need re-projecting
     // informers with at least one live subscriber) while holding the Mutex
     // for the minimum time — no inner awaits here.
     let entries: Vec<ReprojectTarget> = {
         let active = registry.active.lock().await;
         active
             .values()
-            .filter(|e| (e.is_pod || e.is_pvc) && e.tx.receiver_count() > 0)
+            .filter(|e| {
+                (e.is_pod || e.is_pvc || (e.group == "batch" && e.kind == "CronJob"))
+                    && e.tx.receiver_count() > 0
+            })
             .map(|e| ReprojectTarget {
                 tx: e.tx.clone(),
                 objects: e.objects.clone(),
@@ -918,6 +920,11 @@ async fn reproject_once(registry: &InformerRegistry) {
                     None,
                     pvc_usage_for(obj, &pvc),
                 )
+            })
+            .await;
+        } else {
+            reproject_entry(&entry.tx, &entry.objects, &entry.rows, |obj, current| {
+                reproject_table_row(&entry.group, &entry.kind, &layout, obj, current, None, None)
             })
             .await;
         }

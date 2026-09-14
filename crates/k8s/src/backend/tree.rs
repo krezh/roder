@@ -77,6 +77,7 @@ enum RelationshipProvider {
     CnpgCluster,
     CnpgClusterReference,
     CnpgScheduledBackup,
+    KubernetesStorage,
     RookStorageClass,
     RookCephCluster,
 }
@@ -215,6 +216,24 @@ const RELATIONSHIP_PROVIDERS: &[ProviderRegistration] = &[
         version: None,
         kind: "ScheduledBackup",
         provider: RelationshipProvider::CnpgScheduledBackup,
+    },
+    ProviderRegistration {
+        group: "",
+        version: Some("v1"),
+        kind: "Pod",
+        provider: RelationshipProvider::KubernetesStorage,
+    },
+    ProviderRegistration {
+        group: "",
+        version: Some("v1"),
+        kind: "PersistentVolumeClaim",
+        provider: RelationshipProvider::KubernetesStorage,
+    },
+    ProviderRegistration {
+        group: "",
+        version: Some("v1"),
+        kind: "PersistentVolume",
+        provider: RelationshipProvider::KubernetesStorage,
     },
     ProviderRegistration {
         group: "storage.k8s.io",
@@ -504,6 +523,20 @@ impl Backend {
                         Err(error) => errors.push(format!("generated backups: {error}")),
                     }
                 }
+                RelationshipProvider::KubernetesStorage => {
+                    children.extend(storage_reference_targets(resource, data).into_iter().map(
+                        |target| {
+                            self.resolve_resource(
+                                target.group.into(),
+                                target.version.into(),
+                                target.kind.into(),
+                                target.name,
+                                target.namespace,
+                                Some(ResourceTreeRelation::ReferencedResource),
+                            )
+                        },
+                    ));
+                }
                 RelationshipProvider::RookStorageClass => {
                     let (mut refs, mut provider_errors) =
                         self.rook_storage_relationships(data, semaphore).await;
@@ -596,7 +629,7 @@ impl Backend {
                 key: Some(entry.kind.key.clone()),
                 category: Some(entry.kind.category.clone()),
                 relation: Some(relation),
-                expandable: false,
+                expandable: reference_is_expandable(Some(relation), group, kind),
             })
             .collect())
     }
@@ -1025,7 +1058,85 @@ fn reference_is_expandable(
     group: &str,
     kind: &str,
 ) -> bool {
-    relation == Some(ResourceTreeRelation::Owner) || is_flux_owner(group, kind)
+    relation == Some(ResourceTreeRelation::Owner)
+        || is_flux_owner(group, kind)
+        || (relation == Some(ResourceTreeRelation::ReferencedResource)
+            && group.is_empty()
+            && matches!(kind, "PersistentVolumeClaim" | "PersistentVolume"))
+        || (group.is_empty() && kind == "Pod" && relation.is_some())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct StorageReference {
+    group: &'static str,
+    version: &'static str,
+    kind: &'static str,
+    name: String,
+    namespace: Option<String>,
+}
+
+fn storage_reference_targets(resource: &ResourceRef, data: &Value) -> Vec<StorageReference> {
+    match (resource.group.as_str(), resource.kind.as_str()) {
+        ("", "Pod") => data
+            .pointer("/spec/volumes")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|volume| {
+                let claim = volume
+                    .pointer("/persistentVolumeClaim/claimName")
+                    .and_then(Value::as_str)
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_string)
+                    .or_else(|| {
+                        volume.get("ephemeral")?;
+                        let volume_name = volume.get("name")?.as_str()?;
+                        (!resource.name.is_empty() && !volume_name.is_empty())
+                            .then(|| format!("{}-{volume_name}", resource.name))
+                    })?;
+                Some(StorageReference {
+                    group: "",
+                    version: "v1",
+                    kind: "PersistentVolumeClaim",
+                    name: claim,
+                    namespace: resource.namespace.clone(),
+                })
+            })
+            .collect(),
+        ("", "PersistentVolumeClaim") => {
+            if let Some(name) = data
+                .pointer("/spec/volumeName")
+                .and_then(Value::as_str)
+                .filter(|name| !name.is_empty())
+            {
+                vec![StorageReference {
+                    group: "",
+                    version: "v1",
+                    kind: "PersistentVolume",
+                    name: name.to_string(),
+                    namespace: None,
+                }]
+            } else {
+                storage_class_reference(data).into_iter().collect()
+            }
+        }
+        ("", "PersistentVolume") => storage_class_reference(data).into_iter().collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn storage_class_reference(data: &Value) -> Option<StorageReference> {
+    let name = data
+        .pointer("/spec/storageClassName")
+        .and_then(Value::as_str)
+        .filter(|name| !name.is_empty())?;
+    Some(StorageReference {
+        group: "storage.k8s.io",
+        version: "v1",
+        kind: "StorageClass",
+        name: name.to_string(),
+        namespace: None,
+    })
 }
 
 fn owned_child_kind(group: &str, kind: &str) -> Option<(&'static str, &'static str)> {
@@ -1230,5 +1341,106 @@ mod tests {
         assert_eq!(relationship_providers(&resource).count(), 1);
         resource.version = "v1beta1".into();
         assert_eq!(relationship_providers(&resource).count(), 0);
+    }
+
+    #[test]
+    fn storage_registry_and_expansion_cover_the_full_chain() {
+        let resource = |kind: &str| ResourceRef {
+            group: String::new(),
+            version: "v1".into(),
+            kind: kind.into(),
+            name: "resource".into(),
+            namespace: Some("app".into()),
+            key: None,
+            category: Some(Category::Storage),
+            relation: None,
+            expandable: true,
+        };
+
+        for kind in ["Pod", "PersistentVolumeClaim", "PersistentVolume"] {
+            assert_eq!(
+                relationship_providers(&resource(kind)).collect::<Vec<_>>(),
+                [RelationshipProvider::KubernetesStorage]
+            );
+        }
+        assert!(reference_is_expandable(
+            Some(ResourceTreeRelation::ReferencedResource),
+            "",
+            "PersistentVolumeClaim"
+        ));
+        assert!(reference_is_expandable(
+            Some(ResourceTreeRelation::ReferencedResource),
+            "",
+            "PersistentVolume"
+        ));
+        assert!(!reference_is_expandable(
+            Some(ResourceTreeRelation::ReferencedResource),
+            "storage.k8s.io",
+            "StorageClass"
+        ));
+    }
+
+    #[test]
+    fn pod_storage_references_keep_the_pod_namespace() {
+        let pod = ResourceRef {
+            group: String::new(),
+            version: "v1".into(),
+            kind: "Pod".into(),
+            name: "api".into(),
+            namespace: Some("app".into()),
+            key: None,
+            category: None,
+            relation: None,
+            expandable: true,
+        };
+        let targets = storage_reference_targets(
+            &pod,
+            &json!({"spec": {"volumes": [
+                {"name": "data", "persistentVolumeClaim": {"claimName": "api-data"}},
+                {"name": "cache", "persistentVolumeClaim": {"claimName": "api-cache"}},
+                {"name": "scratch", "ephemeral": {"volumeClaimTemplate": {"spec": {}}}},
+                {"name": "config", "configMap": {"name": "api"}}
+            ]}}),
+        );
+
+        assert_eq!(targets.len(), 3);
+        assert!(targets.iter().all(|target| {
+            target.kind == "PersistentVolumeClaim" && target.namespace.as_deref() == Some("app")
+        }));
+        assert!(targets.iter().any(|target| target.name == "api-scratch"));
+    }
+
+    #[test]
+    fn claims_and_volumes_resolve_cluster_scoped_storage() {
+        let mut resource = ResourceRef {
+            group: String::new(),
+            version: "v1".into(),
+            kind: "PersistentVolumeClaim".into(),
+            name: "data".into(),
+            namespace: Some("app".into()),
+            key: None,
+            category: None,
+            relation: None,
+            expandable: true,
+        };
+        let bound = storage_reference_targets(
+            &resource,
+            &json!({"spec": {"volumeName": "pv-data", "storageClassName": "fast"}}),
+        );
+        assert_eq!(bound[0].kind, "PersistentVolume");
+        assert_eq!(bound[0].name, "pv-data");
+        assert_eq!(bound[0].namespace, None);
+
+        let unbound =
+            storage_reference_targets(&resource, &json!({"spec": {"storageClassName": "fast"}}));
+        assert_eq!(unbound[0].kind, "StorageClass");
+        assert_eq!(unbound[0].name, "fast");
+        assert_eq!(unbound[0].namespace, None);
+
+        resource.kind = "PersistentVolume".into();
+        let class =
+            storage_reference_targets(&resource, &json!({"spec": {"storageClassName": "fast"}}));
+        assert_eq!(class[0].group, "storage.k8s.io");
+        assert_eq!(class[0].kind, "StorageClass");
     }
 }

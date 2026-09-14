@@ -348,6 +348,194 @@ pub(crate) struct CertificateSummary {
     pub(crate) secret: String,
 }
 
+pub(crate) struct CnpgClusterSummary {
+    pub(crate) phase: String,
+    pub(crate) phase_class: &'static str,
+    pub(crate) phase_reason: String,
+    pub(crate) topology: String,
+    pub(crate) topology_note: String,
+    pub(crate) primary: String,
+    pub(crate) primary_note: String,
+    pub(crate) image: String,
+    pub(crate) storage: String,
+    pub(crate) storage_note: String,
+    pub(crate) replication: String,
+    pub(crate) replication_note: String,
+}
+
+pub(crate) fn cnpg_cluster_summary(object: &serde_json::Value) -> Option<CnpgClusterSummary> {
+    let api_version = json_str(object, &["apiVersion"])?;
+    if json_str(object, &["kind"]).as_deref() != Some("Cluster")
+        || api_version.split('/').next() != Some("postgresql.cnpg.io")
+    {
+        return None;
+    }
+
+    let desired = json_str(object, &["spec", "instances"])
+        .or_else(|| json_str(object, &["status", "instances"]))
+        .unwrap_or_else(|| "1".to_string());
+    let ready = json_str(object, &["status", "readyInstances"]).unwrap_or_else(|| "0".into());
+    let phase = json_str(object, &["status", "phase"]).unwrap_or_else(|| "Not reported".into());
+    let phase_reason = json_str(object, &["status", "phaseReason"]).unwrap_or_default();
+    let phase_class = cnpg_phase_class(&phase, &ready, &desired);
+    let nodes = json_str(object, &["status", "topology", "nodesUsed"]);
+    let current_primary = json_str(object, &["status", "currentPrimary"]);
+    let target_primary = json_str(object, &["status", "targetPrimary"])
+        .filter(|target| Some(target) != current_primary.as_ref());
+    let image = json_str(object, &["status", "image"])
+        .or_else(|| json_str(object, &["spec", "imageName"]))
+        .unwrap_or_else(|| "-".into());
+    let storage = json_str(object, &["spec", "storage", "size"])
+        .or_else(|| {
+            json_str(
+                object,
+                &[
+                    "spec",
+                    "storage",
+                    "pvcTemplate",
+                    "resources",
+                    "requests",
+                    "storage",
+                ],
+            )
+        })
+        .unwrap_or_else(|| "-".into());
+    let storage_class = json_str(object, &["spec", "storage", "storageClass"]).or_else(|| {
+        json_str(
+            object,
+            &["spec", "storage", "pvcTemplate", "storageClassName"],
+        )
+    });
+    let wal_size = json_str(object, &["spec", "walStorage", "size"]).or_else(|| {
+        json_str(
+            object,
+            &[
+                "spec",
+                "walStorage",
+                "pvcTemplate",
+                "resources",
+                "requests",
+                "storage",
+            ],
+        )
+    });
+    let wal_class = json_str(object, &["spec", "walStorage", "storageClass"]).or_else(|| {
+        json_str(
+            object,
+            &["spec", "walStorage", "pvcTemplate", "storageClassName"],
+        )
+    });
+    let mut storage_notes = Vec::new();
+    if let Some(class) = storage_class {
+        storage_notes.push(format!("{class} storage class"));
+    }
+    if wal_size.is_some() || wal_class.is_some() {
+        storage_notes.push(format!(
+            "WAL {}{}",
+            wal_size.unwrap_or_else(|| "storage".into()),
+            wal_class
+                .map(|class| format!(" on {class}"))
+                .unwrap_or_default()
+        ));
+    }
+    let ephemeral = object
+        .get("spec")
+        .and_then(|spec| spec.get("ephemeralVolumeSource"));
+    let (storage, storage_note) = if ephemeral.is_some() {
+        ("Ephemeral".to_string(), "data is not persisted".to_string())
+    } else {
+        (storage, storage_notes.join("; "))
+    };
+    let status_count = |name: &str| {
+        object
+            .pointer(&format!("/status/instancesStatus/{name}"))
+            .and_then(serde_json::Value::as_array)
+            .map_or(0, Vec::len)
+    };
+    let instances_status_reported = object
+        .pointer("/status/instancesStatus")
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|statuses| !statuses.is_empty());
+    let desired_count = desired.parse::<usize>().unwrap_or(1);
+    let standbys = desired_count.saturating_sub(1);
+    let replicating = status_count("replicating");
+    let failed = status_count("failed");
+    let sync_topology = object
+        .pointer("/status/conditions")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|conditions| {
+            conditions.iter().rev().find(|condition| {
+                condition.get("type").and_then(serde_json::Value::as_str)
+                    == Some("SyncReplicationTopologySatisfied")
+            })
+        });
+    let (replication, replication_note) = if failed > 0 {
+        (
+            format!("{failed} failed"),
+            format!("{replicating}/{standbys} standbys replicating"),
+        )
+    } else if instances_status_reported {
+        let note = match sync_topology
+            .and_then(|condition| condition.get("status"))
+            .and_then(serde_json::Value::as_str)
+        {
+            Some("False") => "synchronous topology is not satisfied",
+            Some("True") => "synchronous topology satisfied",
+            _ => "streaming status reported by the operator",
+        };
+        (format!("{replicating}/{standbys} replicating"), note.into())
+    } else {
+        (
+            "Not reported".into(),
+            format!("{ready}/{desired} instances ready"),
+        )
+    };
+
+    Some(CnpgClusterSummary {
+        phase,
+        phase_class,
+        phase_reason,
+        topology: format!("{desired} instances"),
+        topology_note: nodes
+            .map(|nodes| format!("across {nodes} nodes"))
+            .unwrap_or_default(),
+        primary: current_primary.unwrap_or_else(|| "-".into()),
+        primary_note: target_primary
+            .map(|target| format!("switching to {target}"))
+            .unwrap_or_default(),
+        image,
+        storage,
+        storage_note,
+        replication,
+        replication_note,
+    })
+}
+
+fn cnpg_phase_class(phase: &str, ready: &str, desired: &str) -> &'static str {
+    let phase = phase.to_ascii_lowercase();
+    if phase.contains("unrecoverable")
+        || phase.contains("invalid")
+        || phase.contains("unable to create")
+        || phase.contains("plugin rollout failed")
+        || phase.contains("unknown state")
+        || phase.contains("cannot proceed")
+        || phase.contains("unknown plugin")
+        || phase.contains("missing architecture")
+        || phase.contains("interaction failed")
+    {
+        "error"
+    } else if phase.contains("degraded")
+        || phase.contains("upgrade delayed")
+        || phase.contains("waiting for user action")
+    {
+        "warning"
+    } else if phase.contains("healthy") && ready == desired {
+        "ok"
+    } else {
+        "pending"
+    }
+}
+
 pub(crate) fn certificate_summary(object: &serde_json::Value) -> CertificateSummary {
     let condition = |type_: &str| {
         object

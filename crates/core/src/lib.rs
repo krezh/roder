@@ -47,6 +47,7 @@ pub enum Category {
     CertManager,
     Rook,
     CloudNativePg,
+    PrometheusOperator,
     Cluster,
     Custom(String),
 }
@@ -64,6 +65,7 @@ impl Category {
             Category::CertManager => "cert-manager".into(),
             Category::Rook => "Rook Ceph".into(),
             Category::CloudNativePg => "CloudNativePG".into(),
+            Category::PrometheusOperator => "Prometheus Operator".into(),
             Category::Cluster => "Cluster".into(),
             Category::Custom(name) => name.clone(),
         }
@@ -83,7 +85,8 @@ impl Category {
             Category::CertManager => 8,
             Category::Rook => 9,
             Category::CloudNativePg => 10,
-            Category::Custom(_) => 11,
+            Category::PrometheusOperator => 11,
+            Category::Custom(_) => 12,
         }
     }
 

@@ -4,13 +4,8 @@
 
 - Group Access Review rows by category or operator
 
-## Dashboard
-
-- Add Prometheus and Alertmanager readiness rollups
-
 ## Resource Relationships
 
-- Add Pod to PVC to PV to StorageClass relationships
 - Add VolumeAttachment to PV and Node relationships
 - Add ObjectBucketClaim to ObjectBucket, Secret, and ConfigMap relationships
 - Add cert-manager Certificate to target Secret and issuer relationships
@@ -35,7 +30,6 @@
 - Add FailoverQuorum row projection
 - Add ImageCatalog and ClusterImageCatalog row projections
 - Add Barman ObjectStore row projection and health semantics
-- Add Cluster detail summary with topology, primary, image, storage, and replication health
 - Add Instances and Backups tabs to Cluster details
 - Add Backup and ScheduledBackup detail summaries
 - Add safe create-backup and schedule suspend/resume actions with semantic RBAC checks
@@ -60,8 +54,6 @@
 
 ## Monitoring And Alerts
 
-- Add a first-class Prometheus Operator category
-- Add Prometheus, PrometheusAgent, Alertmanager, and ThanosRuler readiness projections
 - Add PrometheusRule group, rule count, evaluation, and error summaries
 - Add ServiceMonitor, PodMonitor, Probe, and ScrapeConfig target summaries
 - Support Flux, CloudNativePG, Rook, cert-manager, and External Secrets alert labels
@@ -81,7 +73,6 @@
 - Add ResourceQuota used/hard utilization columns and thresholds
 - Add CertificateSigningRequest approval, denial, and failure status
 - Add safe CertificateSigningRequest approve and deny actions
-- Add CronJob last schedule, last success, active Job, and missed-schedule status
 - Add CronJob suspend and resume actions
 - Add CustomResourceDefinition establishment, naming, termination, and served-version status
 - Add ReplicationController projection, scaling, logs, and relationships
@@ -89,11 +80,11 @@
 
 ## Details And Mobile
 
-- Add operator-specific detail summaries for Flux, External Secrets, Kopiur, Tuppr, Rook, and CloudNativePG
+- Add operator-specific detail summaries for Flux, External Secrets, Kopiur, Tuppr, and Rook
 - Make referenced resources in detail summaries clickable
 - Reuse category icons and colors in mobile resource trees
 - Define per-GVK mobile summary columns
 
 ## Testing
 
-- Add layout integration tests for Kopiur, Tuppr, and monitoring resources
+- Add layout integration tests for Kopiur and Tuppr resources

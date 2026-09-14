@@ -1,5 +1,11 @@
 //! Workload row projection: Deployment/StatefulSet/DaemonSet/ReplicaSet/Job/CronJob.
 
+use std::collections::BTreeSet;
+use std::str::FromStr;
+
+use chrono::{DateTime, Duration, Utc};
+use chrono_tz::Tz;
+use croner::Cron;
 use roder_core::RowStatus;
 use serde_json::Value;
 
@@ -155,18 +161,104 @@ pub(crate) fn job_cells(data: &Value) -> (Vec<String>, RowStatus) {
 }
 
 pub(crate) fn cronjob_cells(data: &Value) -> (Vec<String>, RowStatus) {
+    cronjob_cells_at(data, time::OffsetDateTime::now_utc())
+}
+
+fn cronjob_cells_at(data: &Value, now: time::OffsetDateTime) -> (Vec<String>, RowStatus) {
     let schedule = str_at(data, &["spec", "schedule"]).unwrap_or_default();
     let suspended = data
         .get("spec")
         .and_then(|s| s.get("suspend"))
         .and_then(|b| b.as_bool())
         .unwrap_or(false);
-    let status = if suspended {
-        RowStatus::Warn
+    let active = data
+        .pointer("/status/active")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|reference| reference.get("name").and_then(Value::as_str))
+        .filter(|name| !name.is_empty())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>()
+        .join("\n");
+    let last_schedule = str_at(data, &["status", "lastScheduleTime"]).unwrap_or_default();
+    let last_success = str_at(data, &["status", "lastSuccessfulTime"]).unwrap_or_default();
+    let schedule_state = cronjob_schedule_state(data, &schedule, now);
+    let (label, status) = if schedule_state == ScheduleState::Invalid {
+        ("Invalid schedule", RowStatus::Error)
+    } else if suspended {
+        ("Suspended", RowStatus::Warn)
+    } else if schedule_state == ScheduleState::Missed {
+        ("Missed schedule", RowStatus::Warn)
+    } else if !active.is_empty() {
+        ("Active", RowStatus::Ok)
     } else {
-        RowStatus::Ok
+        ("Scheduled", RowStatus::Ok)
     };
-    (vec![schedule, suspended.to_string()], status)
+    (
+        vec![
+            schedule,
+            suspended.to_string(),
+            active,
+            last_schedule,
+            last_success,
+            label.to_string(),
+        ],
+        status,
+    )
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ScheduleState {
+    Current,
+    Missed,
+    Invalid,
+}
+
+fn cronjob_schedule_state(
+    data: &Value,
+    schedule: &str,
+    now: time::OffsetDateTime,
+) -> ScheduleState {
+    let Ok(cron) = Cron::from_str(schedule) else {
+        return ScheduleState::Invalid;
+    };
+    let Some(timezone) = str_at(data, &["spec", "timeZone"]) else {
+        return ScheduleState::Current;
+    };
+    let Ok(timezone) = timezone.parse::<Tz>() else {
+        return ScheduleState::Invalid;
+    };
+    let baseline = str_at(data, &["status", "lastScheduleTime"])
+        .or_else(|| str_at(data, &["metadata", "creationTimestamp"]));
+    let Some(baseline) = baseline
+        .as_deref()
+        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+    else {
+        return ScheduleState::Current;
+    };
+    let Some(now) = DateTime::<Utc>::from_timestamp(now.unix_timestamp(), now.nanosecond()) else {
+        return ScheduleState::Current;
+    };
+    let baseline = baseline.with_timezone(&timezone);
+    let now = now.with_timezone(&timezone);
+    let Ok(next) = cron.find_next_occurrence(&baseline, false) else {
+        return ScheduleState::Invalid;
+    };
+    let grace = int_at(data, &["spec", "startingDeadlineSeconds"])
+        .unwrap_or(60)
+        .max(0);
+    let Some(deadline) =
+        Duration::try_seconds(grace).and_then(|grace| next.checked_add_signed(grace))
+    else {
+        return ScheduleState::Current;
+    };
+    if now > deadline {
+        ScheduleState::Missed
+    } else {
+        ScheduleState::Current
+    }
 }
 
 fn desired_replicas(data: &Value) -> i64 {
@@ -419,10 +511,22 @@ mod tests {
 
     #[test]
     fn cronjob_active() {
-        let data = json!({"spec": {"schedule": "0 * * * *", "suspend": false}});
-        let (cells, status) = cronjob_cells(&data);
+        let data = json!({
+            "spec": {"schedule": "0 * * * *", "suspend": false},
+            "status": {
+                "active": [{"name": "hourly-b"}, {"name": "hourly-a"}, {"name": "hourly-a"}],
+                "lastScheduleTime": "2026-09-14T12:00:00Z",
+                "lastSuccessfulTime": "2026-09-14T11:00:12Z"
+            }
+        });
+        let now = super::super::parse_timestamp("2026-09-14T12:00:30Z").unwrap();
+        let (cells, status) = cronjob_cells_at(&data, now);
         assert_eq!(cells[0], "0 * * * *");
         assert_eq!(cells[1], "false");
+        assert_eq!(cells[2], "hourly-a\nhourly-b");
+        assert_eq!(cells[3], "2026-09-14T12:00:00Z");
+        assert_eq!(cells[4], "2026-09-14T11:00:12Z");
+        assert_eq!(cells[5], "Active");
         assert_eq!(status, RowStatus::Ok);
     }
 
@@ -431,6 +535,45 @@ mod tests {
         let data = json!({"spec": {"schedule": "*/5 * * * *", "suspend": true}});
         let (cells, status) = cronjob_cells(&data);
         assert_eq!(cells[1], "true");
+        assert_eq!(cells[5], "Suspended");
         assert_eq!(status, RowStatus::Warn);
+    }
+
+    #[test]
+    fn cronjob_reports_missed_and_invalid_schedules() {
+        let now = super::super::parse_timestamp("2026-09-14T12:02:00Z").unwrap();
+        let missed = json!({
+            "metadata": {"creationTimestamp": "2026-09-14T11:00:00Z"},
+            "spec": {"schedule": "0 * * * *", "timeZone": "UTC"},
+            "status": {"lastScheduleTime": "2026-09-14T11:00:00Z"}
+        });
+        let invalid = json!({
+            "metadata": {"creationTimestamp": "2026-09-14T11:00:00Z"},
+            "spec": {"schedule": "not a schedule"}
+        });
+
+        let (missed_cells, missed_status) = cronjob_cells_at(&missed, now);
+        assert_eq!(missed_cells[5], "Missed schedule");
+        assert_eq!(missed_status, RowStatus::Warn);
+        let (invalid_cells, invalid_status) = cronjob_cells_at(&invalid, now);
+        assert_eq!(invalid_cells[5], "Invalid schedule");
+        assert_eq!(invalid_status, RowStatus::Error);
+    }
+
+    #[test]
+    fn cronjob_honors_starting_deadline_and_timezone() {
+        let data = json!({
+            "metadata": {"creationTimestamp": "2026-09-14T10:00:00Z"},
+            "spec": {
+                "schedule": "0 8 * * *",
+                "timeZone": "America/New_York",
+                "startingDeadlineSeconds": 300
+            }
+        });
+        let inside_deadline = super::super::parse_timestamp("2026-09-14T12:04:00Z").unwrap();
+        let past_deadline = super::super::parse_timestamp("2026-09-14T12:06:00Z").unwrap();
+
+        assert_eq!(cronjob_cells_at(&data, inside_deadline).1, RowStatus::Ok);
+        assert_eq!(cronjob_cells_at(&data, past_deadline).1, RowStatus::Warn);
     }
 }

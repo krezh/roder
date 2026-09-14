@@ -19,6 +19,7 @@ mod flux;
 mod format;
 mod gateway;
 mod pods;
+mod prometheus;
 mod rbac;
 mod rook;
 mod status;
@@ -36,6 +37,9 @@ use self::eso::{cluster_external_secret_cells, eso_generic_cells, external_secre
 use self::flux::ready_message_cells;
 use self::gateway::{gateway_cells, gatewayclass_cells, httproute_cells, parent_route_cells};
 use self::pods::pod_cells;
+use self::prometheus::{
+    alertmanager_cells, prometheus_agent_cells, prometheus_cells, thanos_ruler_cells,
+};
 use self::rbac::rolebinding_cells;
 use self::rook::{ceph_cluster_cells, ceph_resource_cells, object_bucket_claim_cells};
 use self::status::generic_status;
@@ -101,7 +105,17 @@ fn explicit_view(group: &str, kind: &str) -> Option<KindView> {
         ("apps", "DaemonSet") => view!(&["Ready", "Available"], Plain(daemonset_cells)),
         ("apps", "ReplicaSet") => view!(&["Ready"], Plain(replicaset_cells)),
         ("batch", "Job") => view!(&["Completions", "Status"], Plain(job_cells)),
-        ("batch", "CronJob") => view!(&["Schedule", "Suspended"], Plain(cronjob_cells)),
+        ("batch", "CronJob") => view!(
+            &[
+                "Schedule",
+                "Suspend",
+                "Active",
+                "Last Schedule",
+                "Last Success",
+                "Status"
+            ],
+            Plain(cronjob_cells)
+        ),
         ("", "Service") => view!(&["Type", "ClusterIP"], Plain(service_cells)),
         ("", "Node") => view!(&["Status", "Version"], Plain(node_cells)),
         ("", "Namespace") => view!(&["Phase"], Plain(namespace_cells)),
@@ -183,6 +197,50 @@ fn explicit_view(group: &str, kind: &str) -> Option<KindView> {
         ("postgresql.cnpg.io", "Pooler") => custom_view!(
             &["Cluster", "Type", "Instances", "Phase", "Reason"],
             Plain(pooler_cells)
+        ),
+        ("monitoring.coreos.com", "Prometheus") => custom_view!(
+            &[
+                "Version",
+                "Desired",
+                "Ready",
+                "Reconciled",
+                "Available",
+                "Paused"
+            ],
+            Plain(prometheus_cells)
+        ),
+        ("monitoring.coreos.com", "PrometheusAgent") => custom_view!(
+            &[
+                "Version",
+                "Desired",
+                "Ready",
+                "Reconciled",
+                "Available",
+                "Paused"
+            ],
+            Plain(prometheus_agent_cells)
+        ),
+        ("monitoring.coreos.com", "Alertmanager") => custom_view!(
+            &[
+                "Version",
+                "Replicas",
+                "Ready",
+                "Reconciled",
+                "Available",
+                "Paused"
+            ],
+            Plain(alertmanager_cells)
+        ),
+        ("monitoring.coreos.com", "ThanosRuler") => custom_view!(
+            &[
+                "Version",
+                "Replicas",
+                "Ready",
+                "Reconciled",
+                "Available",
+                "Paused"
+            ],
+            Plain(thanos_ruler_cells)
         ),
         // Gateway API: HTTPRoute plus its Gateway/GatewayClass and sibling route kinds.
         ("gateway.networking.k8s.io", "HTTPRoute")
@@ -504,7 +562,7 @@ fn enhancement_headers(group: &str, kind: &str) -> &'static [&'static str] {
             "Restarts", "CPU", "%CPU/R", "%CPU/L", "MEM", "%MEM/R", "%MEM/L", "IP", "Node",
         ],
         ("", "PersistentVolumeClaim") => &["Usage", "Mount"],
-        ("", "Event") => explicit_view(group, kind)
+        ("", "Event") | ("batch", "CronJob") => explicit_view(group, kind)
             .map(|view| view.headers)
             .unwrap_or(&[]),
         _ => explicit_view(group, kind)
@@ -533,6 +591,10 @@ fn enhancement_values(
         }
         ("", "Event") => {
             let (cells, status) = event_cells(data);
+            (cells, vec![], status)
+        }
+        ("batch", "CronJob") => {
+            let (cells, status) = cronjob_cells(data);
             (cells, vec![], status)
         }
         _ if explicit_view(group, kind).is_some_and(|view| view.custom_columns) => {
@@ -632,7 +694,18 @@ mod tests {
             ("apps", "DaemonSet", &["Ready", "Available"]),
             ("apps", "ReplicaSet", &["Ready"]),
             ("batch", "Job", &["Completions", "Status"]),
-            ("batch", "CronJob", &["Schedule", "Suspended"]),
+            (
+                "batch",
+                "CronJob",
+                &[
+                    "Schedule",
+                    "Suspend",
+                    "Active",
+                    "Last Schedule",
+                    "Last Success",
+                    "Status",
+                ],
+            ),
             ("", "Service", &["Type", "ClusterIP"]),
             ("", "Node", &["Status", "Version"]),
             ("", "Namespace", &["Phase"]),
@@ -723,6 +796,54 @@ mod tests {
                 "postgresql.cnpg.io",
                 "Pooler",
                 &["Cluster", "Type", "Instances", "Phase", "Reason"],
+            ),
+            (
+                "monitoring.coreos.com",
+                "Prometheus",
+                &[
+                    "Version",
+                    "Desired",
+                    "Ready",
+                    "Reconciled",
+                    "Available",
+                    "Paused",
+                ],
+            ),
+            (
+                "monitoring.coreos.com",
+                "PrometheusAgent",
+                &[
+                    "Version",
+                    "Desired",
+                    "Ready",
+                    "Reconciled",
+                    "Available",
+                    "Paused",
+                ],
+            ),
+            (
+                "monitoring.coreos.com",
+                "Alertmanager",
+                &[
+                    "Version",
+                    "Replicas",
+                    "Ready",
+                    "Reconciled",
+                    "Available",
+                    "Paused",
+                ],
+            ),
+            (
+                "monitoring.coreos.com",
+                "ThanosRuler",
+                &[
+                    "Version",
+                    "Replicas",
+                    "Ready",
+                    "Reconciled",
+                    "Available",
+                    "Paused",
+                ],
             ),
             (
                 "gateway.networking.k8s.io",
@@ -1194,6 +1315,170 @@ mod tests {
                 "app-1",
                 "Cluster in healthy state",
                 "ghcr.io/cloudnative-pg/postgresql:18"
+            ]
+        );
+    }
+
+    #[test]
+    fn prometheus_layout_projects_replica_and_reconciliation_health() {
+        let definitions = [
+            column("Name", 0),
+            column("Version", 0),
+            column("Desired", 0),
+            column("Ready", 0),
+            column("Reconciled", 0),
+            column("Available", 0),
+            column("Age", 0),
+            column("Paused", 1),
+        ];
+        let layout = table_layout("monitoring.coreos.com", "Prometheus", true, &definitions);
+        assert_eq!(
+            layout.columns,
+            [
+                "Namespace",
+                "Name",
+                "Version",
+                "Desired",
+                "Ready",
+                "Reconciled",
+                "Available",
+                "Paused",
+                "Age"
+            ]
+        );
+        let table_row = TableRow {
+            cells: vec![
+                json!("platform"),
+                json!("v3.5.0"),
+                json!(2),
+                json!(2),
+                json!("True"),
+                json!("True"),
+                json!("1h"),
+                json!(false),
+            ],
+            object: Some(
+                serde_json::from_value(json!({
+                    "apiVersion": "monitoring.coreos.com/v1",
+                    "kind": "Prometheus",
+                    "metadata": {
+                        "name": "platform",
+                        "namespace": "monitoring",
+                        "uid": "prometheus-1",
+                        "generation": 4,
+                        "creationTimestamp": "2026-09-14T10:00:00Z"
+                    },
+                    "spec": {"version": "v3.5.0", "replicas": 2},
+                    "status": {
+                        "availableReplicas": 1,
+                        "conditions": [
+                            {"type": "Reconciled", "status": "True", "observedGeneration": 4},
+                            {"type": "Available", "status": "Degraded", "observedGeneration": 4}
+                        ]
+                    }
+                }))
+                .unwrap(),
+            ),
+            ..Default::default()
+        };
+        let row = project_table_row(
+            "monitoring.coreos.com",
+            "Prometheus",
+            &layout,
+            &table_row,
+            None,
+            None,
+        )
+        .unwrap()
+        .0;
+
+        assert_eq!(row.status, RowStatus::Warn);
+        assert_eq!(
+            row.cells,
+            [
+                "monitoring",
+                "platform",
+                "v3.5.0",
+                "2",
+                "1/2",
+                "True",
+                "Degraded",
+                "false",
+                "2026-09-14T10:00:00Z"
+            ]
+        );
+    }
+
+    #[test]
+    fn cronjob_layout_replaces_server_snapshots_with_live_status() {
+        let definitions = [
+            column("Name", 0),
+            column("Schedule", 0),
+            column("Timezone", 0),
+            column("Suspend", 0),
+            column("Active", 0),
+            column("Last Schedule", 0),
+            column("Age", 0),
+        ];
+        let layout = table_layout("batch", "CronJob", true, &definitions);
+        assert_eq!(
+            layout.columns,
+            [
+                "Namespace",
+                "Name",
+                "Schedule",
+                "Timezone",
+                "Suspend",
+                "Active",
+                "Last Schedule",
+                "Last Success",
+                "Status",
+                "Age"
+            ]
+        );
+        let table_row = TableRow {
+            cells: vec![
+                json!("hourly"),
+                json!("0 * * * *"),
+                json!("UTC"),
+                json!(false),
+                json!(1),
+                json!("5m"),
+                json!("2d"),
+            ],
+            object: Some(
+                serde_json::from_value(json!({
+                    "apiVersion": "batch/v1",
+                    "kind": "CronJob",
+                    "metadata": {
+                        "name": "hourly",
+                        "namespace": "jobs",
+                        "uid": "cron-1",
+                        "creationTimestamp": "2026-09-14T10:00:00Z"
+                    },
+                    "spec": {"schedule": "0 * * * *", "timeZone": "UTC"},
+                    "status": {
+                        "active": [{"name": "hourly-123"}],
+                        "lastScheduleTime": "2099-09-14T12:00:00Z",
+                        "lastSuccessfulTime": "2099-09-14T11:00:10Z"
+                    }
+                }))
+                .unwrap(),
+            ),
+            ..Default::default()
+        };
+        let row = project_table_row("batch", "CronJob", &layout, &table_row, None, None)
+            .unwrap()
+            .0;
+
+        assert_eq!(
+            &row.cells[4..9],
+            [
+                "false",
+                "hourly-123",
+                "2099-09-14T12:00:00Z",
+                "2099-09-14T11:00:10Z",
+                "Active"
             ]
         );
     }

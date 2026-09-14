@@ -4,7 +4,7 @@
 use leptos::prelude::*;
 use roder_core::ObjectDetail;
 
-use crate::app::controllers::detail::certificate_summary;
+use crate::app::controllers::detail::{certificate_summary, cnpg_cluster_summary};
 use crate::app::util::format::{camel_label, condition_class, counted};
 use crate::app::util::json::{
     conditions, container_envs, container_images, data_entries, json_map, json_str, owner_refs,
@@ -17,6 +17,7 @@ pub(crate) fn info_view(d: ObjectDetail, kind: String) -> impl IntoView {
     let o = &d.object;
     let is_event = kind == "Event";
     let certificate = (kind == "Certificate").then(|| certificate_summary(o));
+    let cnpg_cluster = cnpg_cluster_summary(o);
     let created = json_str(o, &["metadata", "creationTimestamp"]);
     let labels = json_map(o, &["metadata", "labels"]);
     let annotations = json_map(o, &["metadata", "annotations"]);
@@ -28,6 +29,20 @@ pub(crate) fn info_view(d: ObjectDetail, kind: String) -> impl IntoView {
             !matches!(
                 key.as_str(),
                 "notBefore" | "notAfter" | "renewalTime" | "revision"
+            )
+        });
+    }
+    if cnpg_cluster.is_some() {
+        stats.retain(|(key, _)| {
+            !matches!(
+                key.as_str(),
+                "phase"
+                    | "phaseReason"
+                    | "instances"
+                    | "readyInstances"
+                    | "currentPrimary"
+                    | "targetPrimary"
+                    | "image"
             )
         });
     }
@@ -190,6 +205,44 @@ pub(crate) fn info_view(d: ObjectDetail, kind: String) -> impl IntoView {
                         <div class="detail-stat">
                             <span class="detail-stat-label">"Target Secret"</span>
                             <span class="detail-stat-value">{certificate.secret}</span>
+                        </div>
+                    </div>
+                </section>
+            })}
+
+            {cnpg_cluster.map(|cluster| view! {
+                <section class="cnpg-detail-summary" aria-label="CloudNativePG cluster health">
+                    <div class="cnpg-detail-heading">
+                        <span>"Cluster health"</span>
+                        <strong class=cluster.phase_class>{cluster.phase}</strong>
+                    </div>
+                    {(!cluster.phase_reason.is_empty()).then(|| view! {
+                        <div class="cnpg-detail-reason">{cluster.phase_reason}</div>
+                    })}
+                    <div class="detail-stats">
+                        <div class="detail-stat">
+                            <span class="detail-stat-label">"Topology"</span>
+                            <span class="detail-stat-value">{cluster.topology}</span>
+                            <span class="detail-stat-note">{cluster.topology_note}</span>
+                        </div>
+                        <div class="detail-stat">
+                            <span class="detail-stat-label">"Primary"</span>
+                            <span class="detail-stat-value">{cluster.primary}</span>
+                            <span class="detail-stat-note">{cluster.primary_note}</span>
+                        </div>
+                        <div class="detail-stat">
+                            <span class="detail-stat-label">"Image"</span>
+                            <span class="detail-stat-value">{cluster.image}</span>
+                        </div>
+                        <div class="detail-stat">
+                            <span class="detail-stat-label">"Storage"</span>
+                            <span class="detail-stat-value">{cluster.storage}</span>
+                            <span class="detail-stat-note">{cluster.storage_note}</span>
+                        </div>
+                        <div class="detail-stat">
+                            <span class="detail-stat-label">"Replication"</span>
+                            <span class="detail-stat-value">{cluster.replication}</span>
+                            <span class="detail-stat-note">{cluster.replication_note}</span>
                         </div>
                     </div>
                 </section>
@@ -432,5 +485,67 @@ mod tests {
         assert_eq!(summary.not_after, "2026-10-01 12:00:00");
         assert_eq!(summary.revision, "3");
         assert_eq!(summary.secret, "api-tls");
+    }
+
+    #[test]
+    fn cnpg_summary_projects_topology_storage_and_replication() {
+        let summary = cnpg_cluster_summary(&json!({
+            "apiVersion": "postgresql.cnpg.io/v1",
+            "kind": "Cluster",
+            "spec": {
+                "instances": 3,
+                "imageName": "ghcr.io/cloudnative-pg/postgresql:18",
+                "storage": {"size": "20Gi", "storageClass": "fast"},
+                "walStorage": {"size": "5Gi"}
+            },
+            "status": {
+                "phase": "Cluster in healthy state",
+                "readyInstances": 3,
+                "currentPrimary": "app-1",
+                "topology": {"nodesUsed": 3},
+                "instancesStatus": {"replicating": ["app-2", "app-3"]}
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(summary.phase_class, "ok");
+        assert_eq!(summary.topology, "3 instances");
+        assert_eq!(summary.topology_note, "across 3 nodes");
+        assert_eq!(summary.primary, "app-1");
+        assert_eq!(summary.storage, "20Gi");
+        assert_eq!(summary.storage_note, "fast storage class; WAL 5Gi");
+        assert_eq!(summary.replication, "2/2 replicating");
+    }
+
+    #[test]
+    fn cnpg_summary_is_gvk_guarded_and_reports_shortfalls() {
+        assert!(cnpg_cluster_summary(&json!({
+            "apiVersion": "example.io/v1",
+            "kind": "Cluster"
+        }))
+        .is_none());
+
+        let summary = cnpg_cluster_summary(&json!({
+            "apiVersion": "postgresql.cnpg.io/v1",
+            "kind": "Cluster",
+            "spec": {"instances": 3, "storage": {"pvcTemplate": {
+                "storageClassName": "standard",
+                "resources": {"requests": {"storage": "10Gi"}}
+            }}},
+            "status": {
+                "phase": "Cluster in healthy state",
+                "readyInstances": 2,
+                "currentPrimary": "app-1",
+                "targetPrimary": "app-2"
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(summary.phase_class, "pending");
+        assert_eq!(summary.primary_note, "switching to app-2");
+        assert_eq!(summary.storage, "10Gi");
+        assert_eq!(summary.storage_note, "standard storage class");
+        assert_eq!(summary.replication, "Not reported");
+        assert_eq!(summary.replication_note, "2/3 instances ready");
     }
 }

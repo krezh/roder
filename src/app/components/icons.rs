@@ -41,6 +41,7 @@ pub(crate) fn tree_icon_class(category: Option<&Category>) -> &'static str {
         Some(Category::CertManager) => "cat-certmanager",
         Some(Category::Rook) => "cat-rook",
         Some(Category::CloudNativePg) => "cat-cnpg",
+        Some(Category::PrometheusOperator) => "cat-prometheus",
         Some(Category::Cluster) => "cat-cluster",
         Some(Category::Custom(_)) | None => "cat-fallback",
     }
@@ -68,6 +69,7 @@ pub(crate) fn tree_icon_glyph(category: Option<&Category>, kind: &str) -> &'stat
         (Some(Category::Cluster), _) => "\u{2B21}",          // ⬡
         (Some(Category::Rook), _) => "\u{2B22}",             // ⬢
         (Some(Category::CloudNativePg), _) => "PG",
+        (Some(Category::PrometheusOperator), _) => "P",
         _ => "\u{25CF}", // ●
     }
 }

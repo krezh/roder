@@ -13,7 +13,10 @@ use roder_core::{
 };
 
 use crate::metrics::{node_usage, parse_cpu, parse_mem};
-use crate::project::{condition, parse_timestamp, resource_status, ts_string};
+use crate::project::{
+    condition, parse_timestamp, recorded_verification_failed, resource_status, resource_suspended,
+    ts_string, verification_enabled,
+};
 
 use super::{api_err, Backend};
 use crate::client::K8sError;
@@ -126,17 +129,12 @@ impl Backend {
             ("cert-manager", Category::CertManager, None),
             ("Rook Ceph", Category::Rook, None),
             (
-                "Kopiur",
-                Category::Custom("home-operations.com".to_string()),
-                Some("kopiur.home-operations.com"),
-            ),
-            (
                 "Tuppr",
                 Category::Custom("home-operations.com".to_string()),
                 Some("tuppr.home-operations.com"),
             ),
         ];
-        let (mut controller_groups, cnpg_group, prometheus_group) = tokio::join!(
+        let (mut controller_groups, cnpg_group, prometheus_group, kopiur_group) = tokio::join!(
             join_all(
                 groups
                     .into_iter()
@@ -150,9 +148,11 @@ impl Backend {
             ),
             self.cnpg_group(),
             self.prometheus_group(),
+            self.kopiur_group(),
         );
         controller_groups.insert(4, cnpg_group);
         controller_groups.insert(5, prometheus_group);
+        controller_groups.insert(6, kopiur_group);
         controller_groups.retain(|group| !group.resources.is_empty() || !group.signals.is_empty());
 
         Ok(ClusterOverview {
@@ -314,6 +314,26 @@ impl Backend {
             signals: Vec::new(),
         }
     }
+
+    async fn kopiur_group(&self) -> ControllerHealthGroup {
+        let snapshots = self
+            .resource_snapshots(
+                Category::Custom("home-operations.com".to_string()),
+                Some("kopiur.home-operations.com"),
+            )
+            .await;
+        let signals = summarize_kopiur_signals(snapshot_objects(&snapshots, "SnapshotPolicy"));
+        let resources = snapshots
+            .into_iter()
+            .map(|(kind, objects)| summarize_resources(kind, objects))
+            .filter(|resource| resource.health.total > 0 || resource.error.is_some())
+            .collect();
+        ControllerHealthGroup {
+            name: "Kopiur".to_string(),
+            resources,
+            signals,
+        }
+    }
 }
 
 fn snapshot_objects<'a>(
@@ -468,6 +488,82 @@ fn summarize_cnpg_signals(
     signals
 }
 
+fn summarize_kopiur_signals(policies: &[DynamicObject]) -> Vec<ControllerHealthSignal> {
+    let mut signals = Vec::new();
+    for policy in policies {
+        let name = policy.metadata.name.clone().unwrap_or_default();
+        let data = &policy.data;
+        let suspended = resource_suspended("kopiur.home-operations.com", "SnapshotPolicy", data);
+        let last_snapshot = data
+            .pointer("/status/lastSuccessfulSnapshot")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        let has_last_snapshot = last_snapshot.is_some();
+        signals.push(ControllerHealthSignal {
+            label: format!("{name} backup freshness"),
+            value: last_snapshot
+                .as_ref()
+                .map(|_| "Recovery point age")
+                .unwrap_or("No recovery point")
+                .to_string(),
+            status: if suspended {
+                RowStatus::Warn
+            } else if has_last_snapshot {
+                RowStatus::Ok
+            } else {
+                RowStatus::Pending
+            },
+            timestamp: last_snapshot,
+            message: if suspended {
+                "Policy is suspended; backup age will keep increasing"
+            } else if has_last_snapshot {
+                "Latest successful recovery point"
+            } else {
+                "No successful snapshot recorded"
+            }
+            .to_string(),
+        });
+
+        if !verification_enabled(data) {
+            continue;
+        }
+        let last_verified = data
+            .pointer("/status/lastVerified")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        let has_last_verified = last_verified.is_some();
+        let failed = recorded_verification_failed(data);
+        signals.push(ControllerHealthSignal {
+            label: format!("{name} verification"),
+            value: last_verified
+                .as_ref()
+                .map(|_| "Last verified")
+                .unwrap_or("Never verified")
+                .to_string(),
+            status: if failed || suspended {
+                RowStatus::Warn
+            } else if has_last_verified {
+                RowStatus::Ok
+            } else {
+                RowStatus::Pending
+            },
+            timestamp: last_verified,
+            message: if failed {
+                "The latest recorded verification attempt failed"
+            } else if suspended {
+                "Policy is suspended; verification age will keep increasing"
+            } else if has_last_verified {
+                "Most recent successful verification"
+            } else {
+                "No successful verification recorded"
+            }
+            .to_string(),
+        });
+    }
+    signals.sort_by(|left, right| left.label.cmp(&right.label));
+    signals
+}
+
 fn summarize_resources(
     kind: roder_core::ResourceKind,
     result: Result<Vec<DynamicObject>, String>,
@@ -496,11 +592,7 @@ fn record_status(
     object: &DynamicObject,
 ) {
     rollup.total += 1;
-    let suspended = object
-        .data
-        .pointer("/spec/suspend")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
+    let suspended = resource_suspended(&kind.group, &kind.kind, &object.data);
     if suspended {
         rollup.suspended += 1;
         return;
@@ -783,5 +875,62 @@ mod tests {
 
         assert_eq!(signals[0].status, RowStatus::Error);
         assert_eq!(signals[0].value, "No recovery point");
+    }
+
+    #[test]
+    fn kopiur_signals_surface_backup_age_and_verification_failure() {
+        let policies = [object(
+            "kopiur.home-operations.com",
+            "SnapshotPolicy",
+            "database",
+            serde_json::json!({
+                "spec": {
+                    "repository": {"name": "local"},
+                    "verification": {"quick": {"schedule": {"cron": "H 3 * * *"}}}
+                },
+                "status": {
+                    "lastSuccessfulSnapshot": "2026-09-14T02:00:00Z",
+                    "lastVerified": "2026-09-13T03:00:00Z",
+                    "conditions": [{
+                        "type": "Verified",
+                        "status": "False",
+                        "reason": "VerificationFailed",
+                        "observedGeneration": 0
+                    }]
+                }
+            }),
+        )];
+
+        let signals = summarize_kopiur_signals(&policies);
+
+        assert_eq!(signals.len(), 2);
+        assert_eq!(signals[0].label, "database backup freshness");
+        assert_eq!(signals[0].status, RowStatus::Ok);
+        assert_eq!(
+            signals[0].timestamp.as_deref(),
+            Some("2026-09-14T02:00:00Z")
+        );
+        assert_eq!(signals[1].label, "database verification");
+        assert_eq!(signals[1].status, RowStatus::Warn);
+    }
+
+    #[test]
+    fn kopiur_schedule_rollup_recognizes_nested_suspension() {
+        let kind = resource_kind("kopiur.home-operations.com", "SnapshotSchedule");
+        let schedule = object(
+            "kopiur.home-operations.com",
+            "SnapshotSchedule",
+            "daily",
+            serde_json::json!({
+                "spec": {"schedule": {"cron": "H 2 * * *", "suspend": true}},
+                "status": {"conditions": [{"type": "Ready", "status": "True"}]}
+            }),
+        );
+
+        let rollup = summarize_resources(kind, Ok(vec![schedule]));
+
+        assert_eq!(rollup.health.total, 1);
+        assert_eq!(rollup.health.suspended, 1);
+        assert_eq!(rollup.health.ready, 0);
     }
 }

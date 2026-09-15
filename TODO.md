@@ -44,8 +44,7 @@
 ## Kopiur And Tuppr
 
 - Give Kopiur and Tuppr separate categories and visual identities
-- Add SnapshotPolicy, SnapshotSchedule, Snapshot, Repository, Restore, and replication row projections
-- Add backup freshness, verification, suspension, and failure health semantics
+- Add Repository, Restore, and replication row projections
 - Add Kopiur policy and snapshot detail summaries
 - Add restore history and progress summaries
 - Add KubernetesUpgrade and TalosUpgrade row projections and detail summaries

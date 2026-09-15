@@ -18,6 +18,7 @@ mod eso;
 mod flux;
 mod format;
 mod gateway;
+mod kopiur;
 mod pods;
 mod prometheus;
 mod rbac;
@@ -36,6 +37,8 @@ use self::core::{
 use self::eso::{cluster_external_secret_cells, eso_generic_cells, external_secret_cells};
 use self::flux::ready_message_cells;
 use self::gateway::{gateway_cells, gatewayclass_cells, httproute_cells, parent_route_cells};
+pub(crate) use self::kopiur::{recorded_verification_failed, verification_enabled};
+use self::kopiur::{snapshot_cells, snapshot_policy_cells, snapshot_schedule_cells};
 use self::pods::pod_cells;
 use self::prometheus::{
     alertmanager_cells, prometheus_agent_cells, prometheus_cells, thanos_ruler_cells,
@@ -197,6 +200,42 @@ fn explicit_view(group: &str, kind: &str) -> Option<KindView> {
         ("postgresql.cnpg.io", "Pooler") => custom_view!(
             &["Cluster", "Type", "Instances", "Phase", "Reason"],
             Plain(pooler_cells)
+        ),
+        ("kopiur.home-operations.com", "SnapshotPolicy") => custom_view!(
+            &[
+                "Repository",
+                "Repositories",
+                "Last Snapshot",
+                "Last Verified",
+                "Suspended",
+                "Status",
+                "Message"
+            ],
+            Plain(snapshot_policy_cells)
+        ),
+        ("kopiur.home-operations.com", "SnapshotSchedule") => custom_view!(
+            &[
+                "Config",
+                "Schedule",
+                "Suspended",
+                "Last Schedule",
+                "Last Success",
+                "Next Schedule",
+                "Status",
+                "Message"
+            ],
+            Plain(snapshot_schedule_cells)
+        ),
+        ("kopiur.home-operations.com", "Snapshot") => custom_view!(
+            &[
+                "Phase",
+                "Origin",
+                "Snapshot",
+                "Source",
+                "Completed",
+                "Message"
+            ],
+            Plain(snapshot_cells)
         ),
         ("monitoring.coreos.com", "Prometheus") => custom_view!(
             &[
@@ -511,7 +550,7 @@ pub(crate) fn project_table_row(
             cells,
             trends,
             status,
-            suspended: flux_suspended(group, &object.data),
+            suspended: row_suspended(group, kind, &object.data),
             labels,
         },
         object,
@@ -554,17 +593,27 @@ pub(crate) fn reproject_table_row(
         }
     }
     row.status = status;
-    row.suspended = flux_suspended(group, &object.data);
+    row.suspended = row_suspended(group, kind, &object.data);
     row
 }
 
-fn flux_suspended(group: &str, data: &Value) -> bool {
-    group.ends_with("fluxcd.io")
+pub(crate) fn resource_suspended(group: &str, kind: &str, data: &Value) -> bool {
+    let nested_schedule = group == "kopiur.home-operations.com"
+        && kind == "SnapshotSchedule"
         && data
-            .get("spec")
-            .and_then(|spec| spec.get("suspend"))
+            .pointer("/spec/schedule/suspend")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+    nested_schedule
+        || data
+            .pointer("/spec/suspend")
             .and_then(Value::as_bool)
             .unwrap_or(false)
+}
+
+fn row_suspended(group: &str, kind: &str, data: &Value) -> bool {
+    (group.ends_with("fluxcd.io") || group == "kopiur.home-operations.com")
+        && resource_suspended(group, kind, data)
 }
 
 fn enhancement_headers(group: &str, kind: &str) -> &'static [&'static str] {
@@ -813,6 +862,45 @@ mod tests {
                 "postgresql.cnpg.io",
                 "Pooler",
                 &["Cluster", "Type", "Instances", "Phase", "Reason"],
+            ),
+            (
+                "kopiur.home-operations.com",
+                "SnapshotPolicy",
+                &[
+                    "Repository",
+                    "Repositories",
+                    "Last Snapshot",
+                    "Last Verified",
+                    "Suspended",
+                    "Status",
+                    "Message",
+                ],
+            ),
+            (
+                "kopiur.home-operations.com",
+                "SnapshotSchedule",
+                &[
+                    "Config",
+                    "Schedule",
+                    "Suspended",
+                    "Last Schedule",
+                    "Last Success",
+                    "Next Schedule",
+                    "Status",
+                    "Message",
+                ],
+            ),
+            (
+                "kopiur.home-operations.com",
+                "Snapshot",
+                &[
+                    "Phase",
+                    "Origin",
+                    "Snapshot",
+                    "Source",
+                    "Completed",
+                    "Message",
+                ],
             ),
             (
                 "monitoring.coreos.com",
@@ -1753,14 +1841,122 @@ mod tests {
     }
 
     #[test]
-    fn flux_suspension_is_separate_from_warning_status() {
-        assert!(flux_suspended(
+    fn operator_suspension_is_separate_from_warning_status() {
+        assert!(row_suspended(
             "helm.toolkit.fluxcd.io",
+            "HelmRelease",
             &json!({"spec": {"suspend": true}})
         ));
-        assert!(!flux_suspended(
+        assert!(row_suspended(
+            "kopiur.home-operations.com",
+            "SnapshotSchedule",
+            &json!({"spec": {"schedule": {"suspend": true}}})
+        ));
+        assert!(!row_suspended(
             "helm.toolkit.fluxcd.io",
+            "HelmRelease",
             &json!({"metadata": {"deletionTimestamp": "2026-08-26T10:00:00Z"}})
         ));
+        assert!(!row_suspended(
+            "postgresql.cnpg.io",
+            "ScheduledBackup",
+            &json!({"spec": {"suspend": true}})
+        ));
+        assert!(resource_suspended(
+            "postgresql.cnpg.io",
+            "ScheduledBackup",
+            &json!({"spec": {"suspend": true}})
+        ));
+    }
+
+    #[test]
+    fn kopiur_policy_layout_uses_semantic_backup_columns_and_health() {
+        let definitions = [
+            column("Name", 0),
+            column("Repository", 0),
+            column("Last-Snapshot", 0),
+            column("Suspended", 0),
+            column("Age", 0),
+        ];
+        let layout = table_layout(
+            "kopiur.home-operations.com",
+            "SnapshotPolicy",
+            true,
+            &definitions,
+        );
+        assert_eq!(
+            layout.columns,
+            [
+                "Namespace",
+                "Name",
+                "Repository",
+                "Repositories",
+                "Last Snapshot",
+                "Last Verified",
+                "Suspended",
+                "Status",
+                "Message",
+                "Age",
+            ]
+        );
+
+        let table_row = TableRow {
+            cells: vec![
+                json!("database"),
+                json!("local"),
+                json!("1d"),
+                json!(false),
+                json!("2d"),
+            ],
+            object: Some(
+                serde_json::from_value(json!({
+                    "apiVersion": "kopiur.home-operations.com/v1alpha1",
+                    "kind": "SnapshotPolicy",
+                    "metadata": {
+                        "name": "database",
+                        "namespace": "backups",
+                        "uid": "kopiur-policy-1",
+                        "creationTimestamp": "2026-09-13T00:00:00Z"
+                    },
+                    "spec": {
+                        "repository": {"name": "local"},
+                        "verification": {"quick": {"schedule": {"cron": "H 3 * * *"}}}
+                    },
+                    "status": {
+                        "repositorySummary": "local",
+                        "lastSuccessfulSnapshot": "2026-09-14T02:00:00Z",
+                        "conditions": [
+                            {"type": "Ready", "status": "True"},
+                            {
+                                "type": "Verified",
+                                "status": "False",
+                                "reason": "VerificationFailed",
+                                "message": "restore check failed",
+                                "observedGeneration": 0
+                            }
+                        ]
+                    }
+                }))
+                .unwrap(),
+            ),
+            ..Default::default()
+        };
+        let row = project_table_row(
+            "kopiur.home-operations.com",
+            "SnapshotPolicy",
+            &layout,
+            &table_row,
+            None,
+            None,
+        )
+        .unwrap()
+        .0;
+
+        assert_eq!(row.cells[2], "local");
+        assert_eq!(row.cells[3], "local");
+        assert_eq!(row.cells[4], "2026-09-14T02:00:00Z");
+        assert_eq!(row.cells[7], "VerificationFailed");
+        assert_eq!(row.cells[8], "restore check failed");
+        assert_eq!(row.status, RowStatus::Warn);
     }
 }

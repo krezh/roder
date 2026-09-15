@@ -9,7 +9,7 @@ use std::collections::{BTreeSet, HashMap};
 use leptos::prelude::{GetUntracked, GetValue, RwSignal, StoredValue};
 use roder_core::{ResourceRow, RowStatus};
 
-use crate::app::columns::column_kind;
+use crate::app::columns::{column_kind, ColumnKind};
 use crate::app::components::table::cmp_cell;
 use crate::app::state::{CtxMenu, DetailTarget, SortKey};
 
@@ -163,8 +163,11 @@ fn compare_rows(a: &ResourceRow, b: &ResourceRow, sort_key: SortKey) -> Ordering
 /// Pick up to 2 columns to surface on a mobile card: a state column (see
 /// [`crate::app::columns::ColumnKind::is_state`]) first if present, then fill
 /// the remaining slot in column order, skipping the identity columns the card
-/// already shows. Returns (label, value, colored-by-status) triples.
-pub(crate) fn surfaced_cells(columns: &[String], cells: &[String]) -> Vec<(String, String, bool)> {
+/// already shows. Returns (label, value, kind) triples.
+pub(crate) fn surfaced_cells(
+    columns: &[String],
+    cells: &[String],
+) -> Vec<(String, String, ColumnKind)> {
     let mut idx: Vec<usize> = Vec::new();
     if let Some(i) = columns.iter().position(|c| column_kind(c).is_state()) {
         idx.push(i);
@@ -181,8 +184,8 @@ pub(crate) fn surfaced_cells(columns: &[String], cells: &[String]) -> Vec<(Strin
         .filter_map(|i| {
             let label = columns.get(i)?.clone();
             let value = cells.get(i).cloned().unwrap_or_default();
-            let colored = column_kind(&label).is_state();
-            Some((label, value, colored))
+            let kind = column_kind(&label);
+            Some((label, value, kind))
         })
         .collect()
 }
@@ -276,6 +279,7 @@ pub(crate) fn resolve_current_action_targets(
 #[cfg(test)]
 mod tests {
     use super::{move_cursor, node_is_control_plane, resolve_action_targets, surfaced_cells};
+    use crate::app::columns::ColumnKind;
     use crate::app::state::DetailTarget;
     use roder_core::{ResourceRow, RowStatus};
     use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -407,8 +411,12 @@ mod tests {
         assert_eq!(
             surfaced_cells(&columns, &cells),
             vec![
-                ("Ready".to_string(), "True".to_string(), true),
-                ("Node".to_string(), "worker-1".to_string(), false),
+                ("Ready".to_string(), "True".to_string(), ColumnKind::Status,),
+                (
+                    "Node".to_string(),
+                    "worker-1".to_string(),
+                    ColumnKind::Plain,
+                ),
             ]
         );
     }
@@ -429,8 +437,16 @@ mod tests {
         assert_eq!(
             surfaced_cells(&columns, &cells),
             vec![
-                ("Attached".to_string(), "false".to_string(), true),
-                ("Attacher".to_string(), "csi.example.com".to_string(), false),
+                (
+                    "Attached".to_string(),
+                    "false".to_string(),
+                    ColumnKind::Bool,
+                ),
+                (
+                    "Attacher".to_string(),
+                    "csi.example.com".to_string(),
+                    ColumnKind::Plain,
+                ),
             ]
         );
     }

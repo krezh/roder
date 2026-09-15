@@ -7,6 +7,7 @@ use std::time::Duration;
 use leptos::prelude::*;
 use roder_core::{ResourceRow, RowStatus};
 
+use crate::app::columns::{bool_color, ColumnKind};
 use crate::app::events::UidSet;
 use crate::app::hooks::RowPress;
 use crate::app::state::{CtxMenu, DetailTarget};
@@ -22,8 +23,8 @@ pub(crate) struct CardFields {
     pub(crate) namespace: Option<String>,
     /// Shown only in multi-kind contexts (search results).
     pub(crate) kind_label: Option<String>,
-    /// Up to a couple of surfaced columns: (label, value, colored-by-status).
-    pub(crate) extra: Vec<(String, String, bool)>,
+    /// Up to a couple of surfaced columns: (label, value, kind).
+    pub(crate) extra: Vec<(String, String, ColumnKind)>,
     pub(crate) age: String,
 }
 
@@ -36,7 +37,7 @@ impl CardFields {
     ) -> Self {
         let extra = table_logic::surfaced_cells(columns, &row.cells)
             .into_iter()
-            .map(|(label, value, colored)| {
+            .map(|(label, value, kind)| {
                 // Collapse multi-value Table cells to the desktop's compact form.
                 let value = value.replace('\n', ", ");
                 let value = if crate::data::cell_needs_tick(&value) {
@@ -44,7 +45,7 @@ impl CardFields {
                 } else {
                     value
                 };
-                (label, value, colored)
+                (label, value, kind)
             })
             .collect();
         let cell = |header: &str| {
@@ -64,6 +65,14 @@ impl CardFields {
                 .map(|value| crate::data::humanize_cell(&value))
                 .unwrap_or_default(),
         }
+    }
+}
+
+fn extra_color(kind: ColumnKind, value: &str, status: RowStatus) -> Option<&'static str> {
+    match kind {
+        ColumnKind::Status => Some(dot_class(status)),
+        ColumnKind::Bool => Some(bool_color(value)),
+        _ => None,
     }
 }
 
@@ -185,16 +194,12 @@ pub(crate) fn MobileRowCard(
                     <span class="mc-chip mc-chip-age">{f.age}</span>
                 </div>
                 {(!f.extra.is_empty()).then(|| {
-                    // Colored extras are tinted by the row's overall computed
-                    // `RowStatus` — the same source desktop's `colored_cols`
-                    // branch uses (`kind_table.rs`) — not by guessing from the
-                    // cell's raw text, which drifts from the real status (a
-                    // HelmRelease's Ready value isn't one of a fixed word set).
-                    let status_class = dot_class(f.status);
                     view! {
                         <div class="mc-extra">
-                            {f.extra.into_iter().map(|(label, value, colored)| {
-                                let cls = if colored { format!("mc-ex mc-ex-{status_class}") } else { "mc-ex".to_string() };
+                            {f.extra.into_iter().map(|(label, value, kind)| {
+                                let cls = extra_color(kind, &value, f.status)
+                                    .map(|color| format!("mc-ex mc-ex-{color}"))
+                                    .unwrap_or_else(|| "mc-ex".to_string());
                                     view! {
                                         <span class=cls>
                                             <span class="mc-ex-label">{label}</span>
@@ -208,5 +213,22 @@ pub(crate) fn MobileRowCard(
                 })
             }}
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn boolean_extras_are_colored_by_value() {
+        assert_eq!(
+            extra_color(ColumnKind::Bool, "false", RowStatus::Ok),
+            Some("warn")
+        );
+        assert_eq!(
+            extra_color(ColumnKind::Bool, "true", RowStatus::Error),
+            Some("ok")
+        );
     }
 }

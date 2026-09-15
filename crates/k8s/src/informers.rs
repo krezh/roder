@@ -92,6 +92,42 @@ type NameIndex = Arc<RwLock<HashMap<NameKey, String>>>;
 
 type Headers = Arc<ArcSwap<Vec<String>>>;
 
+/// The state a running informer task and its [`Active`] registry entry both
+/// hold. Cloning shares the same `Arc`s: the task writes, subscribers read.
+///
+/// Bundled rather than passed as a dozen separate handles so the spawn site
+/// can't quietly forget one, and so adding a shared cache means adding a field
+/// here instead of another `let task_x = x.clone();`.
+#[derive(Clone)]
+struct InformerState {
+    tx: broadcast::Sender<WatchEvent>,
+    rows: Arc<RwLock<HashMap<String, ResourceRow>>>,
+    objects: Arc<RwLock<HashMap<String, DynamicObject>>>,
+    by_name: NameIndex,
+    layout: Arc<RwLock<Option<TableLayout>>>,
+    headers: Headers,
+    schema_lock: Arc<RwLock<()>>,
+    reproject: Arc<Notify>,
+    terminal: Arc<RwLock<Option<WatchEvent>>>,
+}
+
+impl InformerState {
+    fn new() -> Self {
+        let (tx, _rx) = broadcast::channel(CHANNEL_CAP);
+        Self {
+            tx,
+            rows: Arc::new(RwLock::new(HashMap::new())),
+            objects: Arc::new(RwLock::new(HashMap::new())),
+            by_name: Arc::new(RwLock::new(HashMap::new())),
+            layout: Arc::new(RwLock::new(None)),
+            headers: Arc::new(ArcSwap::from_pointee(Vec::new())),
+            schema_lock: Arc::new(RwLock::new(())),
+            reproject: Arc::new(Notify::new()),
+            terminal: Arc::new(RwLock::new(None)),
+        }
+    }
+}
+
 struct Active {
     tx: broadcast::Sender<WatchEvent>,
     rows: Arc<RwLock<HashMap<String, ResourceRow>>>,
@@ -361,32 +397,26 @@ fn start_informer(
     // Clones for the `Active` record; the originals are moved into the task.
     let active_group = group.clone();
     let active_kind = kind.clone();
-    let (tx, _rx) = broadcast::channel(CHANNEL_CAP);
-    let rows: Arc<RwLock<HashMap<String, ResourceRow>>> = Arc::new(RwLock::new(HashMap::new()));
-    let objects: Arc<RwLock<HashMap<String, DynamicObject>>> =
-        Arc::new(RwLock::new(HashMap::new()));
-    let by_name: NameIndex = Arc::new(RwLock::new(HashMap::new()));
+    let state = InformerState::new();
     // Start as None: the informer is being subscribed to immediately in
     // subscribe(), which sets idle_since = None. Initialising to Some(now())
     // would make the reaper start the eviction clock before any subscription.
     let idle_since: Arc<RwLock<Option<Instant>>> = Arc::new(RwLock::new(None));
 
-    let headers: Headers = Arc::new(ArcSwap::from_pointee(Vec::new()));
-    let layout = Arc::new(RwLock::new(None));
-    let schema_lock = Arc::new(RwLock::new(()));
-    let reproject = Arc::new(Notify::new());
-    let terminal = Arc::new(RwLock::new(None));
-
-    let task_tx = tx.clone();
-    let task_rows = rows.clone();
-    let task_objects = objects.clone();
-    let task_by_name = by_name.clone();
+    // The task and the `Active` record share one set of `Arc`s; cloning the
+    // bundle is what hands the task its half.
+    let InformerState {
+        tx: task_tx,
+        rows: task_rows,
+        objects: task_objects,
+        by_name: task_by_name,
+        layout: task_layout,
+        headers: task_headers,
+        schema_lock: task_schema_lock,
+        reproject: task_reproject,
+        terminal: task_terminal,
+    } = state.clone();
     let task_pvc_usage = pvc_usage.clone();
-    let task_layout = layout.clone();
-    let task_schema_lock = schema_lock.clone();
-    let task_headers = headers.clone();
-    let task_reproject = reproject.clone();
-    let task_terminal = terminal.clone();
     // Pods, PVCs, and time-sensitive CronJobs are re-projected from their full
     // object body, and only those need cached objects for the
     // detail view. For every other kind we keep just the lightweight rows and
@@ -699,8 +729,8 @@ fn start_informer(
     });
 
     Active {
-        tx,
-        rows,
+        tx: state.tx,
+        rows: state.rows,
         handle,
         idle_since,
         is_pod,
@@ -709,13 +739,13 @@ fn start_informer(
         namespace: active_ns,
         group: active_group,
         kind: active_kind,
-        objects,
-        by_name,
-        layout,
-        headers,
-        schema_lock,
-        reproject,
-        terminal,
+        objects: state.objects,
+        by_name: state.by_name,
+        layout: state.layout,
+        headers: state.headers,
+        schema_lock: state.schema_lock,
+        reproject: state.reproject,
+        terminal: state.terminal,
     }
 }
 

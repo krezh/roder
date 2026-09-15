@@ -8,7 +8,7 @@ use crate::app::controllers::drain::{
     DrainProgressState,
 };
 use crate::app::state::{DrainOpen, DrainTarget};
-use crate::app::ui::{show_toast_detail, Toast, ToastKind};
+use crate::app::ui::toast::{show_toast_detail, Toast, ToastKind};
 
 #[component]
 pub(crate) fn MobileDrainOverlay() -> impl IntoView {

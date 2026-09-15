@@ -1,12 +1,12 @@
 use leptos::prelude::*;
 use roder_core::{AlertResourceTarget, FiringAlert};
 
-use super::use_bool_overlay;
 use crate::app::alert_utils::{elapsed_since, elapsed_since_ms, sort_alerts};
 use crate::app::components::dropdown::{Dropdown, DropdownClose};
 use crate::app::state::{
     AlertSilencesEnabled, AlertsData, AlertsLastRefresh, AlertsOpen, DetailTarget, Tick,
 };
+use crate::app::ui::use_bool_overlay;
 
 #[component]
 pub(crate) fn AlertsPanel() -> impl IntoView {

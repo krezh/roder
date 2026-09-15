@@ -2,14 +2,15 @@
 
 use leptos::prelude::*;
 
-pub(crate) use crate::app::ui::{ask_confirm, Confirm};
+use crate::app::ui::confirm::Confirm;
+use crate::app::ui::{use_dialog_focus, use_option_overlay};
 
 #[component]
 pub(crate) fn ConfirmDialog() -> impl IntoView {
     let confirm = expect_context::<RwSignal<Option<Confirm>>>();
-    let (snapshot, closing, do_close) = super::use_option_overlay(confirm);
+    let (snapshot, closing, do_close) = use_option_overlay(confirm);
     let dialog_ref = NodeRef::<leptos::html::Div>::new();
-    crate::app::ui::use_dialog_focus(dialog_ref);
+    use_dialog_focus(dialog_ref);
 
     view! {
         {move || snapshot.get().map(|c| {

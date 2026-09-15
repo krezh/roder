@@ -7,39 +7,80 @@ use std::sync::Arc;
 use leptos::prelude::*;
 use roder_core::{ResourceAction, ResourceKind, RowStatus, Trend};
 
-use crate::app::components::table::{cmp_str, sortable_th, FlashTd};
+use crate::app::columns::{column_kind, ColumnKind};
+use crate::app::components::cell::DataCell;
+use crate::app::components::table::{cmp_str, sortable_th};
 use crate::app::components::table_row::{NameCell, ResourceRow as ResourceRowView};
 use crate::app::controllers::detail::selection_permissions_resource;
 use crate::app::events::make_do_delete_multi;
 use crate::app::hooks::{table_window, use_table_state, Coalescer};
-use crate::app::overlays::delete::{ask_delete, DeleteRequest};
-use crate::app::overlays::toast::Toast;
 use crate::app::search_state::{self, MergedRow};
 use crate::app::state::{
     open_logs, ConnectionState, Connectivity, CtxMenu, DetailTarget, LogPods, LogTarget,
     MultiKindSearch, OnlyProblems, ResourceFilter, SortKey, TableRows, TableSelected, TableTargets,
-    Tick,
 };
+use crate::app::ui::delete::{ask_delete, DeleteRequest};
+use crate::app::ui::toast::Toast;
 #[cfg(target_arch = "wasm32")]
 use crate::app::util::history::history_back;
 use crate::data;
 
-/// Unified column schema for multi-kind results.
+/// Unified column schema for multi-kind results. How each column paints is
+/// decided by its shared [`ColumnKind`], not by flags local to this view, so
+/// the search grid and the single-kind grid can't disagree about a header.
 #[derive(Clone, Debug, PartialEq)]
 struct UnifiedColumn {
     name: String,
-    /// Whether this column should be colored by status
-    colored: bool,
-    /// Whether this is a metric column (no flash)
-    is_metric: bool,
-    /// Whether this column holds a boolean value (true/false) and should be
-    /// coloured by the value itself — green for "true", amber for "false" —
-    /// rather than by the row's status. Used for PVC Mount, etc.
-    bool_colored: bool,
-    /// Whether this column holds a saturation percentage and should be tinted
-    /// by its value (red at 90+, yellow at 70+). Used for %CPU/R, %CPU/L,
-    /// %MEM/R, %MEM/L.
-    pct_thresh: bool,
+    kind: ColumnKind,
+}
+
+/// Resolve one cell of a merged row by column *header*.
+///
+/// Rows in this view come from several kinds at once, each with its own column
+/// order, so a unified-schema position means nothing to an individual row —
+/// the header has to be looked up in that row's own schema. Missing columns
+/// read as empty, which is how a kind that simply lacks the column renders.
+fn cell_by_header(
+    merged: Memo<Option<MergedRow>>,
+    live_columns: RwSignal<HashMap<String, Vec<String>>>,
+    header: String,
+) -> String {
+    merged
+        .get()
+        .and_then(|mr| {
+            let i = column_position(live_columns, &mr, &header)?;
+            mr.row.cells.get(i).cloned()
+        })
+        .unwrap_or_default()
+}
+
+/// The trend arrow for one cell of a merged row, resolved by column header.
+/// Columns a row's kind doesn't have carry no trend.
+fn trend_by_header(
+    merged: Memo<Option<MergedRow>>,
+    live_columns: RwSignal<HashMap<String, Vec<String>>>,
+    header: String,
+) -> Trend {
+    merged
+        .get()
+        .and_then(|mr| {
+            let i = column_position(live_columns, &mr, &header)?;
+            mr.row.trends.get(i).copied()
+        })
+        .unwrap_or(Trend::None)
+}
+
+fn column_position(
+    live_columns: RwSignal<HashMap<String, Vec<String>>>,
+    merged: &MergedRow,
+    header: &str,
+) -> Option<usize> {
+    live_columns.with(|schemas| {
+        schemas
+            .get(&merged.kind.key)?
+            .iter()
+            .position(|c| c == header)
+    })
 }
 
 /// Merge the latest snapshot schemas in kind encounter order.
@@ -56,17 +97,9 @@ fn build_unified_columns(
         };
         for col in columns {
             if seen.insert(col.clone()) {
-                let colored = matches!(col.as_str(), "Phase" | "Status" | "Ready");
-                let is_metric =
-                    col.starts_with("CPU") || col.starts_with("MEM") || col.starts_with("%");
-                let bool_colored = matches!(col.as_str(), "Mount");
-                let pct_thresh = matches!(col.as_str(), "%CPU/R" | "%CPU/L" | "%MEM/R" | "%MEM/L");
                 unified.push(UnifiedColumn {
                     name: col.clone(),
-                    colored,
-                    is_metric,
-                    bool_colored,
-                    pct_thresh,
+                    kind: column_kind(col),
                 });
             }
         }
@@ -99,7 +132,6 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
     let log_pods = expect_context::<LogPods>().0;
     let detail = expect_context::<RwSignal<Option<DetailTarget>>>();
     let ctx_menu = expect_context::<RwSignal<Option<CtxMenu>>>();
-    let tick = expect_context::<Tick>().0;
     let only_problems = expect_context::<OnlyProblems>().0;
     let resource_filter = expect_context::<ResourceFilter>().0;
     let delete_confirm = expect_context::<RwSignal<Option<DeleteRequest>>>();
@@ -581,149 +613,35 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
                                     {move || {
                                         let cols = unified_columns.get();
                                         cols.iter().map(|col| {
-                                            let col_colored = col.colored;
-                                            let col_is_metric = col.is_metric;
-                                            let col_bool_colored = col.bool_colored;
-                                            let col_pct_thresh = col.pct_thresh;
-                                            match col.name.as_str() {
-                                                "Name" => {
-                                                    view! {
-                                                        <NameCell
-                                                            uid=uid.clone()
-                                                            name=move || merged.get().and_then(|mr| {
-                                                                live_columns.with(|schemas| {
-                                                                    let i = schemas.get(&mr.kind.key)?.iter().position(|c| c == "Name")?;
-                                                                    mr.row.cells.get(i).cloned()
-                                                                })
-                                                            })
-                                                            status=move || merged.get().map(|mr| mr.row.status)
-                                                            selected=selected
-                                                            last_clicked=last_clicked
-                                                            shown_uids=shown_uids />
-                                                    }.into_any()
-                                                }
-                                                "Namespace" => {
-                                                    view! {
-                                                        <FlashTd
-                                                            value=move || merged.get().and_then(|mr| {
-                                                                live_columns.with(|schemas| {
-                                                                    let i = schemas.get(&mr.kind.key)?.iter().position(|c| c == "Namespace")?;
-                                                                    mr.row.cells.get(i).cloned()
-                                                                })
-                                                            }).unwrap_or_default()
-                                                            class="cell-ns" />
-                                                    }.into_any()
-                                                }
-                                                "Age" => {
-                                                    view! {
-                                                        <div class="cell cell-age"><div class="cw"><div class="cwi">{move || {
-                                                            tick.get();
-                                                            let value = merged.get().and_then(|mr| {
-                                                                live_columns.with(|schemas| {
-                                                                    let i = schemas.get(&mr.kind.key)?.iter().position(|c| c == "Age")?;
-                                                                    mr.row.cells.get(i).cloned()
-                                                                })
-                                                            }).unwrap_or_default();
-                                                            data::humanize_cell(&value)
-                                                        }}</div></div></div>
-                                                    }.into_any()
-                                                }
-                                                _ => {
-                                                    // Resolve by header because each kind may order its schema differently.
-                                                    let col_name_sv = StoredValue::new(col.name.clone());
-                                                    if col_colored || col_bool_colored {
-                                                        view! {
-                                                            <FlashTd value=move || {
-                                                                let cn = col_name_sv.get_value();
-                                                                merged.get()
-                                                                    .and_then(|mr| {
-                                                                        let i = live_columns.with(|schemas| schemas.get(&mr.kind.key)?.iter().position(|c| c == &cn))?;
-                                                                        mr.row.cells.get(i).cloned()
-                                                                    })
-                                                                    .unwrap_or_default()
-                                                            } no_flash=col_is_metric pill=col_colored
-                                                                color=Signal::derive(move || {
-                                                                    if col_bool_colored {
-                                                                        let cn = col_name_sv.get_value();
-                                                                        match merged.get()
-                                                                            .and_then(|mr| {
-                                                                                let i = live_columns.with(|schemas| schemas.get(&mr.kind.key)?.iter().position(|c| c == &cn))?;
-                                                                                mr.row.cells.get(i).cloned()
-                                                                            })
-                                                                            .as_deref()
-                                                                        {
-                                                                            Some("true") => "ok",
-                                                                            Some("false") => "warn",
-                                                                            _ => "unknown",
-                                                                        }
-                                                                    } else {
-                                                                        crate::app::util::color::dot_class(merged.get().map(|mr| mr.row.status).unwrap_or(RowStatus::Unknown))
-                                                                    }
-                                                                }) />
-                                                        }.into_any()
-                                                    } else if col_pct_thresh {
-                                                        // Saturation percentage: red at 90+, yellow at 70+.
-                                                        // `is_metric` is true (starts with %), so we keep
-                                                        // `no_flash` and forward the trend arrow.
-                                                        let trend_sig = Signal::derive(move || {
-                                                            let cn = col_name_sv.get_value();
-                                                            merged.get().and_then(|mr| {
-                                                                let i = live_columns.with(|schemas| schemas.get(&mr.kind.key)?.iter().position(|c| c == &cn))?;
-                                                                mr.row.trends.get(i).copied()
-                                                            }).unwrap_or(Trend::None)
-                                                        });
-                                                        view! {
-                                                            <FlashTd value=move || {
-                                                                let cn = col_name_sv.get_value();
-                                                                merged.get()
-                                                                    .and_then(|mr| {
-                                                                        let i = live_columns.with(|schemas| schemas.get(&mr.kind.key)?.iter().position(|c| c == &cn))?;
-                                                                        mr.row.cells.get(i).cloned()
-                                                                    })
-                                                                    .unwrap_or_default()
-                                                            } no_flash=true trend=trend_sig pct_bar=true
-                                                                color=Signal::derive(move || {
-                                                                    // `merged.get()` yields an owned
-                                                                    // `Option<MergedRow>`, so we clone the
-                                                                    // cell into a local `String` and pass a
-                                                                    // `&str` view of it to `pct_thresh_color`.
-                                                                    let cn = col_name_sv.get_value();
-                                                                    let v = merged.get()
-                                                                        .and_then(|mr| {
-                                                                            let i = live_columns.with(|schemas| schemas.get(&mr.kind.key)?.iter().position(|c| c == &cn))?;
-                                                                            mr.row.cells.get(i).cloned()
-                                                                        })
-                                                                        .unwrap_or_default();
-                                                                    crate::app::util::color::pct_thresh_color(&v)
-                                                                }) />
-                                                        }.into_any()
-                                                    } else {
-                                                        let trend_sig = Signal::derive(move || {
-                                                            let cn = col_name_sv.get_value();
-                                                            merged.get().and_then(|mr| {
-                                                                let i = live_columns.with(|schemas| schemas.get(&mr.kind.key)?.iter().position(|c| c == &cn))?;
-                                                                mr.row.trends.get(i).copied()
-                                                            }).unwrap_or(Trend::None)
-                                                        });
-                                                        view! {
-                                                            <FlashTd value=move || {
-                                                                let cn = col_name_sv.get_value();
-                                                                let v = merged.get()
-                                                                    .and_then(|mr| {
-                                                                        let i = live_columns.with(|schemas| schemas.get(&mr.kind.key)?.iter().position(|c| c == &cn))?;
-                                                                        mr.row.cells.get(i).cloned()
-                                                                    })
-                                                                    .unwrap_or_default();
-                                                                if data::looks_like_rfc3339(&v) {
-                                                                    tick.get();
-                                                                    data::humanize_cell(&v)
-                                                                } else {
-                                                                    v
-                                                                }
-                                                            } no_flash=col_is_metric trend=trend_sig />
-                                                        }.into_any()
-                                                    }
-                                                }
+                                            let col_kind = col.kind;
+                                            // Every cell is resolved by header rather than by
+                                            // index, because each merged kind orders its own
+                                            // schema differently.
+                                            let col_name = StoredValue::new(col.name.clone());
+                                            let cell = move || cell_by_header(merged, live_columns, col_name.get_value());
+                                            let trend_sig = Signal::derive(move || {
+                                                trend_by_header(merged, live_columns, col_name.get_value())
+                                            });
+                                            if col_kind == ColumnKind::Name {
+                                                view! {
+                                                    <NameCell
+                                                        uid=uid.clone()
+                                                        name=move || {
+                                                            let v = cell();
+                                                            (!v.is_empty()).then_some(v)
+                                                        }
+                                                        status=move || merged.get().map(|mr| mr.row.status)
+                                                        selected=selected
+                                                        last_clicked=last_clicked
+                                                        shown_uids=shown_uids />
+                                                }.into_any()
+                                            } else {
+                                                view! {
+                                                    <DataCell kind=col_kind value=cell trend=trend_sig
+                                                        status=Signal::derive(move || {
+                                                            merged.get().map(|mr| mr.row.status).unwrap_or(RowStatus::Unknown)
+                                                        }) />
+                                                }.into_any()
                                             }
                                         }).collect_view()
                                     }}

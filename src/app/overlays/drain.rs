@@ -8,10 +8,10 @@ use leptos::prelude::*;
 use roder_core::ActiveDrainJob;
 use roder_core::{DrainBlocker, DrainEvent, DrainEventKind, DrainJobRef, DrainOptions};
 
-use crate::app::overlays::toast::{
+use crate::app::state::{DrainOpen, DrainTarget};
+use crate::app::ui::toast::{
     show_progress_toast, show_toast, show_toast_detail, update_progress_toast, Toast, ToastKind,
 };
-use crate::app::state::{DrainOpen, DrainTarget};
 
 #[derive(Clone, PartialEq)]
 enum Phase {
@@ -27,7 +27,7 @@ enum Phase {
 #[component]
 pub(crate) fn DrainOverlay() -> impl IntoView {
     let open = expect_context::<DrainOpen>().0;
-    let (snapshot, closing, do_close) = super::use_option_overlay(open);
+    let (snapshot, closing, do_close) = crate::app::ui::use_option_overlay(open);
 
     #[cfg(target_arch = "wasm32")]
     Effect::new(move |_| {

@@ -19,7 +19,7 @@ use crate::app::state::{
     MultiKindSearch, OnlyProblems, ResourceFilter, TableRows, TableSelected, TableTargets, Tick,
 };
 use crate::app::table_logic;
-use crate::app::ui::Toast;
+use crate::app::ui::toast::Toast;
 #[cfg(target_arch = "wasm32")]
 use crate::app::util::history::history_back;
 use crate::data;

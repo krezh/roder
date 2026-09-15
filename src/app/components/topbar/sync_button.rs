@@ -4,7 +4,7 @@
 use leptos::prelude::*;
 use roder_core::ActionSummary;
 
-use crate::app::overlays::toast::{show_toast, show_toast_detail, Toast, ToastKind};
+use crate::app::ui::toast::{show_toast, show_toast_detail, Toast, ToastKind};
 use crate::data;
 
 #[component]

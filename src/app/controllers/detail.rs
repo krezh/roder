@@ -592,3 +592,354 @@ fn display_certificate_time(value: &str) -> String {
     }
     value.strip_suffix('Z').unwrap_or(value).replace('T', " ")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn format_bytes_steps_up_units_and_stops_at_tib() {
+        assert_eq!(format_bytes(0), "0.0 B");
+        assert_eq!(format_bytes(1023), "1023.0 B");
+        assert_eq!(format_bytes(1024), "1.0 KiB");
+        assert_eq!(format_bytes(1536), "1.5 KiB");
+        assert_eq!(format_bytes(1024 * 1024), "1.0 MiB");
+        assert_eq!(format_bytes(1024 * 1024 * 1024), "1.0 GiB");
+        // Beyond TiB the unit stays put and the number keeps growing, rather
+        // than indexing past the end of the table.
+        assert_eq!(
+            format_bytes(4096_u64 * 1024 * 1024 * 1024 * 1024),
+            "4096.0 TiB"
+        );
+    }
+
+    #[test]
+    fn short_fingerprint_truncates_without_panicking_on_short_input() {
+        assert_eq!(short_fingerprint("0123456789abcdef"), "0123456789ab");
+        assert_eq!(short_fingerprint("abc"), "abc");
+        assert_eq!(short_fingerprint(""), "");
+    }
+
+    #[test]
+    fn certificate_times_drop_the_zulu_suffix_and_the_t_separator() {
+        assert_eq!(
+            display_certificate_time("2026-01-02T03:04:05Z"),
+            "2026-01-02 03:04:05"
+        );
+        assert_eq!(display_certificate_time(""), "-");
+    }
+
+    #[test]
+    fn cnpg_phase_class_ranks_fatal_phases_as_errors() {
+        for phase in [
+            "Unrecoverable state",
+            "Invalid configuration",
+            "Unable to create required cluster objects",
+            "Plugin rollout failed",
+            "Unknown state",
+            "Cannot proceed with the rollout",
+            "Unknown plugin",
+            "Missing architecture",
+            "Interaction failed",
+        ] {
+            assert_eq!(cnpg_phase_class(phase, "3", "3"), "error", "{phase}");
+        }
+    }
+
+    #[test]
+    fn cnpg_phase_class_ranks_recoverable_phases_as_warnings() {
+        for phase in [
+            "Cluster in degraded state",
+            "Upgrade delayed",
+            "Waiting for user action",
+        ] {
+            assert_eq!(cnpg_phase_class(phase, "3", "3"), "warning", "{phase}");
+        }
+    }
+
+    /// Healthy only counts as `ok` once every desired instance is ready —
+    /// a healthy-but-still-scaling cluster stays pending.
+    #[test]
+    fn cnpg_phase_class_requires_full_readiness_for_ok() {
+        assert_eq!(cnpg_phase_class("Cluster in healthy state", "3", "3"), "ok");
+        assert_eq!(
+            cnpg_phase_class("Cluster in healthy state", "2", "3"),
+            "pending"
+        );
+        assert_eq!(cnpg_phase_class("Setting up primary", "0", "3"), "pending");
+    }
+
+    fn cnpg_cluster(status: serde_json::Value, spec: serde_json::Value) -> serde_json::Value {
+        json!({
+            "apiVersion": "postgresql.cnpg.io/v1",
+            "kind": "Cluster",
+            "spec": spec,
+            "status": status,
+        })
+    }
+
+    #[test]
+    fn cnpg_summary_ignores_objects_that_are_not_cnpg_clusters() {
+        assert!(cnpg_cluster_summary(&json!({})).is_none());
+        // Right kind, wrong group.
+        assert!(cnpg_cluster_summary(&json!({ "apiVersion": "v1", "kind": "Cluster" })).is_none());
+        // Right group, wrong kind.
+        assert!(cnpg_cluster_summary(
+            &json!({ "apiVersion": "postgresql.cnpg.io/v1", "kind": "Backup" })
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn cnpg_summary_reports_topology_and_primary_switchover() {
+        let object = cnpg_cluster(
+            json!({
+                "phase": "Cluster in healthy state",
+                "readyInstances": "3",
+                "currentPrimary": "pg-1",
+                "targetPrimary": "pg-2",
+                "topology": { "nodesUsed": "3" },
+                "image": "postgres:17",
+            }),
+            json!({ "instances": "3" }),
+        );
+        let summary = cnpg_cluster_summary(&object).expect("CNPG cluster");
+        assert_eq!(summary.topology, "3 instances");
+        assert_eq!(summary.topology_note, "across 3 nodes");
+        assert_eq!(summary.primary, "pg-1");
+        assert_eq!(summary.primary_note, "switching to pg-2");
+        assert_eq!(summary.image, "postgres:17");
+    }
+
+    /// A target that matches the current primary isn't a switchover in
+    /// progress, so it must not be announced as one.
+    #[test]
+    fn cnpg_summary_stays_quiet_when_the_target_primary_is_the_current_one() {
+        let object = cnpg_cluster(
+            json!({ "currentPrimary": "pg-1", "targetPrimary": "pg-1" }),
+            json!({ "instances": "1" }),
+        );
+        let summary = cnpg_cluster_summary(&object).expect("CNPG cluster");
+        assert_eq!(summary.primary_note, "");
+    }
+
+    #[test]
+    fn cnpg_summary_collects_storage_class_and_wal_notes() {
+        let object = cnpg_cluster(
+            json!({}),
+            json!({
+                "instances": "3",
+                "storage": { "size": "100Gi", "storageClass": "ceph-block" },
+                "walStorage": { "size": "10Gi", "storageClass": "ceph-fast" },
+            }),
+        );
+        let summary = cnpg_cluster_summary(&object).expect("CNPG cluster");
+        assert_eq!(summary.storage, "100Gi");
+        assert_eq!(
+            summary.storage_note,
+            "ceph-block storage class; WAL 10Gi on ceph-fast"
+        );
+    }
+
+    #[test]
+    fn cnpg_summary_falls_back_to_the_pvc_template_for_storage() {
+        let object = cnpg_cluster(
+            json!({}),
+            json!({
+                "instances": "1",
+                "storage": {
+                    "pvcTemplate": {
+                        "storageClassName": "local-path",
+                        "resources": { "requests": { "storage": "50Gi" } },
+                    }
+                },
+            }),
+        );
+        let summary = cnpg_cluster_summary(&object).expect("CNPG cluster");
+        assert_eq!(summary.storage, "50Gi");
+        assert_eq!(summary.storage_note, "local-path storage class");
+    }
+
+    /// An ephemeral cluster's storage spec is irrelevant — the summary has to
+    /// say the data isn't persisted, whatever size was configured.
+    #[test]
+    fn cnpg_summary_flags_ephemeral_storage() {
+        let object = cnpg_cluster(
+            json!({}),
+            json!({
+                "instances": "1",
+                "storage": { "size": "100Gi", "storageClass": "ceph-block" },
+                "ephemeralVolumeSource": {},
+            }),
+        );
+        let summary = cnpg_cluster_summary(&object).expect("CNPG cluster");
+        assert_eq!(summary.storage, "Ephemeral");
+        assert_eq!(summary.storage_note, "data is not persisted");
+    }
+
+    #[test]
+    fn cnpg_summary_leads_with_failed_instances_over_replication_state() {
+        let object = cnpg_cluster(
+            json!({
+                "readyInstances": "2",
+                "instancesStatus": { "replicating": ["pg-2"], "failed": ["pg-3"] },
+            }),
+            json!({ "instances": "3" }),
+        );
+        let summary = cnpg_cluster_summary(&object).expect("CNPG cluster");
+        assert_eq!(summary.replication, "1 failed");
+        assert_eq!(summary.replication_note, "1/2 standbys replicating");
+    }
+
+    #[test]
+    fn cnpg_summary_reports_synchronous_topology_from_the_latest_condition() {
+        let object = cnpg_cluster(
+            json!({
+                "instancesStatus": { "replicating": ["pg-2", "pg-3"] },
+                "conditions": [
+                    { "type": "SyncReplicationTopologySatisfied", "status": "False" },
+                    { "type": "SyncReplicationTopologySatisfied", "status": "True" },
+                ],
+            }),
+            json!({ "instances": "3" }),
+        );
+        let summary = cnpg_cluster_summary(&object).expect("CNPG cluster");
+        assert_eq!(summary.replication, "2/2 replicating");
+        assert_eq!(summary.replication_note, "synchronous topology satisfied");
+    }
+
+    #[test]
+    fn cnpg_summary_falls_back_to_readiness_when_no_instance_status_is_reported() {
+        let object = cnpg_cluster(
+            json!({ "readyInstances": "1" }),
+            json!({ "instances": "3" }),
+        );
+        let summary = cnpg_cluster_summary(&object).expect("CNPG cluster");
+        assert_eq!(summary.replication, "Not reported");
+        assert_eq!(summary.replication_note, "1/3 instances ready");
+    }
+
+    fn certificate(conditions: serde_json::Value) -> serde_json::Value {
+        json!({ "status": { "conditions": conditions } })
+    }
+
+    /// An in-flight renewal outranks whatever Ready currently says, so the UI
+    /// doesn't show "Valid" while the certificate is being reissued.
+    #[test]
+    fn certificate_issuing_outranks_ready() {
+        let object = certificate(json!([
+            { "type": "Ready", "status": "True" },
+            { "type": "Issuing", "status": "True" },
+        ]));
+        let summary = certificate_summary(&object);
+        assert_eq!(summary.state, "Renewing");
+        assert_eq!(summary.state_class, "pending");
+    }
+
+    #[test]
+    fn certificate_expiry_is_reported_as_expired() {
+        let object = certificate(json!([
+            { "type": "Ready", "status": "False", "reason": "Expired" },
+        ]));
+        let summary = certificate_summary(&object);
+        assert_eq!(summary.state, "Expired");
+        assert_eq!(summary.state_class, "error");
+    }
+
+    #[test]
+    fn certificate_states_follow_the_ready_condition() {
+        let valid =
+            certificate_summary(&certificate(json!([{ "type": "Ready", "status": "True" }])));
+        assert_eq!((valid.state.as_str(), valid.state_class), ("Valid", "ok"));
+
+        let failed = certificate_summary(&certificate(json!([
+            { "type": "Ready", "status": "False", "reason": "DoesNotExist" },
+        ])));
+        assert_eq!(
+            (failed.state.as_str(), failed.state_class),
+            ("DoesNotExist", "error")
+        );
+
+        // A False Ready with no reason still has to render something.
+        let unnamed = certificate_summary(&certificate(
+            json!([{ "type": "Ready", "status": "False" }]),
+        ));
+        assert_eq!(
+            (unnamed.state.as_str(), unnamed.state_class),
+            ("Failed", "error")
+        );
+
+        let pending = certificate_summary(&json!({}));
+        assert_eq!(
+            (pending.state.as_str(), pending.state_class),
+            ("Pending", "pending")
+        );
+    }
+
+    #[test]
+    fn certificate_summary_formats_times_and_defaults_missing_fields() {
+        let object = json!({
+            "spec": { "secretName": "tls-web" },
+            "status": {
+                "notBefore": "2026-01-02T03:04:05Z",
+                "notAfter": "2026-04-02T03:04:05Z",
+                "revision": "7",
+            },
+        });
+        let summary = certificate_summary(&object);
+        assert_eq!(summary.not_before, "2026-01-02 03:04:05");
+        assert_eq!(summary.not_before_raw, "2026-01-02T03:04:05Z");
+        assert_eq!(summary.not_after, "2026-04-02 03:04:05");
+        // Absent in the object, so it renders as a dash rather than empty.
+        assert_eq!(summary.renewal_time, "-");
+        assert_eq!(summary.renewal_time_raw, "");
+        assert_eq!(summary.revision, "7");
+        assert_eq!(summary.secret, "tls-web");
+
+        let bare = certificate_summary(&json!({}));
+        assert_eq!(bare.revision, "-");
+        assert_eq!(bare.secret, "-");
+    }
+
+    fn selection(selected: usize, permitted: &[(ResourceAction, usize)]) -> SelectionPermissions {
+        SelectionPermissions {
+            selected,
+            permitted: permitted
+                .iter()
+                .map(|(action, n)| (action.api_name().to_string(), *n))
+                .collect(),
+        }
+    }
+
+    /// A bulk action is only offered when RBAC permits it on *every* selected
+    /// resource — partial permission must not enable the button.
+    #[test]
+    fn selection_allows_all_requires_every_selected_resource() {
+        let all = selection(3, &[(ResourceAction::Delete, 3)]);
+        assert!(all.allows_all(ResourceAction::Delete));
+
+        let partial = selection(3, &[(ResourceAction::Delete, 2)]);
+        assert!(!partial.allows_all(ResourceAction::Delete));
+
+        let unmentioned = selection(3, &[(ResourceAction::Delete, 3)]);
+        assert!(!unmentioned.allows_all(ResourceAction::Restart));
+    }
+
+    /// An empty selection permits nothing, so a stale 0-of-0 can't read as
+    /// "allowed on all of them".
+    #[test]
+    fn selection_allows_nothing_when_empty() {
+        let empty = selection(0, &[(ResourceAction::Delete, 0)]);
+        assert!(!empty.allows_all(ResourceAction::Delete));
+        assert_eq!(empty.count(ResourceAction::Delete), (0, 0));
+    }
+
+    #[test]
+    fn selection_count_reports_allowed_over_total() {
+        let partial = selection(4, &[(ResourceAction::Delete, 1)]);
+        assert_eq!(partial.count(ResourceAction::Delete), (1, 4));
+        // An action nobody is permitted still reports the selection size.
+        assert_eq!(partial.count(ResourceAction::Restart), (0, 4));
+    }
+}

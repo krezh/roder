@@ -8,7 +8,7 @@ use leptos::prelude::*;
 use roder_core::{ResourceKind, ResourceRow, WatchEvent};
 
 use crate::app::events::UidSet;
-use crate::app::overlays::toast::{show_toast_detail, Toast, ToastKind};
+use crate::app::ui::toast::{show_toast_detail, Toast, ToastKind};
 
 #[derive(Clone, PartialEq)]
 pub(crate) struct MergedRow {

@@ -5,8 +5,8 @@ use roder_core::{ResourceTreeNode, RowStatus};
 
 use crate::app::components::icons::TreeKindIcon;
 use crate::app::detail::RowDetail;
-use crate::app::overlays::use_option_overlay;
 use crate::app::state::{DetailTarget, TreeOpen};
+use crate::app::ui::use_option_overlay;
 use crate::data;
 
 pub(crate) enum ChildGroup {

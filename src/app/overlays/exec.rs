@@ -7,7 +7,7 @@ use crate::data;
 #[component]
 pub(crate) fn ExecWindow() -> impl IntoView {
     let exec_open = expect_context::<ExecOpen>().0;
-    let (snapshot, closing, do_close) = crate::app::overlays::use_option_overlay(exec_open);
+    let (snapshot, closing, do_close) = crate::app::ui::use_option_overlay(exec_open);
     let iframe_ref = NodeRef::<Iframe>::new();
 
     Effect::new(move |_| {

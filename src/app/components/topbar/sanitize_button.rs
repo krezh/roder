@@ -2,8 +2,8 @@
 
 use leptos::prelude::*;
 
-use crate::app::overlays::toast::Toast;
-use crate::app::ui::{ask_sweep, run_sweep, SweepRequest};
+use crate::app::ui::sweep::{ask_sweep, run_sweep, SweepRequest};
+use crate::app::ui::toast::Toast;
 
 #[component]
 pub(crate) fn SanitizeButton() -> impl IntoView {

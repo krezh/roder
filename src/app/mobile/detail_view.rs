@@ -12,7 +12,8 @@ use crate::app::resource_actions::AvailableActions;
 use crate::app::state::{
     DetailTarget, DrainOpen, DrainTarget, ExecOpen, ExecTarget, TalosFeatures,
 };
-use crate::app::ui::{ask_confirm, ask_delete, delete_extra, Confirm, DeleteRequest};
+use crate::app::ui::confirm::{ask_confirm, Confirm};
+use crate::app::ui::delete::{ask_delete, delete_extra, DeleteRequest};
 use crate::app::util::format::{
     ansi_to_html, camel_label, condition_class, counted, log_level, parse_key, parse_log_line,
 };

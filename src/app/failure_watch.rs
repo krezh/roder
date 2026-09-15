@@ -3,7 +3,7 @@ use leptos::task::spawn_local;
 
 use crate::app::events::{apply_event, RowMap};
 use crate::app::state::{Catalog, ConnectionState, Connectivity};
-use crate::app::ui::Toast;
+use crate::app::ui::toast::Toast;
 use crate::data;
 
 #[derive(Clone, Copy)]

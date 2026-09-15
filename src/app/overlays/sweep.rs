@@ -1,12 +1,16 @@
+//! The desktop sweep dialog. Options, preview and result formatting are
+//! shared with the mobile sheet and live in `app::ui::sweep`.
+
 use leptos::prelude::*;
 use roder_core::SweepOptions;
 
-use crate::app::ui::{use_sweep_preview, SweepOption, SweepPreview, SweepRequest};
+use crate::app::ui::sweep::{use_sweep_preview, SweepOption, SweepPreview, SweepRequest};
+use crate::app::ui::{use_dialog_focus, use_option_overlay};
 
 #[component]
 pub(crate) fn SweepDialog() -> impl IntoView {
     let sweep = expect_context::<RwSignal<Option<SweepRequest>>>();
-    let (snapshot, closing, close) = super::use_option_overlay(sweep);
+    let (snapshot, closing, close) = use_option_overlay(sweep);
 
     view! {
         {move || snapshot.get().map(|request| view! {
@@ -24,7 +28,7 @@ fn SweepDialogView(
     let options = RwSignal::new(SweepOptions::default());
     let preview = use_sweep_preview(request.namespace.clone(), options);
     let dialog_ref = NodeRef::<leptos::html::Div>::new();
-    crate::app::ui::use_dialog_focus(dialog_ref);
+    use_dialog_focus(dialog_ref);
 
     view! {
         <div class="modal-scrim" class:closing=move || closing.get() on:click=move |_| close()></div>

@@ -9,6 +9,7 @@ use std::collections::{BTreeSet, HashMap};
 use leptos::prelude::{GetUntracked, GetValue, RwSignal, StoredValue};
 use roder_core::{ResourceRow, RowStatus};
 
+use crate::app::columns::column_kind;
 use crate::app::components::table::cmp_cell;
 use crate::app::state::{CtxMenu, DetailTarget, SortKey};
 
@@ -159,22 +160,20 @@ fn compare_rows(a: &ResourceRow, b: &ResourceRow, sort_key: SortKey) -> Ordering
     .then_with(|| a.uid.cmp(&b.uid))
 }
 
-/// Pick up to 2 columns to surface on a mobile card: a status-ish column
-/// (Phase/Status/Ready) first if present, then fill remaining slots in
-/// column order. Returns (label, value, colored-by-status) triples.
+/// Pick up to 2 columns to surface on a mobile card: a state column (see
+/// [`crate::app::columns::ColumnKind::is_state`]) first if present, then fill
+/// the remaining slot in column order, skipping the identity columns the card
+/// already shows. Returns (label, value, colored-by-status) triples.
 pub(crate) fn surfaced_cells(columns: &[String], cells: &[String]) -> Vec<(String, String, bool)> {
     let mut idx: Vec<usize> = Vec::new();
-    if let Some(i) = columns
-        .iter()
-        .position(|c| matches!(c.as_str(), "Phase" | "Status" | "Ready" | "Attached"))
-    {
+    if let Some(i) = columns.iter().position(|c| column_kind(c).is_state()) {
         idx.push(i);
     }
     for (i, column) in columns.iter().enumerate() {
         if idx.len() >= 2 {
             break;
         }
-        if !idx.contains(&i) && !matches!(column.as_str(), "Namespace" | "Name" | "Age") {
+        if !idx.contains(&i) && !column_kind(column).is_identity() {
             idx.push(i);
         }
     }
@@ -182,7 +181,7 @@ pub(crate) fn surfaced_cells(columns: &[String], cells: &[String]) -> Vec<(Strin
         .filter_map(|i| {
             let label = columns.get(i)?.clone();
             let value = cells.get(i).cloned().unwrap_or_default();
-            let colored = matches!(label.as_str(), "Phase" | "Status" | "Ready" | "Attached");
+            let colored = column_kind(&label).is_state();
             Some((label, value, colored))
         })
         .collect()

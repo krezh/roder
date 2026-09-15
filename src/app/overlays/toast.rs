@@ -2,15 +2,13 @@
 
 use leptos::prelude::*;
 
-pub(crate) use crate::app::ui::{
-    show_progress_toast, show_toast, show_toast_detail, show_toast_full, show_toast_list,
-    update_progress_toast, Toast, ToastKind,
-};
+use crate::app::ui::toast::{Toast, ToastKind, TOAST_MS};
+use crate::app::ui::use_option_overlay;
 
 #[component]
 pub(crate) fn ToastView() -> impl IntoView {
     let toast = expect_context::<RwSignal<Option<Toast>>>();
-    let (snapshot, closing, do_close) = super::use_option_overlay(toast);
+    let (snapshot, closing, do_close) = use_option_overlay(toast);
 
     // Auto-dismiss each toast a few seconds after it lands, unless a newer one
     // has already replaced it (compared by id, since two toasts can share text).
@@ -27,7 +25,7 @@ pub(crate) fn ToastView() -> impl IntoView {
                     do_close();
                 }
             },
-            std::time::Duration::from_millis(crate::app::ui::TOAST_MS),
+            std::time::Duration::from_millis(TOAST_MS),
         );
     });
 

@@ -6,7 +6,7 @@ use crate::app::state::FileBrowserOpen;
 #[component]
 pub(crate) fn FileBrowserWindow() -> impl IntoView {
     let open = expect_context::<FileBrowserOpen>().0;
-    let (snapshot, closing, close) = crate::app::overlays::use_option_overlay(open);
+    let (snapshot, closing, close) = crate::app::ui::use_option_overlay(open);
 
     view! {
         <Show when=move || snapshot.get().is_some()>

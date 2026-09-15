@@ -7,7 +7,8 @@ use roder_core::ResourceAction;
 
 use crate::app::controllers::detail::SelectionPermissions;
 use crate::app::events::UidSet;
-use crate::app::ui::{ask_confirm, ask_delete, Confirm, DeleteRequest};
+use crate::app::ui::confirm::{ask_confirm, Confirm};
+use crate::app::ui::delete::{ask_delete, DeleteRequest};
 
 #[component]
 pub(crate) fn MobileBulkBar(

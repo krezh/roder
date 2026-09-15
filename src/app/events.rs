@@ -5,13 +5,13 @@ use std::collections::HashMap;
 use leptos::prelude::*;
 use roder_core::{DeletePropagation, ResourceRow, WatchEvent};
 
-use crate::app::overlays::delete::delete_extra;
-use crate::app::overlays::toast::{
-    show_toast, show_toast_detail, show_toast_full, show_toast_list, Toast, ToastKind,
-};
 use crate::app::search_state::MergedRow;
 use crate::app::state::{open_logs, DetailTarget, LogTarget};
 use crate::app::table_logic;
+use crate::app::ui::delete::delete_extra;
+use crate::app::ui::toast::{
+    show_toast, show_toast_detail, show_toast_full, show_toast_list, Toast, ToastKind,
+};
 use crate::data;
 
 pub(crate) type UidSet = RwSignal<std::collections::BTreeSet<String>>;

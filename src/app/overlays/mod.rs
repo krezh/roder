@@ -14,5 +14,3 @@ pub(crate) mod toast;
 pub(crate) mod tree;
 
 pub(crate) use alerts::AlertsPanel;
-
-pub(crate) use crate::app::ui::{use_bool_overlay, use_option_overlay};

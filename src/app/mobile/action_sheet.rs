@@ -13,10 +13,10 @@ use crate::app::state::{
     LogTarget, TableRows, TableSelected, TableTargets, TreeOpen,
 };
 use crate::app::table_logic::resolve_current_action_targets;
-use crate::app::ui::{
-    ask_confirm, ask_delete, delete_extra, show_toast, use_option_overlay, Confirm, DeleteRequest,
-    Toast, ToastKind,
-};
+use crate::app::ui::confirm::{ask_confirm, Confirm};
+use crate::app::ui::delete::{ask_delete, delete_extra, DeleteRequest};
+use crate::app::ui::toast::{show_toast, Toast, ToastKind};
+use crate::app::ui::use_option_overlay;
 use crate::app::util::clipboard::copy_to_clipboard;
 use crate::app::util::format::parse_key;
 use crate::app::util::predicate::KindKind;

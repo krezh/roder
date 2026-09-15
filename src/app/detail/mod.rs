@@ -11,12 +11,12 @@ use crate::app::controllers::detail::{
     ResourceDetailController,
 };
 use crate::app::logs::LogsView;
-use crate::app::overlays::confirm::{ask_confirm, Confirm};
-use crate::app::overlays::delete::{ask_delete, delete_extra, DeleteRequest};
 use crate::app::resource_actions::AvailableActions;
 use crate::app::state::{
     DetailTarget, DrainOpen, DrainTarget, ExecOpen, ExecTarget, TalosFeatures,
 };
+use crate::app::ui::confirm::{ask_confirm, Confirm};
+use crate::app::ui::delete::{ask_delete, delete_extra, DeleteRequest};
 use crate::app::util::format::parse_key;
 use crate::app::util::json::selector_from;
 use crate::app::util::yaml_hl;
@@ -36,7 +36,7 @@ pub(crate) fn DetailDrawer() -> impl IntoView {
     let detail = expect_context::<RwSignal<Option<DetailTarget>>>();
     let width_percent = RwSignal::new(40.0);
     let dragging = RwSignal::new(false);
-    let (snapshot, closing, do_close) = crate::app::overlays::use_option_overlay(detail);
+    let (snapshot, closing, do_close) = crate::app::ui::use_option_overlay(detail);
 
     #[cfg(target_arch = "wasm32")]
     {

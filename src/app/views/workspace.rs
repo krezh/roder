@@ -6,10 +6,10 @@ use roder_core::{ResourceKind, WatchEvent};
 use crate::app::components::kind_table::KindTable;
 use crate::app::events::RowMap;
 use crate::app::hooks::Coalescer;
-use crate::app::overlays::toast::{show_toast_detail, Toast, ToastKind};
 use crate::app::state::{
     Catalog, ConnectionState, Connectivity, DetailTarget, PaneConfig, WorkspaceConf,
 };
+use crate::app::ui::toast::{show_toast_detail, Toast, ToastKind};
 use crate::data;
 
 #[component]

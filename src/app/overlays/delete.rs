@@ -6,12 +6,13 @@ use leptos::prelude::*;
 use roder_core::DeletePropagation;
 
 use crate::app::components::dropdown::{Dropdown, DropdownClose};
-pub(crate) use crate::app::ui::{ask_delete, delete_extra, DeleteRequest};
+use crate::app::ui::delete::DeleteRequest;
+use crate::app::ui::{use_dialog_focus, use_option_overlay};
 
 #[component]
 pub(crate) fn DeleteDialog() -> impl IntoView {
     let del = expect_context::<RwSignal<Option<DeleteRequest>>>();
-    let (snapshot, closing, do_close) = super::use_option_overlay(del);
+    let (snapshot, closing, do_close) = use_option_overlay(del);
 
     view! {
         {move || snapshot.get().map(|req| view! {
@@ -32,7 +33,7 @@ fn DeleteDialogView(
     let force = RwSignal::new(false);
     let propagation = RwSignal::new(String::new()); // "" = server default
     let dialog_ref = NodeRef::<leptos::html::Div>::new();
-    crate::app::ui::use_dialog_focus(dialog_ref);
+    use_dialog_focus(dialog_ref);
 
     let propagation_label = move || {
         match propagation.get().as_str() {

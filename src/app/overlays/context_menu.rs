@@ -5,9 +5,6 @@ use roder_core::ResourceKind;
 
 use crate::app::controllers::detail::fetch_selection_permissions;
 use crate::app::events::{fire_action, fire_action_with};
-use crate::app::overlays::confirm::{ask_confirm, Confirm};
-use crate::app::overlays::delete::{ask_delete, delete_extra, DeleteRequest};
-use crate::app::overlays::toast::{show_toast, show_toast_detail, Toast, ToastKind};
 use crate::app::resource_actions::{ActionSurface, ResourceActionModel, ResourceMenuAction};
 use crate::app::state::{
     open_logs, Catalog, CtxMenu, DebugImage, DetailTarget, DrainOpen, DrainTarget, ExecOpen,
@@ -15,6 +12,9 @@ use crate::app::state::{
     TalosFeatures, TreeOpen,
 };
 use crate::app::table_logic::resolve_current_action_targets;
+use crate::app::ui::confirm::{ask_confirm, Confirm};
+use crate::app::ui::delete::{ask_delete, delete_extra, DeleteRequest};
+use crate::app::ui::toast::{show_toast, show_toast_detail, Toast, ToastKind};
 use crate::app::util::clipboard::copy_to_clipboard;
 use crate::app::util::format::parse_key;
 use crate::app::util::predicate::KindKind;
@@ -41,7 +41,7 @@ pub(crate) fn ContextMenu() -> impl IntoView {
     let table_targets = expect_context::<TableTargets>().0;
     let toast = expect_context::<RwSignal<Option<Toast>>>();
 
-    let (snapshot, closing, do_close) = super::use_option_overlay(ctx);
+    let (snapshot, closing, do_close) = crate::app::ui::use_option_overlay(ctx);
     let action_permissions = LocalResource::new(move || {
         let targets = snapshot
             .get()

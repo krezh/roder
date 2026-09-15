@@ -15,7 +15,7 @@ use super::RowDetail;
 #[component]
 pub(crate) fn PodModal() -> impl IntoView {
     let pod_modal = expect_context::<PodModalTarget>().0;
-    let (snapshot, closing, do_close) = crate::app::overlays::use_option_overlay(pod_modal);
+    let (snapshot, closing, do_close) = crate::app::ui::use_option_overlay(pod_modal);
 
     view! {
         {move || snapshot.get().map(|target| {

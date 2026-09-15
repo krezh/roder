@@ -13,7 +13,7 @@ pub(crate) fn NsPalette() -> impl IntoView {
     let query = RwSignal::new(String::new());
     let cursor = RwSignal::new(0usize);
     let input_ref = NodeRef::<leptos::html::Input>::new();
-    let (visible, closing, do_close) = super::use_bool_overlay(open);
+    let (visible, closing, do_close) = crate::app::ui::use_bool_overlay(open);
 
     Effect::new(move |_| {
         if open.get() {

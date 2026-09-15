@@ -22,7 +22,7 @@ fn access_colgroup() -> impl IntoView {
 pub(crate) fn AccessReview() -> impl IntoView {
     let open = expect_context::<AccessReviewOpen>().0;
     let selected_ns = expect_context::<RwSignal<Option<String>>>();
-    let (visible, closing, do_close) = super::use_bool_overlay(open);
+    let (visible, closing, do_close) = crate::app::ui::use_bool_overlay(open);
     let dialog_ref = NodeRef::<leptos::html::Div>::new();
     crate::app::ui::use_dialog_focus(dialog_ref);
 

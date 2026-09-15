@@ -1,10 +1,10 @@
 use leptos::prelude::*;
 use roder_core::DeletePropagation;
 
-use crate::app::ui::{
-    use_option_overlay, use_sweep_preview, Confirm, DeleteRequest, SweepOption, SweepPreview,
-    SweepRequest,
-};
+use crate::app::ui::confirm::Confirm;
+use crate::app::ui::delete::DeleteRequest;
+use crate::app::ui::sweep::{use_sweep_preview, SweepOption, SweepPreview, SweepRequest};
+use crate::app::ui::use_option_overlay;
 
 #[component]
 pub(crate) fn MobileConfirmDialog() -> impl IntoView {

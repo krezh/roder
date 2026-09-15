@@ -29,9 +29,10 @@ use crate::app::state::{
     ShortcutsOpen, SortKey, TreeOpen,
 };
 use crate::app::table_logic::{bulk_targets, move_cursor};
-use crate::app::ui::{
-    ask_delete, delete_extra, show_toast, Confirm, DeleteRequest, SweepRequest, Toast, ToastKind,
-};
+use crate::app::ui::confirm::Confirm;
+use crate::app::ui::delete::{ask_delete, delete_extra, DeleteRequest};
+use crate::app::ui::sweep::SweepRequest;
+use crate::app::ui::toast::{show_toast, Toast, ToastKind};
 use crate::app::util::clipboard::copy_to_clipboard;
 use crate::app::util::format::parse_key;
 use crate::app::util::predicate::KindKind;

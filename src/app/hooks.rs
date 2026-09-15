@@ -9,8 +9,8 @@ use leptos::task::spawn_local;
 use roder_core::WatchEvent;
 
 use crate::app::events::{apply_event, RowMap, UidSet};
-use crate::app::overlays::toast::Toast;
 use crate::app::state::{ConnectionState, Connectivity, SortKey};
+use crate::app::ui::toast::Toast;
 use crate::data;
 
 /// How long an SSE burst accumulates before it's drained in one reactive flush.

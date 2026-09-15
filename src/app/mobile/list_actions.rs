@@ -2,9 +2,8 @@ use leptos::prelude::*;
 use roder_core::ActionSummary;
 
 use crate::app::state::OnlyProblems;
-use crate::app::ui::{
-    ask_sweep, run_sweep, show_toast, show_toast_detail, SweepRequest, Toast, ToastKind,
-};
+use crate::app::ui::sweep::{ask_sweep, run_sweep, SweepRequest};
+use crate::app::ui::toast::{show_toast, show_toast_detail, Toast, ToastKind};
 use crate::data;
 
 #[component]

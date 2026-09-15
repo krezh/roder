@@ -45,7 +45,7 @@ pub(crate) fn CommandPalette() -> impl IntoView {
     let query = RwSignal::new(String::new());
     let cursor = RwSignal::new(0usize);
     let input_ref = NodeRef::<leptos::html::Input>::new();
-    let (visible, closing, do_close) = super::use_bool_overlay(palette_open);
+    let (visible, closing, do_close) = crate::app::ui::use_bool_overlay(palette_open);
 
     Effect::new(move |_| {
         if palette_open.get() {

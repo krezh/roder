@@ -19,7 +19,7 @@ use crate::app::state::{
     Tick, WorkspaceConf,
 };
 use crate::app::table_logic;
-use crate::app::ui::{show_toast_detail, Toast, ToastKind};
+use crate::app::ui::toast::{show_toast_detail, Toast, ToastKind};
 use crate::app::util::predicate::KindKind;
 use crate::data;
 

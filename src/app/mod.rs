@@ -10,8 +10,12 @@ use roder_core::ResourceKind;
 
 use crate::data;
 
+use contexts::{provide_table_handles, Alerts, Overlays};
+
 mod alert_utils;
+mod columns;
 mod components;
+mod contexts;
 mod controllers;
 mod detail;
 mod events;
@@ -58,14 +62,11 @@ use overlays::toast::ToastView;
 use overlays::tree::ResourceTreeWindow;
 use overlays::AlertsPanel;
 use state::{
-    AccessReviewOpen, AlertSilencesEnabled, AlertsData, AlertsLastRefresh, AlertsOpen, Catalog,
-    ConnectionState, Connectivity, CtxMenu, DebugImage, DrainOpen, DrainTarget, ExecOpen,
-    ExecTarget, FileBrowserOpen, FilterFocus, LogPods, LogTarget, NavOpen, NavigationRestored,
-    NsPaletteOpen, OnlyProblems, PaletteOpen, PinnedKinds, PodModalTarget, ResourceFilter,
-    ShortcutsOpen, TableRows, TableSelected, TableTargets, TalosFeatures, Tick, TreeOpen,
+    Catalog, ConnectionState, Connectivity, CtxMenu, DebugImage, FilterFocus, LogPods, LogTarget,
+    NavOpen, NavigationRestored, OnlyProblems, PinnedKinds, ResourceFilter, TalosFeatures, Tick,
     WorkspaceConf, WorkspaceConfig,
 };
-use ui::{Confirm, DeleteRequest, SweepRequest, Toast};
+use ui::toast::Toast;
 use views::resource::ResourceView;
 use views::search::SearchResultsView;
 use views::workspace::WorkspaceView;
@@ -237,71 +238,51 @@ pub fn App() -> impl IntoView {
             });
         }
     });
-    let palette_open = RwSignal::new(false);
-    let ns_palette_open = RwSignal::new(false);
-    provide_context(NsPaletteOpen(ns_palette_open));
+    let overlays = Overlays::new();
+    overlays.provide();
+    let alerts = Alerts::new();
+    alerts.provide();
+    // Rebound as locals: the feature-probe and poll effects below read these
+    // directly rather than going back through context. Those effects are
+    // wasm-only, so on the SSR build nothing reads them and the bindings would
+    // be dead.
+    #[cfg(target_arch = "wasm32")]
+    let Alerts {
+        data: alerts_data,
+        last_refresh: alerts_last_refresh,
+        silences_enabled: alert_silences_enabled,
+        enabled: alertmanager_enabled,
+    } = alerts;
+    provide_table_handles();
+
     let catalog = RwSignal::new(Vec::<ResourceKind>::new());
     let ctx_menu = RwSignal::new(None::<CtxMenu>);
     let requested_tab = RwSignal::new(None::<DetailTab>);
     let tick = RwSignal::new(0u32);
     let only_problems = RwSignal::new(false);
-    let confirm = RwSignal::new(None::<Confirm>);
-    let delete_confirm = RwSignal::new(None::<DeleteRequest>);
-    let sweep = RwSignal::new(None::<SweepRequest>);
     let toast = RwSignal::new(None::<Toast>);
-    let pod_modal = RwSignal::new(None::<DetailTarget>);
-    provide_context(PodModalTarget(pod_modal));
-    let exec_open = RwSignal::new(None::<ExecTarget>);
-    provide_context(ExecOpen(exec_open));
-    let file_browser_open = RwSignal::new(None::<DetailTarget>);
-    provide_context(FileBrowserOpen(file_browser_open));
     let talos_features = RwSignal::new(roder_core::TalosCapabilities::default());
-    provide_context(TalosFeatures(talos_features));
-    let tree_open = RwSignal::new(None::<DetailTarget>);
-    provide_context(TreeOpen(tree_open));
-    let drain_open = RwSignal::new(None::<DrainTarget>);
-    provide_context(DrainOpen(drain_open));
-    let shortcuts_open = RwSignal::new(false);
-    provide_context(ShortcutsOpen(shortcuts_open));
-    let alerts_open = RwSignal::new(false);
-    provide_context(AlertsOpen(alerts_open));
-    let access_review_open = RwSignal::new(false);
-    provide_context(AccessReviewOpen(access_review_open));
-    let alerts_data: RwSignal<Option<Vec<roder_core::FiringAlert>>> = RwSignal::new(None);
-    provide_context(AlertsData(alerts_data));
-    let alerts_last_refresh = RwSignal::new(None::<f64>);
-    provide_context(AlertsLastRefresh(alerts_last_refresh));
-    let alert_silences_enabled = RwSignal::new(false);
-    provide_context(AlertSilencesEnabled(alert_silences_enabled));
-    let _alertmanager_enabled = RwSignal::new(false);
     let debug_image = RwSignal::new(String::new());
-    provide_context(DebugImage(debug_image));
     let resource_filter = RwSignal::new(String::new());
+    let log_pods = RwSignal::new(Vec::<LogTarget>::new());
+    let connection = RwSignal::new(Connectivity::Checking);
+    provide_context(TalosFeatures(talos_features));
+    provide_context(DebugImage(debug_image));
     provide_context(ResourceFilter(resource_filter));
     provide_context(FilterFocus(RwSignal::new(0u32)));
-    let log_pods = RwSignal::new(Vec::<LogTarget>::new());
     provide_context(LogPods(log_pods));
     provide_context(Tick(tick));
     provide_context(OnlyProblems(only_problems));
-    provide_context(confirm);
-    provide_context(delete_confirm);
-    provide_context(sweep);
     provide_context(toast);
     provide_context(selected_kind);
     provide_context(selected_ns);
     provide_context(detail);
     provide_context(NavOpen(nav_open));
     provide_context(NavigationRestored(restored));
-    provide_context(PaletteOpen(palette_open));
     provide_context(Catalog(catalog));
     provide_context(ctx_menu);
     provide_context(requested_tab);
-    let connection = RwSignal::new(Connectivity::Checking);
     provide_context(ConnectionState(connection));
-    provide_context(TableSelected(StoredValue::new(None)));
-    provide_context(TableRows(StoredValue::new(None)));
-    provide_context(TableTargets(StoredValue::new(None)));
-    provide_context(keys::TableKeys(StoredValue::new(None)));
 
     // Pinned kinds: owned here rather than in `Sidebar` so the key dispatcher
     // can resolve Ctrl+1..Ctrl+0 against the same set the sidebar renders.
@@ -321,22 +302,10 @@ pub fn App() -> impl IntoView {
     });
 
     // One layer decision, read by the single keydown listener, so a keypress
-    // can't be acted on by the table while a palette has the focus.
+    // can't be acted on by the table while a palette has the focus. The overlay
+    // set is `Overlays`' business, so a new overlay can't be forgotten here.
     let active_layer = Signal::derive(move || {
-        if palette_open.get()
-            || ns_palette_open.get()
-            || shortcuts_open.get()
-            || alerts_open.get()
-            || access_review_open.get()
-            || exec_open.with(Option::is_some)
-            || file_browser_open.with(Option::is_some)
-            || tree_open.with(Option::is_some)
-            || drain_open.with(Option::is_some)
-            || pod_modal.with(Option::is_some)
-            || confirm.with(Option::is_some)
-            || delete_confirm.with(Option::is_some)
-            || sweep.with(Option::is_some)
-        {
+        if overlays.any_open() {
             keys::Layer::Overlay
         } else if ctx_menu.with(Option::is_some) {
             keys::Layer::Menu
@@ -529,7 +498,7 @@ pub fn App() -> impl IntoView {
             .as_ref()
             .and_then(|v| v.get("alertmanager").and_then(|v| v.as_bool()))
             .unwrap_or(false);
-        _alertmanager_enabled.set(enabled);
+        alertmanager_enabled.set(enabled);
         alert_silences_enabled.set(
             features
                 .as_ref()
@@ -573,7 +542,7 @@ pub fn App() -> impl IntoView {
             move || {
                 #[cfg(target_arch = "wasm32")]
                 leptos::task::spawn_local(async move {
-                    if !_alertmanager_enabled.get_untracked() {
+                    if !alertmanager_enabled.get_untracked() {
                         return;
                     }
                     if let Ok(list) = fetch_alerts(false).await {

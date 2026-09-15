@@ -78,8 +78,12 @@ pub(crate) fn FlashTd<F>(
     #[prop(optional)] class: &'static str,
     #[prop(optional, into)] color: Option<Signal<&'static str>>,
     #[prop(optional)] no_flash: bool,
-    #[prop(optional, into)] flash: Option<Signal<bool>>,
-    #[prop(optional)] trend: Option<Signal<Trend>>,
+    /// An explicit change highlight. `None` lets this cell notice its own value
+    /// change instead — taken as `Option` so `DataCell` can forward whichever
+    /// its caller has without branching.
+    #[prop(optional_no_strip)]
+    flash: Option<Signal<bool>>,
+    #[prop(optional_no_strip)] trend: Option<Signal<Trend>>,
     /// Render `color` as a solid-fill status pill around the value instead of
     /// coloring the cell text directly (used for Phase/Status/Ready columns).
     #[prop(optional)]

@@ -16,7 +16,7 @@ use crate::app::state::{
     TableSelected, Tick,
 };
 use crate::app::table_logic;
-use crate::app::ui::Toast;
+use crate::app::ui::toast::Toast;
 use crate::app::util::predicate::KindKind;
 use crate::data;
 

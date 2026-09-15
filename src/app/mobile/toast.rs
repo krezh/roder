@@ -1,6 +1,7 @@
 use leptos::prelude::*;
 
-use crate::app::ui::{use_option_overlay, Toast, ToastKind, TOAST_MS};
+use crate::app::ui::toast::{Toast, ToastKind, TOAST_MS};
+use crate::app::ui::use_option_overlay;
 
 #[component]
 pub(crate) fn MobileToastView() -> impl IntoView {

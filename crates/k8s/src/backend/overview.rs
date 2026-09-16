@@ -494,36 +494,6 @@ fn summarize_kopiur_signals(policies: &[DynamicObject]) -> Vec<ControllerHealthS
         let name = policy.metadata.name.clone().unwrap_or_default();
         let data = &policy.data;
         let suspended = resource_suspended("kopiur.home-operations.com", "SnapshotPolicy", data);
-        let last_snapshot = data
-            .pointer("/status/lastSuccessfulSnapshot")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_string);
-        let has_last_snapshot = last_snapshot.is_some();
-        signals.push(ControllerHealthSignal {
-            label: format!("{name} backup freshness"),
-            value: last_snapshot
-                .as_ref()
-                .map(|_| "Recovery point age")
-                .unwrap_or("No recovery point")
-                .to_string(),
-            status: if suspended {
-                RowStatus::Warn
-            } else if has_last_snapshot {
-                RowStatus::Ok
-            } else {
-                RowStatus::Pending
-            },
-            timestamp: last_snapshot,
-            message: if suspended {
-                "Policy is suspended; backup age will keep increasing"
-            } else if has_last_snapshot {
-                "Latest successful recovery point"
-            } else {
-                "No successful snapshot recorded"
-            }
-            .to_string(),
-        });
-
         if !verification_enabled(data) {
             continue;
         }
@@ -878,7 +848,7 @@ mod tests {
     }
 
     #[test]
-    fn kopiur_signals_surface_backup_age_and_verification_failure() {
+    fn kopiur_signals_surface_verification_failure() {
         let policies = [object(
             "kopiur.home-operations.com",
             "SnapshotPolicy",
@@ -903,15 +873,9 @@ mod tests {
 
         let signals = summarize_kopiur_signals(&policies);
 
-        assert_eq!(signals.len(), 2);
-        assert_eq!(signals[0].label, "database backup freshness");
-        assert_eq!(signals[0].status, RowStatus::Ok);
-        assert_eq!(
-            signals[0].timestamp.as_deref(),
-            Some("2026-09-14T02:00:00Z")
-        );
-        assert_eq!(signals[1].label, "database verification");
-        assert_eq!(signals[1].status, RowStatus::Warn);
+        assert_eq!(signals.len(), 1);
+        assert_eq!(signals[0].label, "database verification");
+        assert_eq!(signals[0].status, RowStatus::Warn);
     }
 
     #[test]

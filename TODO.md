@@ -71,7 +71,6 @@
 
 - Add operator-specific detail summaries for Flux, External Secrets, Kopiur, Tuppr, and Rook
 - Make referenced resources in detail summaries clickable
-- Reuse category icons and colors in mobile resource trees
 - Define per-GVK mobile summary columns
 
 ## Testing

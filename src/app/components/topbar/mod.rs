@@ -25,7 +25,7 @@ use identity::Identity;
 use leptos::prelude::*;
 
 use crate::app::components::dropdown::{Dropdown, DropdownItem};
-use crate::app::components::icons::ShiftIcon;
+use crate::app::icons::ShiftIcon;
 use crate::app::state::{NavOpen, OnlyProblems, PaletteOpen};
 
 #[component]

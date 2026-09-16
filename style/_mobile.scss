@@ -2668,16 +2668,12 @@
   strong, small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   small { color: var(--muted); font-size: 0.7rem; }
   &:disabled { opacity: 0.55; }
-}
-.mobile-shell .mobile-relationship-kind {
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  background: color-mix(in srgb, var(--accent) 18%, var(--panel));
-  color: var(--accent);
-  font-weight: 800;
+
+  > .tree-icon {
+    width: 30px;
+    height: 30px;
+    font-size: 13px;
+  }
 }
 .mobile-shell .mobile-relationship-toggle {
   width: 48px;

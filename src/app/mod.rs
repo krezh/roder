@@ -23,6 +23,7 @@ mod events;
 mod failure_watch;
 mod files;
 mod hooks;
+mod icons;
 mod jobs;
 mod keys;
 mod log_stream;

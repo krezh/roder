@@ -1,7 +1,6 @@
 pub(crate) mod bulk_bar;
 pub(crate) mod cell;
 pub(crate) mod dropdown;
-pub(crate) mod icons;
 pub(crate) mod kind_table;
 pub(crate) mod sidebar;
 pub(crate) mod table;

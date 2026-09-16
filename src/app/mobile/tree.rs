@@ -3,6 +3,7 @@
 use leptos::prelude::*;
 use roder_core::ResourceTreeNode;
 
+use crate::app::icons::TreeKindIcon;
 use crate::app::state::{DetailTarget, TreeOpen};
 use crate::data;
 
@@ -66,6 +67,8 @@ fn MobileRelationshipNode(node: ResourceTreeNode, root: bool) -> AnyView {
     let key = node.key.clone();
     let namespace = node.namespace.clone();
     let name = node.name.clone();
+    let category = node.category.clone();
+    let kind = node.kind.clone();
     let relation = node.relation.map(|relation| relation.label());
     let subtitle = match (relation, node.namespace.as_deref()) {
         (Some(relation), Some(namespace)) => format!("{relation} · {} · {namespace}", node.kind),
@@ -85,7 +88,7 @@ fn MobileRelationshipNode(node: ResourceTreeNode, root: bool) -> AnyView {
                         tree_open.set(None);
                     }
                 }>
-                    <span class="mobile-relationship-kind">{node.kind.chars().next().unwrap_or('?')}</span>
+                    <TreeKindIcon category=category kind=kind small=false />
                     <span><strong>{node.name}</strong><small>{subtitle}</small></span>
                 </button>
                 {has_children.then(|| view! {

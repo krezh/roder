@@ -3,8 +3,8 @@
 use leptos::prelude::*;
 use roder_core::{ResourceTreeNode, RowStatus};
 
-use crate::app::components::icons::TreeKindIcon;
 use crate::app::detail::RowDetail;
+use crate::app::icons::TreeKindIcon;
 use crate::app::state::{DetailTarget, TreeOpen};
 use crate::app::ui::use_option_overlay;
 use crate::data;

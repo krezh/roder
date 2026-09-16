@@ -3,7 +3,7 @@
 use leptos::prelude::*;
 use roder_core::ResourceKind;
 
-use crate::app::components::icons::TreeKindIcon;
+use crate::app::icons::TreeKindIcon;
 use crate::app::state::{Catalog, PaletteOpen};
 use crate::app::ui::{filter_kinds, highlight};
 

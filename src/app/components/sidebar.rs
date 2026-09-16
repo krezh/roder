@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use leptos::prelude::*;
 use roder_core::{Category, ResourceKind};
 
-use crate::app::components::icons::CtrlIcon;
+use crate::app::icons::CtrlIcon;
 use crate::app::state::{
     pinned_in_catalog_order, Catalog, NavOpen, PaneConfig, PinnedKinds, WorkspaceConf,
 };

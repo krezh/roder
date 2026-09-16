@@ -72,22 +72,25 @@ fn mobile_dashboard_sections(
         <section class=format!("mobile-cluster-health {health}")><i></i><div><small>{health_summary.label}</small><strong>{health_summary.summary}</strong></div>
             <dl><div><dt>"Nodes"</dt><dd>{health_summary.ready_nodes}"/"{nodes.len()}</dd></div><div><dt>"Pods"</dt><dd>{overview.pod_running}"/"{overview.pod_total}</dd></div><div><dt>"Warnings"</dt><dd>{warnings.len()}</dd></div></dl>
         </section>
-        <section class="mobile-dashboard-grid">
-            <article class="mobile-dashboard-card mobile-capacity"><header><div><small>"Capacity"</small><h2>"Cluster usage"</h2></div><span>{nodes.len()}" nodes"</span></header>
-                {mobile_usage_meter("CPU", cpu, cpu_available)}{mobile_usage_meter("Memory", memory, memory_available)}
-                {(!cpu_available || !memory_available).then(|| view! { <p>"Some usage metrics are unavailable. Capacity values are still shown per node."</p> })}
-            </article>
-            <button class="mobile-dashboard-card mobile-inventory" on:click=move |_| select_kind(catalog, selected, "Pod")><small>"Workloads"</small><h2>"Pods"</h2><strong>{overview.pod_total}</strong>
-                <span><i class="ok"></i>{overview.pod_running}" running"</span><span><i class="pending"></i>{overview.pod_pending}" pending"</span><span><i class="error"></i>{overview.pod_failed}" failed"</span>
-            </button>
-            <button class="mobile-dashboard-card mobile-inventory" on:click=move |_| select_kind(catalog, selected, "Namespace")><small>"Inventory"</small><h2>"Namespaces"</h2><strong>{overview.namespace_count}</strong><span>"Kubernetes "{overview.kubernetes_version}</span></button>
+        <section class="mobile-dashboard-section" aria-labelledby="mobile-infrastructure-heading">
+            <header><small id="mobile-infrastructure-heading">"Infrastructure"</small></header>
+            <section class="mobile-dashboard-grid">
+                <article class="mobile-dashboard-card mobile-capacity"><header><div><small>"Capacity"</small><h2>"Cluster usage"</h2></div><span>{nodes.len()}" nodes"</span></header>
+                    {mobile_usage_meter("CPU", cpu, cpu_available)}{mobile_usage_meter("Memory", memory, memory_available)}
+                    {(!cpu_available || !memory_available).then(|| view! { <p>"Some usage metrics are unavailable. Capacity values are still shown per node."</p> })}
+                </article>
+                <button class="mobile-dashboard-card mobile-inventory" on:click=move |_| select_kind(catalog, selected, "Pod")><small>"Workloads"</small><h2>"Pods"</h2><strong>{overview.pod_total}</strong>
+                    <span><i class="ok"></i>{overview.pod_running}" running"</span><span><i class="pending"></i>{overview.pod_pending}" pending"</span><span><i class="error"></i>{overview.pod_failed}" failed"</span>
+                </button>
+                <button class="mobile-dashboard-card mobile-inventory" on:click=move |_| select_kind(catalog, selected, "Namespace")><small>"Inventory"</small><h2>"Namespaces"</h2><strong>{overview.namespace_count}</strong><span>"Kubernetes "{overview.kubernetes_version}</span></button>
+            </section>
+            <section class="mobile-dashboard-section"><header><h2>"Nodes"</h2><span>{health_summary.ready_nodes}" of "{nodes.len()}" ready"</span></header>
+                <div class="mobile-node-list">{nodes.into_iter().map(|node| mobile_node(node, node_kind.clone(), selected, detail)).collect_view()}</div>
+            </section>
         </section>
         {controller_groups.into_iter().map(|group| {
             mobile_controller_group(group.name, group.resources, group.signals, catalog, selected, tick)
         }).collect_view()}
-        <section class="mobile-dashboard-section"><header><div><small>"Infrastructure"</small><h2>"Nodes"</h2></div><span>{health_summary.ready_nodes}" of "{nodes.len()}" ready"</span></header>
-            <div class="mobile-node-list">{nodes.into_iter().map(|node| mobile_node(node, node_kind.clone(), selected, detail)).collect_view()}</div>
-        </section>
         {(!warnings.is_empty()).then(|| view! { <section class="mobile-dashboard-section mobile-warning-section"><header><div><small>"Event stream"</small><h2>"Recent warnings"</h2></div>
             <button on:click=move |_| select_kind(catalog, selected, "Event")>"View all"</button></header>
             <div>{warnings.into_iter().map(|warning| mobile_warning(warning, event_kind.clone(), detail, tick)).collect_view()}</div>

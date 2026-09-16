@@ -120,50 +120,67 @@ fn dashboard_view(
             </div>
         </section>
 
-        <div class="dashboard-grid">
-            <section class="card dashboard-card capacity-card">
-                <div class="card-heading">
-                    <div>
-                        <span class="card-kicker">"Capacity"</span>
-                        <h2>"Cluster usage"</h2>
+        <section class="dashboard-section" aria-labelledby="infrastructure-heading">
+            <div class="section-heading">
+                <span id="infrastructure-heading" class="section-kicker">"Infrastructure"</span>
+            </div>
+            <div class="dashboard-grid">
+                <section class="card dashboard-card capacity-card">
+                    <div class="card-heading">
+                        <div>
+                            <span class="card-kicker">"Capacity"</span>
+                            <h2>"Cluster usage"</h2>
+                        </div>
+                        <span class="card-meta">{nodes.len()} " nodes"</span>
                     </div>
-                    <span class="card-meta">{nodes.len()} " nodes"</span>
+                    {usage_meter("CPU", cpu_p, cpu_available)}
+                    {usage_meter("Memory", mem_p, mem_available)}
+                    {(!cpu_available || !mem_available).then(|| view! {
+                        <p class="metrics-note">"Some usage metrics are unavailable. Capacity values are still shown per node."</p>
+                    })}
+                </section>
+
+                <button type="button" class="card dashboard-card inventory-card"
+                    on:click=move |_| select_kind(catalog, selected_kind, "Pod")>
+                    <div class="card-heading">
+                        <div>
+                            <span class="card-kicker">"Workloads"</span>
+                            <h2>"Pods"</h2>
+                        </div>
+                    </div>
+                    <strong class="inventory-total">{o.pod_total}</strong>
+                    <div class="inventory-breakdown">
+                        <span class="ok"><i></i>{o.pod_running}" running"</span>
+                        <span class="pending"><i></i>{o.pod_pending}" pending"</span>
+                        <span class="error"><i></i>{o.pod_failed}" failed"</span>
+                    </div>
+                </button>
+
+                <button type="button" class="card dashboard-card inventory-card"
+                    on:click=move |_| select_kind(catalog, selected_kind, "Namespace")>
+                    <div class="card-heading">
+                        <div>
+                            <span class="card-kicker">"Inventory"</span>
+                            <h2>"Namespaces"</h2>
+                        </div>
+                    </div>
+                    <strong class="inventory-total">{o.namespace_count}</strong>
+                    <p class="inventory-caption">"Across Kubernetes " {o.kubernetes_version}</p>
+                </button>
+            </div>
+
+            <section class="dashboard-section" aria-labelledby="nodes-heading">
+                <div class="section-heading">
+                    <h2 id="nodes-heading">"Nodes"</h2>
+                    <span class="section-caption">{health.ready_nodes}" of "{nodes.len()}" ready"</span>
                 </div>
-                {usage_meter("CPU", cpu_p, cpu_available)}
-                {usage_meter("Memory", mem_p, mem_available)}
-                {(!cpu_available || !mem_available).then(|| view! {
-                    <p class="metrics-note">"Some usage metrics are unavailable. Capacity values are still shown per node."</p>
-                })}
+                <div class="nodes">
+                    {nodes.into_iter().map(|node| {
+                        node_card(node, node_kind.clone(), selected_kind, detail)
+                    }).collect_view()}
+                </div>
             </section>
-
-            <button type="button" class="card dashboard-card inventory-card"
-                on:click=move |_| select_kind(catalog, selected_kind, "Pod")>
-                <div class="card-heading">
-                    <div>
-                        <span class="card-kicker">"Workloads"</span>
-                        <h2>"Pods"</h2>
-                    </div>
-                </div>
-                <strong class="inventory-total">{o.pod_total}</strong>
-                <div class="inventory-breakdown">
-                    <span class="ok"><i></i>{o.pod_running}" running"</span>
-                    <span class="pending"><i></i>{o.pod_pending}" pending"</span>
-                    <span class="error"><i></i>{o.pod_failed}" failed"</span>
-                </div>
-            </button>
-
-            <button type="button" class="card dashboard-card inventory-card"
-                on:click=move |_| select_kind(catalog, selected_kind, "Namespace")>
-                <div class="card-heading">
-                    <div>
-                        <span class="card-kicker">"Inventory"</span>
-                        <h2>"Namespaces"</h2>
-                    </div>
-                </div>
-                <strong class="inventory-total">{o.namespace_count}</strong>
-                <p class="inventory-caption">"Across Kubernetes " {o.kubernetes_version}</p>
-            </button>
-        </div>
+        </section>
 
         {(!controller_groups.is_empty()).then(|| view! {
                 <section class="dashboard-section" aria-labelledby="controllers-heading">
@@ -187,21 +204,6 @@ fn dashboard_view(
                     </div>
                 </section>
             })}
-
-        <section class="dashboard-section" aria-labelledby="nodes-heading">
-            <div class="section-heading">
-                <div>
-                    <span class="section-kicker">"Infrastructure"</span>
-                    <h2 id="nodes-heading">"Nodes"</h2>
-                </div>
-                <span class="section-caption">{health.ready_nodes}" of "{nodes.len()}" ready"</span>
-            </div>
-            <div class="nodes">
-                {nodes.into_iter().map(|node| {
-                    node_card(node, node_kind.clone(), selected_kind, detail)
-                }).collect_view()}
-            </div>
-        </section>
 
         {(!warnings.is_empty()).then(|| view! {
             <section class="dashboard-section warnings-section" aria-labelledby="warnings-heading">

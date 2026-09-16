@@ -1,6 +1,7 @@
 use leptos::prelude::*;
 use roder_core::ResourceKind;
 
+use crate::app::icons::TreeKindIcon;
 use crate::app::state::{Catalog, NsPaletteOpen, PaletteOpen};
 use crate::app::ui::{filter_kinds, filter_namespaces, highlight, use_bool_overlay};
 
@@ -94,8 +95,10 @@ pub(crate) fn MobileCommandPalette() -> impl IntoView {
                 {move || matches.get().into_iter().enumerate().map(|(index, (kind, positions))| {
                     let display = kind.kind.clone();
                     let group = if kind.group.is_empty() { "core".to_string() } else { kind.group.clone() };
+                    let icon_category = kind.category.clone();
+                    let icon_kind = kind.kind.clone();
                     view! { <li><button class="mobile-picker-item" class:active=move || cursor.get() == index on:click=move |_| choose(kind.clone())>
-                        <span class="mobile-kind-glyph">{display.chars().next().unwrap_or('?')}</span>
+                        <TreeKindIcon category=Some(icon_category) kind=icon_kind small=false />
                         <span><strong>{highlighted(display, positions)}</strong><small>{group}</small></span><em>{kind.category.label()}</em>
                     </button></li> }
                 }).collect_view()}

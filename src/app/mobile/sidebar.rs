@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use leptos::prelude::*;
 use roder_core::{Category, ResourceKind};
 
+use crate::app::icons::TreeKindIcon;
 use crate::app::state::{Catalog, NavOpen, PaneConfig, WorkspaceConf};
 use crate::data;
 
@@ -28,6 +29,9 @@ fn MobileKindLink(
     let workspace_active_key = workspace_key.clone();
     let pin_key = key.clone();
     let pin_active_key = pin_key.clone();
+    let icon_category = kind.category.clone();
+    let icon_kind = kind.kind.clone();
+    let label = kind.kind;
     view! {
         <li class="mobile-kind-row">
             <button type="button" class="mobile-kind-link"
@@ -40,7 +44,10 @@ fn MobileKindLink(
                         data::storage_set("roder.nav", &serde_json::json!({ "kind": select_kind.key }).to_string());
                         if let Some(window) = web_sys::window() { let _ = window.location().set_href("/"); }
                     }
-                }>{kind.kind}</button>
+                }>
+                <TreeKindIcon category=Some(icon_category) kind=icon_kind small=false />
+                <span>{label}</span>
+            </button>
             <button type="button" class="mobile-kind-action" aria-label="Toggle workspace"
                 class:active=move || workspace.with(|value| value.panes.iter().any(|pane| pane.kind_key == workspace_active_key))
                 on:click=move |_| workspace.update(|value| {

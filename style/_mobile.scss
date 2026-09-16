@@ -2187,14 +2187,27 @@
   }
 
   .mobile-kind-link {
+    display: flex;
     min-width: 0;
+    align-items: center;
+    gap: 0.6rem;
     padding: 0 0.65rem;
-    overflow: hidden;
     text-align: left;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 
     &.active { color: var(--accent); font-weight: 700; }
+
+    > .tree-icon {
+      width: 28px;
+      height: 28px;
+      font-size: 12px;
+    }
+
+    > span:last-child {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
   }
 
   .mobile-kind-action {
@@ -2535,10 +2548,13 @@
   .mobile-picker-list { flex: 1; overflow-y: auto; margin: 0; padding: 0 0.7rem 2rem; list-style: none; }
   .mobile-picker-item { display: grid; width: 100%; min-height: 58px; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 0.65rem; padding: 0.4rem; border: 0; border-bottom: 1px solid var(--mobile-hairline); background: transparent; color: var(--fg); text-align: left; }
   .mobile-picker-item.active { background: color-mix(in srgb, var(--accent) 9%, transparent); }
-  .mobile-picker-item small { display: block; color: var(--muted); }
+  .mobile-picker-item > span:nth-child(2) { min-width: 0; }
+  .mobile-picker-item strong,
+  .mobile-picker-item small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-picker-item small { color: var(--muted); }
   .mobile-picker-item em { color: var(--muted); font-size: 0.7rem; font-style: normal; }
   .mobile-picker-item mark { background: transparent; color: var(--accent); }
-  .mobile-kind-glyph,
+  .mobile-picker-item .tree-icon { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 10px; font-size: 14px; }
   .mobile-ns-glyph { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 10px; background: color-mix(in srgb, var(--accent) 12%, var(--mobile-surface-raised)); color: var(--accent); }
   .mobile-ns-glyph::after { content: "NS"; font-size: 0.6rem; }
   .mobile-picker-empty,

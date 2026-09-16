@@ -13,7 +13,6 @@
 - Add Gateway API Route to parent Gateway and backend Service relationships
 - Add Envoy policy to target Route, Gateway, or Service relationships
 - Add ReferenceGrant relationships for permitted cross-namespace references
-- Add HPA to scale target relationships
 - Add NetworkPolicy to selected Pod relationships
 
 ## CloudNativePG

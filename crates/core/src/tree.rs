@@ -10,6 +10,7 @@ use crate::row::RowStatus;
 pub enum ResourceTreeRelation {
     Owner,
     OwnedResource,
+    ScaleTarget,
     SelectedPod,
     EndpointSlice,
     FluxInventory,
@@ -26,6 +27,7 @@ impl ResourceTreeRelation {
         match self {
             Self::Owner => "Owner",
             Self::OwnedResource => "Owned resource",
+            Self::ScaleTarget => "Scale target",
             Self::SelectedPod => "Selected pod",
             Self::EndpointSlice => "Endpoint slice",
             Self::FluxInventory => "Flux inventory",

@@ -73,6 +73,7 @@ enum RelationshipProvider {
     FluxHelmRelease,
     OwnedChildren,
     WorkloadPods,
+    HpaScaleTarget,
     ServiceTargets,
     EndpointSliceService,
     CnpgCluster,
@@ -170,6 +171,12 @@ const RELATIONSHIP_PROVIDERS: &[ProviderRegistration] = &[
         version: Some("v1"),
         kind: "Job",
         provider: RelationshipProvider::WorkloadPods,
+    },
+    ProviderRegistration {
+        group: "autoscaling",
+        version: None,
+        kind: "HorizontalPodAutoscaler",
+        provider: RelationshipProvider::HpaScaleTarget,
     },
     ProviderRegistration {
         group: "",
@@ -510,6 +517,18 @@ impl Backend {
                             Err(error) => errors.push(format!("selected pods: {error}")),
                         },
                         Err(error) => errors.push(error),
+                    }
+                }
+                RelationshipProvider::HpaScaleTarget => {
+                    if let Some((group, version, kind, name)) = hpa_scale_target(data) {
+                        children.push(self.resolve_resource(
+                            group,
+                            version,
+                            kind,
+                            name,
+                            resource.namespace.clone(),
+                            Some(ResourceTreeRelation::ScaleTarget),
+                        ));
                     }
                 }
                 RelationshipProvider::ServiceTargets => {
@@ -1125,6 +1144,7 @@ fn reference_is_expandable(
 ) -> bool {
     relation == Some(ResourceTreeRelation::Owner)
         || is_flux_owner(group, kind)
+        || (relation == Some(ResourceTreeRelation::ScaleTarget) && is_expandable_kind(group, kind))
         || (relation == Some(ResourceTreeRelation::ReferencedResource)
             && group.is_empty()
             && matches!(kind, "PersistentVolumeClaim" | "PersistentVolume"))
@@ -1269,6 +1289,23 @@ fn endpoint_slice_service_name(data: &Value) -> Option<&str> {
         .filter(|name| !name.is_empty())
 }
 
+fn hpa_scale_target(data: &Value) -> Option<(String, String, String, String)> {
+    let api_version = data
+        .pointer("/spec/scaleTargetRef/apiVersion")?
+        .as_str()
+        .filter(|value| !value.is_empty())?;
+    let kind = data
+        .pointer("/spec/scaleTargetRef/kind")?
+        .as_str()
+        .filter(|value| !value.is_empty())?;
+    let name = data
+        .pointer("/spec/scaleTargetRef/name")?
+        .as_str()
+        .filter(|value| !value.is_empty())?;
+    let (group, version) = split_api_version(api_version);
+    Some((group, version, kind.into(), name.into()))
+}
+
 fn deduplicate_and_sort(resources: &mut Vec<ResourceRef>) {
     resources.sort_by(|left, right| {
         left.relation
@@ -1362,6 +1399,51 @@ mod tests {
             })),
             None
         );
+    }
+
+    #[test]
+    fn hpa_registry_and_reference_resolve_the_scale_target() {
+        let mut resource = ResourceRef {
+            group: "autoscaling".into(),
+            version: "v2".into(),
+            kind: "HorizontalPodAutoscaler".into(),
+            name: "api".into(),
+            namespace: Some("app".into()),
+            key: None,
+            category: Some(Category::Workloads),
+            relation: None,
+            expandable: true,
+        };
+        assert_eq!(
+            relationship_providers(&resource).collect::<Vec<_>>(),
+            [RelationshipProvider::HpaScaleTarget]
+        );
+        resource.version = "v1".into();
+        assert_eq!(relationship_providers(&resource).count(), 1);
+
+        assert_eq!(
+            hpa_scale_target(&json!({"spec": {"scaleTargetRef": {
+                "apiVersion": "apps/v1",
+                "kind": "Deployment",
+                "name": "api"
+            }}})),
+            Some((
+                "apps".into(),
+                "v1".into(),
+                "Deployment".into(),
+                "api".into()
+            ))
+        );
+        assert!(hpa_scale_target(&json!({"spec": {"scaleTargetRef": {
+            "apiVersion": "apps/v1",
+            "kind": "Deployment"
+        }}}))
+        .is_none());
+        assert!(reference_is_expandable(
+            Some(ResourceTreeRelation::ScaleTarget),
+            "apps",
+            "Deployment"
+        ));
     }
 
     #[test]

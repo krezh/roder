@@ -2,9 +2,11 @@ use leptos::prelude::*;
 use roder_core::ObjectDetail;
 use roder_core::ResourceAction;
 
+use crate::app::cnpg::CnpgBackupsTab;
 use crate::app::controllers::detail::{
-    certificate_summary, cnpg_cluster_summary, format_bytes, short_fingerprint, talos_action,
-    talos_config_diff, talos_node, use_metrics, DetailTab, ResourceDetailController,
+    certificate_summary, cnpg_backup_summary, cnpg_cluster_summary, cnpg_scheduled_backup_summary,
+    format_bytes, short_fingerprint, talos_action, talos_config_diff, talos_node, use_metrics,
+    DetailTab, ResourceDetailController,
 };
 use crate::app::jobs::CronJobJobs;
 use crate::app::log_stream::{extract_timestamp, use_log_stream};
@@ -69,7 +71,7 @@ pub(crate) fn MobileRowDetail(
         }
     });
 
-    let (_, _, kind) = parse_key(&target.key);
+    let (group, _, kind) = parse_key(&target.key);
     let available = AvailableActions::for_targets(std::slice::from_ref(&target));
     let is_workload = available.supports(ResourceAction::Restart);
     let is_scalable = available.supports(ResourceAction::Scale);
@@ -84,6 +86,9 @@ pub(crate) fn MobileRowDetail(
     let is_job = available.supports(ResourceAction::JobRerun);
     let is_cronjob = available.supports(ResourceAction::CronJobTrigger);
     let is_snapshot_policy = available.supports(ResourceAction::KopiurSnapshotNow);
+    let can_create_cnpg_backup = available.supports(ResourceAction::CnpgBackup);
+    let is_cnpg_schedule = available.supports(ResourceAction::CnpgSuspend);
+    let is_cnpg_cluster = group == "postgresql.cnpg.io" && kind == "Cluster";
     let has_pods = is_workload || is_job;
     let features = expect_context::<TalosFeatures>().0;
     let talos_available = move || is_node && features.get().read;
@@ -140,6 +145,8 @@ pub(crate) fn MobileRowDetail(
                 {is_cronjob.then(|| view! { <Show when=move || allows(ResourceAction::CronJobTrigger)><button class="act" on:click=move |_| run("cronjob-trigger", serde_json::json!({}))>"Trigger"</button></Show> })}
                 {is_job.then(|| view! { <Show when=move || allows(ResourceAction::JobRerun) && job_terminal()><button class="act" on:click=move |_| run("job-rerun", serde_json::json!({}))>"Re-run"</button></Show> })}
                 {is_snapshot_policy.then(|| view! { <Show when=move || allows(ResourceAction::KopiurSnapshotNow)><button class="act" on:click=move |_| run("kopiur-snapshot-now", serde_json::json!({}))>"Snapshot Now"</button></Show> })}
+                {can_create_cnpg_backup.then(|| view! { <Show when=move || allows(ResourceAction::CnpgBackup)><button class="act" on:click=move |_| ask_confirm(confirm, "Create an immediate Backup for this Cluster? Completion is reported separately.", "Create backup", move || run("cnpg-backup", serde_json::json!({})))>"Create backup"</button></Show> })}
+                {is_cnpg_schedule.then(|| view! { <Show when=move || allows(ResourceAction::CnpgSuspend)><button class="act" on:click=move |_| if suspended() { run("cnpg-resume", serde_json::json!({})) } else { run("cnpg-suspend", serde_json::json!({})) }>{move || if suspended() { "Resume" } else { "Suspend" }}</button></Show> })}
                 {is_pod.then(|| view! { <Show when=move || allows(ResourceAction::Exec)><button class="act" on:click=move |_| {
                     let target = target_value.get_value();
                     exec.set(Some(ExecTarget { namespace: target.namespace.unwrap_or_default(), pod: target.name, container: None, pending: false, node_shell: false, image: String::new() }));
@@ -154,6 +161,10 @@ pub(crate) fn MobileRowDetail(
                 {move || (is_pod || talos_available()).then(|| view! { <MobileTab tab current=DetailTab::Logs label="Logs" /> })}
                 {move || talos_available().then(|| view! { <MobileTab tab current=DetailTab::Talos label="Talos" /> })}
                 {is_cronjob.then(|| view! { <MobileTab tab current=DetailTab::Jobs label="Jobs" /> })}
+                {is_cnpg_cluster.then(|| view! {
+                    <MobileTab tab current=DetailTab::Instances label="Instances" />
+                    <MobileTab tab current=DetailTab::Backups label="Backups" />
+                })}
             </nav>
             <Suspense fallback=|| view! { <div class="pad muted">"Loading..."</div> }>
                 {move || controller.object.get().flatten().map(|detail| {
@@ -169,6 +180,8 @@ pub(crate) fn MobileRowDetail(
                         DetailTab::Metrics => view! { <MobileMetrics namespace=target.namespace.unwrap_or_default() name=target.name /> }.into_any(),
                         DetailTab::Talos => view! { <MobileTalos node=target.name key=target.key actions=features.get().actions config=features.get().config /> }.into_any(),
                         DetailTab::Jobs => view! { <CronJobJobs target=target_value.get_value() /> }.into_any(),
+                        DetailTab::Instances => view! { <div class="rd-pods"><MobilePodsTab namespace=target.namespace.unwrap_or_default() selector=format!("cnpg.io/cluster={}", target.name) cnpg_instances_only=true /></div> }.into_any(),
+                        DetailTab::Backups => view! { <CnpgBackupsTab namespace=target.namespace.unwrap_or_default() cluster=target.name /> }.into_any(),
                     };
                     view! { {pods} {content} }
                 })}
@@ -252,6 +265,8 @@ fn MobileInfo(detail: ObjectDetail, kind: String) -> impl IntoView {
     let is_event = kind == "Event";
     let certificate = (kind == "Certificate").then(|| certificate_summary(object));
     let cnpg_cluster = cnpg_cluster_summary(object);
+    let cnpg_backup = cnpg_backup_summary(object);
+    let cnpg_schedule = cnpg_scheduled_backup_summary(object);
     let created = json_str(object, &["metadata", "creationTimestamp"]);
     let owners = owner_refs(object);
     let mut status = status_scalars(object);
@@ -274,6 +289,22 @@ fn MobileInfo(detail: ObjectDetail, kind: String) -> impl IntoView {
                     | "currentPrimary"
                     | "targetPrimary"
                     | "image"
+            )
+        });
+    }
+    if cnpg_backup.is_some() {
+        status.retain(|(key, _)| {
+            !matches!(
+                key.as_str(),
+                "phase" | "method" | "startedAt" | "stoppedAt" | "error"
+            )
+        });
+    }
+    if cnpg_schedule.is_some() {
+        status.retain(|(key, _)| {
+            !matches!(
+                key.as_str(),
+                "lastScheduleTime" | "nextScheduleTime" | "error"
             )
         });
     }
@@ -417,6 +448,31 @@ fn MobileInfo(detail: ObjectDetail, kind: String) -> impl IntoView {
                 </div>
             </section>
         })}
+        {cnpg_backup.map(|backup| view! {
+            <section class="cnpg-detail-summary" aria-label="CloudNativePG backup status">
+                <div class="cnpg-detail-heading"><span>"Backup status"</span><strong class=backup.phase_class>{backup.phase}</strong></div>
+                {(!backup.error.is_empty()).then(|| view! { <div class="cnpg-detail-reason">{backup.error}</div> })}
+                <div class="detail-stats">
+                    <div class="detail-stat"><span class="detail-stat-label">"Cluster"</span><span class="detail-stat-value">{backup.cluster}</span></div>
+                    <div class="detail-stat"><span class="detail-stat-label">"Method"</span><span class="detail-stat-value">{backup.method}</span></div>
+                    <div class="detail-stat"><span class="detail-stat-label">"Started"</span><span class="detail-stat-value" data-tip=backup.started_raw>{backup.started}</span></div>
+                    <div class="detail-stat"><span class="detail-stat-label">"Completed"</span><span class="detail-stat-value" data-tip=backup.completed_raw>{backup.completed}</span></div>
+                </div>
+            </section>
+        })}
+        {cnpg_schedule.map(|schedule| view! {
+            <section class="cnpg-detail-summary" aria-label="CloudNativePG backup schedule status">
+                <div class="cnpg-detail-heading"><span>"Backup schedule"</span><strong class=schedule.state_class>{schedule.state}</strong></div>
+                {(!schedule.error.is_empty()).then(|| view! { <div class="cnpg-detail-reason">{schedule.error}</div> })}
+                <div class="detail-stats">
+                    <div class="detail-stat"><span class="detail-stat-label">"Cluster"</span><span class="detail-stat-value">{schedule.cluster}</span></div>
+                    <div class="detail-stat"><span class="detail-stat-label">"Schedule"</span><span class="detail-stat-value">{schedule.schedule}</span></div>
+                    <div class="detail-stat"><span class="detail-stat-label">"Method"</span><span class="detail-stat-value">{schedule.method}</span></div>
+                    <div class="detail-stat"><span class="detail-stat-label">"Last run"</span><span class="detail-stat-value" data-tip=schedule.last_schedule_raw>{schedule.last_schedule}</span></div>
+                    <div class="detail-stat"><span class="detail-stat-label">"Next run"</span><span class="detail-stat-value" data-tip=schedule.next_schedule_raw>{schedule.next_schedule}</span></div>
+                </div>
+            </section>
+        })}
 
         <section class="info-overview" aria-label="Resource overview">
             <div class="info-overview-heading">
@@ -525,7 +581,7 @@ fn MobileInfo(detail: ObjectDetail, kind: String) -> impl IntoView {
         })}
 
         {(related_event_count > 0).then(|| view! {
-            <details class="info-section events-section" open=warning_count > 0>
+            <details class="info-section events-section" open={warning_count > 0}>
                 <summary><span>"Recent events"</span><small>{
                     let events = counted(related_event_count, "event", "events");
                     if warning_count > 0 { format!("{events} · {}", counted(warning_count, "warning", "warnings")) } else { events }

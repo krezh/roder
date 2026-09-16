@@ -19,6 +19,23 @@ pub fn humanize_age(_created: &Option<String>) -> String {
     String::new()
 }
 
+#[cfg(target_arch = "wasm32")]
+pub fn timestamp_is_past(timestamp: &str) -> bool {
+    let parsed = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(timestamp)).get_time();
+    !parsed.is_nan() && parsed < js_sys::Date::now()
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "ssr"))]
+pub fn timestamp_is_past(timestamp: &str) -> bool {
+    time::OffsetDateTime::parse(timestamp, &time::format_description::well_known::Rfc3339)
+        .is_ok_and(|parsed| parsed < time::OffsetDateTime::now_utc())
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "ssr")))]
+pub fn timestamp_is_past(_timestamp: &str) -> bool {
+    false
+}
+
 /// Cheap structural check for an RFC3339 timestamp: `YYYY-MM-DDTHH:MM:SS…`.
 /// Used to decide whether a cell value should be live-humanized on the tick
 /// (mirroring the dedicated `Age` column) rather than rendered as a static
@@ -62,4 +79,16 @@ pub fn humanize_cell(s: &str) -> String {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn humanize_cell(s: &str) -> String {
     s.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timestamp_comparison_rejects_invalid_values_and_distinguishes_past_and_future() {
+        assert!(timestamp_is_past("2000-01-01T00:00:00Z"));
+        assert!(!timestamp_is_past("2999-01-01T00:00:00Z"));
+        assert!(!timestamp_is_past("unknown"));
+    }
 }

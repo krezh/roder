@@ -101,16 +101,24 @@ pub(crate) fn use_sse_subscription(
     removing: UidSet,
     columns: Option<RwSignal<Vec<String>>>,
     url: impl Fn() -> Option<String> + 'static,
-) {
+) -> RwSignal<Option<String>> {
     // A counter that the error handler bumps to re-trigger the subscription Effect.
     let reconnect: RwSignal<u32> = RwSignal::new(0);
     let conn = use_context::<ConnectionState>().map(|c| c.0);
     let toast = expect_context::<RwSignal<Option<Toast>>>();
+    let watch_error = RwSignal::new(None::<String>);
 
     // Coalesce the per-event SSE deltas of a burst (notably a metrics scrape's one
     // `Applied` per pod) into a single reactive flush — see [`Coalescer`].
     let coalescer = Coalescer::new(move |batch: Vec<WatchEvent>| {
         for ev in batch {
+            match &ev {
+                WatchEvent::Snapshot { .. } => watch_error.set(None),
+                WatchEvent::Forbidden { message } | WatchEvent::Error { message } => {
+                    watch_error.set(Some(message.clone()));
+                }
+                _ => {}
+            }
             apply_event(rows, entering, removing, columns, toast, ev);
         }
     });
@@ -145,6 +153,7 @@ pub(crate) fn use_sse_subscription(
             },
         )
     });
+    watch_error
 }
 
 /// Per-table long-press ("hold") state, shared by every row.

@@ -144,7 +144,8 @@ impl Backend {
             | ResourceAction::FluxSuspend
             | ResourceAction::FluxForce
             | ResourceAction::FluxReset
-            | ResourceAction::ExternalSecretsRefresh => target("patch").await,
+            | ResourceAction::ExternalSecretsRefresh
+            | ResourceAction::CnpgSuspend => target("patch").await,
             ResourceAction::Drain => {
                 let pods = ResourceKind::make_key("", "v1", "Pod");
                 let pod_action = if drain_options.is_some_and(|options| options.disable_eviction) {
@@ -205,6 +206,14 @@ impl Backend {
             ResourceAction::KopiurSnapshotNow => {
                 let snapshot = ResourceKind::make_key(&kind.group, &kind.version, "Snapshot");
                 self.can("create", &snapshot, ns).await
+            }
+            ResourceAction::CnpgBackup => {
+                let backup = ResourceKind::make_key(&kind.group, &kind.version, "Backup");
+                let schedule =
+                    ResourceKind::make_key(&kind.group, &kind.version, "ScheduledBackup");
+                target("get").await
+                    && self.can("create", &backup, ns).await
+                    && self.can("list", &schedule, ns).await
             }
         }
     }
@@ -319,6 +328,7 @@ impl Backend {
                 ResourceAction::CronJobTrigger,
                 ResourceAction::JobRerun,
                 ResourceAction::KopiurSnapshotNow,
+                ResourceAction::CnpgBackup,
             ];
             let mut applicable = false;
             let mut dependencies_allowed = true;

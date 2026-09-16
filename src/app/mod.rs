@@ -13,6 +13,7 @@ use crate::data;
 use contexts::{provide_table_handles, Alerts, Overlays};
 
 mod alert_utils;
+mod cnpg;
 mod columns;
 mod components;
 mod contexts;

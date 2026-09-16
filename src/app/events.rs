@@ -40,6 +40,9 @@ fn action_label(action: &str) -> &str {
         "cronjob-trigger" => "Triggered",
         "job-rerun" => "Re-ran",
         "kopiur-snapshot-now" => "Snapshot triggered",
+        "cnpg-backup" => "Backup requested for",
+        "cnpg-suspend" => "Suspended",
+        "cnpg-resume" => "Resumed",
         "talos-etcd-defrag" => "Defragmented etcd on",
         other => other,
     }

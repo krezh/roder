@@ -4,7 +4,9 @@
 use leptos::prelude::*;
 use roder_core::ObjectDetail;
 
-use crate::app::controllers::detail::{certificate_summary, cnpg_cluster_summary};
+use crate::app::controllers::detail::{
+    certificate_summary, cnpg_backup_summary, cnpg_cluster_summary, cnpg_scheduled_backup_summary,
+};
 use crate::app::util::format::{camel_label, condition_class, counted};
 use crate::app::util::json::{
     conditions, container_envs, container_images, data_entries, json_map, json_str, owner_refs,
@@ -18,6 +20,8 @@ pub(crate) fn info_view(d: ObjectDetail, kind: String) -> impl IntoView {
     let is_event = kind == "Event";
     let certificate = (kind == "Certificate").then(|| certificate_summary(o));
     let cnpg_cluster = cnpg_cluster_summary(o);
+    let cnpg_backup = cnpg_backup_summary(o);
+    let cnpg_schedule = cnpg_scheduled_backup_summary(o);
     let created = json_str(o, &["metadata", "creationTimestamp"]);
     let labels = json_map(o, &["metadata", "labels"]);
     let annotations = json_map(o, &["metadata", "annotations"]);
@@ -43,6 +47,22 @@ pub(crate) fn info_view(d: ObjectDetail, kind: String) -> impl IntoView {
                     | "currentPrimary"
                     | "targetPrimary"
                     | "image"
+            )
+        });
+    }
+    if cnpg_backup.is_some() {
+        stats.retain(|(key, _)| {
+            !matches!(
+                key.as_str(),
+                "phase" | "method" | "startedAt" | "stoppedAt" | "error"
+            )
+        });
+    }
+    if cnpg_schedule.is_some() {
+        stats.retain(|(key, _)| {
+            !matches!(
+                key.as_str(),
+                "lastScheduleTime" | "nextScheduleTime" | "error"
             )
         });
     }
@@ -248,6 +268,70 @@ pub(crate) fn info_view(d: ObjectDetail, kind: String) -> impl IntoView {
                 </section>
             })}
 
+            {cnpg_backup.map(|backup| view! {
+                <section class="cnpg-detail-summary" aria-label="CloudNativePG backup status">
+                    <div class="cnpg-detail-heading">
+                        <span>"Backup status"</span>
+                        <strong class=backup.phase_class>{backup.phase}</strong>
+                    </div>
+                    {(!backup.error.is_empty()).then(|| view! {
+                        <div class="cnpg-detail-reason">{backup.error}</div>
+                    })}
+                    <div class="detail-stats">
+                        <div class="detail-stat">
+                            <span class="detail-stat-label">"Cluster"</span>
+                            <span class="detail-stat-value">{backup.cluster}</span>
+                        </div>
+                        <div class="detail-stat">
+                            <span class="detail-stat-label">"Method"</span>
+                            <span class="detail-stat-value">{backup.method}</span>
+                        </div>
+                        <div class="detail-stat">
+                            <span class="detail-stat-label">"Started"</span>
+                            <span class="detail-stat-value" data-tip=backup.started_raw>{backup.started}</span>
+                        </div>
+                        <div class="detail-stat">
+                            <span class="detail-stat-label">"Completed"</span>
+                            <span class="detail-stat-value" data-tip=backup.completed_raw>{backup.completed}</span>
+                        </div>
+                    </div>
+                </section>
+            })}
+
+            {cnpg_schedule.map(|schedule| view! {
+                <section class="cnpg-detail-summary" aria-label="CloudNativePG backup schedule status">
+                    <div class="cnpg-detail-heading">
+                        <span>"Backup schedule"</span>
+                        <strong class=schedule.state_class>{schedule.state}</strong>
+                    </div>
+                    {(!schedule.error.is_empty()).then(|| view! {
+                        <div class="cnpg-detail-reason">{schedule.error}</div>
+                    })}
+                    <div class="detail-stats">
+                        <div class="detail-stat">
+                            <span class="detail-stat-label">"Cluster"</span>
+                            <span class="detail-stat-value">{schedule.cluster}</span>
+                        </div>
+                        <div class="detail-stat">
+                            <span class="detail-stat-label">"Schedule"</span>
+                            <span class="detail-stat-value">{schedule.schedule}</span>
+                        </div>
+                        <div class="detail-stat">
+                            <span class="detail-stat-label">"Method"</span>
+                            <span class="detail-stat-value">{schedule.method}</span>
+                        </div>
+                        <div class="detail-stat">
+                            <span class="detail-stat-label">"Last run"</span>
+                            <span class="detail-stat-value" data-tip=schedule.last_schedule_raw>{schedule.last_schedule}</span>
+                        </div>
+                        <div class="detail-stat">
+                            <span class="detail-stat-label">"Next run"</span>
+                            <span class="detail-stat-value" data-tip=schedule.next_schedule_raw>{schedule.next_schedule}</span>
+                        </div>
+                    </div>
+                </section>
+            })}
+
             <section class="info-overview" aria-label="Resource overview">
                 <div class="info-overview-heading">
                     <h3>{kind}</h3>
@@ -387,7 +471,7 @@ pub(crate) fn info_view(d: ObjectDetail, kind: String) -> impl IntoView {
             })}
 
             {(related_event_count > 0).then(|| view! {
-                <details class="info-section events-section" open=warning_count > 0>
+                <details class="info-section events-section" open={warning_count > 0}>
                     <summary>
                         <span>"Recent events"</span>
                         <small>{

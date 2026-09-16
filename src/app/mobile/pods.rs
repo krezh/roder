@@ -19,14 +19,18 @@ pub(crate) fn MobilePodModal() -> impl IntoView {
 }
 
 #[component]
-pub(crate) fn MobilePodsTab(namespace: String, selector: String) -> impl IntoView {
-    let watch = use_pod_watch(namespace, selector);
+pub(crate) fn MobilePodsTab(
+    namespace: String,
+    selector: String,
+    #[prop(optional)] cnpg_instances_only: bool,
+) -> impl IntoView {
+    let watch = use_pod_watch(namespace, selector, cnpg_instances_only);
     let modal = expect_context::<PodModalTarget>().0;
     let context = expect_context::<RwSignal<Option<CtxMenu>>>();
     let tick = expect_context::<Tick>().0;
     view! { <div class="rd-body"><div class="pods-mini"><For each=move || watch.shown_uids.get() key=Clone::clone let:uid>{
         let row_uid = uid.clone(); let row = Memo::new(move |_| watch.rows.with(|rows| rows.get(&row_uid).cloned())); let status = move || dot_class(row.get().map(|row| row.status).unwrap_or(RowStatus::Unknown));
         let target = move || row.get_untracked().zip(watch.pod_kind.get_untracked()).map(|(row, kind)| DetailTarget { key: kind.key, namespace: row.namespace, name: row.name });
-        view! { <article class="pm-row" on:click=move |_| if let Some(target) = target() { modal.set(Some(target)) } on:contextmenu=move |event| { event.prevent_default(); if let (Some(target), Some(row)) = (target(), row.get_untracked()) { context.set(Some(CtxMenu { x: event.client_x(), y: event.client_y(), target, node: None, #[cfg(target_arch = "wasm32")] focus_first: false, uid: row.uid })) } }><span class=move || format!("pm-dot {}", status())></span><span class="pm-name">{move || row.get().map(|row| row.name).unwrap_or_default()}</span><span class="pm-phase" style=move || format!("color:var(--{})", status())>{move || row.get().and_then(|row| row.cells.get(1).cloned()).unwrap_or_default()}</span><span class="pm-num">{move || row.get().and_then(|row| row.cells.first().cloned()).unwrap_or_default()}</span><span class="pm-num">{move || { tick.get(); data::humanize_cell(&row.get().and_then(|row| row.cells.get(2).cloned()).unwrap_or_default()) }}</span><span class="pm-num">{move || { tick.get(); data::humanize_age(&row.get().and_then(|row| row.created)) }}</span></article> }
-    }</For></div>{move || watch.shown_uids.get().is_empty().then(|| view! { <div class="muted pad">"No pods match this selector."</div> })}</div> }
+        view! { <article class="pm-row" on:click=move |_| if let Some(target) = target() { modal.set(Some(target)) } on:contextmenu=move |event| { event.prevent_default(); if let (Some(target), Some(row)) = (target(), row.get_untracked()) { context.set(Some(CtxMenu { x: event.client_x(), y: event.client_y(), target, node: None, #[cfg(target_arch = "wasm32")] focus_first: false, uid: row.uid })) } }><span class=move || format!("pm-dot {}", status())></span><span class="pm-name">{move || row.get().map(|row| row.name).unwrap_or_default()}</span><span class="pm-phase" style=move || format!("color:var(--{})", status())>{move || row.get().and_then(|row| row.cells.get(2).cloned()).unwrap_or_default()}</span><span class="pm-num">{move || row.get().and_then(|row| row.cells.get(1).cloned()).unwrap_or_default()}</span><span class="pm-num">{move || format!("⟳ {}", row.get().and_then(|row| row.cells.get(3).cloned()).unwrap_or_default())}</span><span class="pm-num">{move || { tick.get(); data::humanize_age(&row.get().and_then(|row| row.created)) }}</span></article> }
+    }</For></div>{move || (watch.shown_uids.get().is_empty() && watch.error.get().is_none()).then(|| view! { <div class="muted pad">"No pods match this selector."</div> })}{move || watch.error.get().map(|error| view! { <div class="act-err pad">{format!("Unable to watch pods: {error}")}</div> })}</div> }
 }

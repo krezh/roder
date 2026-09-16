@@ -125,6 +125,8 @@ fn MobileKindList(
     let bulk_eso = kk.supports(ResourceAction::ExternalSecretsRefresh);
     let bulk_cronjob = kk.supports(ResourceAction::CronJobTrigger);
     let bulk_kopiur = kk.supports(ResourceAction::KopiurSnapshotNow);
+    let bulk_cnpg_backup = kk.supports(ResourceAction::CnpgBackup);
+    let bulk_cnpg_suspend = kk.supports(ResourceAction::CnpgSuspend);
     let key_sv = StoredValue::new(kind.key.clone());
     let title_sv = StoredValue::new(kind.kind.clone());
 
@@ -144,6 +146,17 @@ fn MobileKindList(
                         .is_some_and(|row| matches!(row.status, RowStatus::Ok | RowStatus::Error))
                 })
             })
+    });
+    let suspend_state = Signal::derive(move || {
+        let selected = selected.get();
+        rows.with(|rows| {
+            let mut states = selected
+                .iter()
+                .filter_map(|uid| rows.get(uid))
+                .map(|row| row.suspended);
+            let first = states.next()?;
+            states.all(|state| state == first).then_some(first)
+        })
     });
     let select_mode = use_select_mode(selected);
 
@@ -248,7 +261,10 @@ fn MobileKindList(
                 bulk_certificate=bulk_certificate
                 bulk_eso=bulk_eso
                 bulk_cronjob=bulk_cronjob
-                bulk_kopiur=bulk_kopiur />
+                bulk_kopiur=bulk_kopiur
+                bulk_cnpg_backup=bulk_cnpg_backup
+                bulk_cnpg_suspend=bulk_cnpg_suspend
+                suspend_state=suspend_state />
         </div>
     }
 }

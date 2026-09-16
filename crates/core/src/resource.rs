@@ -56,10 +56,12 @@ pub enum ResourceAction {
     CronJobTrigger,
     JobRerun,
     KopiurSnapshotNow,
+    CnpgBackup,
+    CnpgSuspend,
 }
 
 impl ResourceAction {
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 22] = [
         Self::Delete,
         Self::Evict,
         Self::Scale,
@@ -80,6 +82,8 @@ impl ResourceAction {
         Self::CronJobTrigger,
         Self::JobRerun,
         Self::KopiurSnapshotNow,
+        Self::CnpgBackup,
+        Self::CnpgSuspend,
     ];
 
     pub const fn api_name(self) -> &'static str {
@@ -104,6 +108,8 @@ impl ResourceAction {
             Self::CronJobTrigger => "cronjob-trigger",
             Self::JobRerun => "job-rerun",
             Self::KopiurSnapshotNow => "kopiur-snapshot-now",
+            Self::CnpgBackup => "cnpg-backup",
+            Self::CnpgSuspend => "cnpg-suspend",
         }
     }
 
@@ -125,6 +131,8 @@ impl ResourceAction {
             "cronjob-trigger" => Self::CronJobTrigger,
             "job-rerun" => Self::JobRerun,
             "kopiur-snapshot-now" => Self::KopiurSnapshotNow,
+            "cnpg-backup" => Self::CnpgBackup,
+            "cnpg-suspend" | "cnpg-resume" => Self::CnpgSuspend,
             _ => return None,
         })
     }

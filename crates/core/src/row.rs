@@ -52,7 +52,7 @@ pub struct ResourceRow {
     /// pod CPU/MEM cells carry `Up`/`Down` when usage changed vs the prior sample.
     pub trends: Vec<Trend>,
     pub status: RowStatus,
-    /// Whether a Flux resource has reconciliation suspended.
+    /// Whether an operator-managed resource has reconciliation or scheduling suspended.
     #[serde(default)]
     pub suspended: bool,
     /// `metadata.labels` from the Kubernetes object.

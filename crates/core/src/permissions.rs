@@ -73,6 +73,12 @@ impl ResourceCapabilities {
         if group == "kopiur.home-operations.com" && kind == "SnapshotPolicy" {
             bits |= bit(ResourceAction::KopiurSnapshotNow);
         }
+        if group == "postgresql.cnpg.io" && kind == "Cluster" {
+            bits |= bit(ResourceAction::CnpgBackup);
+        }
+        if group == "postgresql.cnpg.io" && kind == "ScheduledBackup" {
+            bits |= bit(ResourceAction::CnpgSuspend);
+        }
 
         Self(bits)
     }

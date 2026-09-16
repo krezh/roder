@@ -38,11 +38,15 @@ pub(crate) fn PodModal() -> impl IntoView {
 /// Live list of the pods owned by the expanded workload (matched by its selector,
 /// via a label-filtered watch). Clicking a pod opens it in a centered modal.
 #[component]
-pub(crate) fn PodsTab(namespace: String, selector: String) -> impl IntoView {
+pub(crate) fn PodsTab(
+    namespace: String,
+    selector: String,
+    #[prop(optional)] cnpg_instances_only: bool,
+) -> impl IntoView {
     let pod_modal = expect_context::<PodModalTarget>().0;
     let ctx = expect_context::<RwSignal<Option<CtxMenu>>>();
     let tick = expect_context::<Tick>().0;
-    let watch = use_pod_watch(namespace, selector);
+    let watch = use_pod_watch(namespace, selector, cnpg_instances_only);
     let rows = watch.rows;
     let shown_uids = watch.shown_uids;
     let pod_kind = watch.pod_kind;
@@ -79,20 +83,12 @@ pub(crate) fn PodsTab(namespace: String, selector: String) -> impl IntoView {
                                 <span class=move || format!("pm-dot {}", st())></span>
                                 <span class="pm-name">{move || row.get().map(|r| r.name).unwrap_or_default()}</span>
                                 <span class="pm-phase" style=move || format!("color:var(--{})", st())>
-                                    {move || row.get().and_then(|r| r.cells.get(1).cloned()).unwrap_or_default()}
+                                    {move || row.get().and_then(|r| r.cells.get(2).cloned()).unwrap_or_default()}
                                 </span>
-                                <span class="pm-num">{move || row.get().and_then(|r| r.cells.first().cloned()).unwrap_or_default()}</span>
+                                <span class="pm-num">{move || row.get().and_then(|r| r.cells.get(1).cloned()).unwrap_or_default()}</span>
                                 <span class="pm-num">{move || {
-                                    let v = row.get().and_then(|r| r.cells.get(2).cloned()).unwrap_or_default();
-                                    if data::cell_needs_tick(&v) {
-                                        tick.get();
-                                    }
-                                    let v = data::humanize_cell(&v);
-                                    if let Some((main, hint)) = v.split_once('\x1f') {
-                                        format!("⟳ {main} ({hint})")
-                                    } else {
-                                        format!("⟳ {v}")
-                                    }
+                                    let restarts = row.get().and_then(|r| r.cells.get(3).cloned()).unwrap_or_default();
+                                    format!("⟳ {restarts}")
                                 }}</span>
                                 <span class="pm-num">{move || { tick.get(); data::humanize_age(&row.get().and_then(|r| r.created)) }}</span>
                             </div>
@@ -100,7 +96,8 @@ pub(crate) fn PodsTab(namespace: String, selector: String) -> impl IntoView {
                     }
                 </For>
             </div>
-            {move || shown_uids.get().is_empty().then(|| view! { <div class="muted pad">"No pods match this selector."</div> })}
+            {move || (shown_uids.get().is_empty() && watch.error.get().is_none()).then(|| view! { <div class="muted pad">"No pods match this selector."</div> })}
+            {move || watch.error.get().map(|error| view! { <div class="act-err pad">{format!("Unable to watch pods: {error}")}</div> })}
         </div>
     }
 }

@@ -5,6 +5,7 @@ pub(crate) mod info;
 pub(crate) mod metrics;
 pub(crate) mod pods;
 
+use crate::app::cnpg::CnpgBackupsTab;
 use crate::app::components::table::ScaleControl;
 use crate::app::controllers::detail::{
     format_bytes, short_fingerprint, talos_action, talos_config_diff, talos_node, DetailTab as Tab,
@@ -112,7 +113,7 @@ pub(crate) fn RowDetail(
     let tab = RwSignal::new(initial_tab);
     let yaml_editing = RwSignal::new(false);
 
-    let (_, _, kind) = parse_key(&target.key);
+    let (group, _, kind) = parse_key(&target.key);
     let available = AvailableActions::for_targets(std::slice::from_ref(&target));
     let is_workload = available.supports(ResourceAction::Restart);
     let is_scalable = available.supports(ResourceAction::Scale);
@@ -133,6 +134,9 @@ pub(crate) fn RowDetail(
     let has_pods = is_workload || is_job;
     let is_cronjob = available.supports(ResourceAction::CronJobTrigger);
     let is_kopiur_snapshot_policy = available.supports(ResourceAction::KopiurSnapshotNow);
+    let can_create_cnpg_backup = available.supports(ResourceAction::CnpgBackup);
+    let is_cnpg_schedule = available.supports(ResourceAction::CnpgSuspend);
+    let is_cnpg_cluster = group == "postgresql.cnpg.io" && kind == "Cluster";
     let ns = target.namespace.clone().unwrap_or_default();
     let pod = target.name.clone();
     let exec_open = expect_context::<ExecOpen>().0;
@@ -263,6 +267,28 @@ pub(crate) fn RowDetail(
                         <button class="act" on:click=move |_| run("kopiur-snapshot-now", serde_json::json!({}))>"Snapshot Now"</button>
                     </Show>
                 })}
+                {can_create_cnpg_backup.then(|| view! {
+                    <Show when=move || allows(ResourceAction::CnpgBackup) fallback=|| ()>
+                        <button class="act" on:click=move |_| {
+                            ask_confirm(
+                                confirm,
+                                "Create an immediate Backup for this Cluster? The request succeeds when the Backup resource is created; completion is reported separately.",
+                                "Create backup",
+                                move || run("cnpg-backup", serde_json::json!({})),
+                            );
+                        }>"Create backup"</button>
+                    </Show>
+                })}
+                {is_cnpg_schedule.then(|| view! {
+                    <Show when=move || allows(ResourceAction::CnpgSuspend) fallback=|| ()>
+                        <Show when=move || !is_suspended() fallback=|| ()>
+                            <button class="act" on:click=move |_| run("cnpg-suspend", serde_json::json!({}))>"Suspend"</button>
+                        </Show>
+                        <Show when=is_suspended fallback=|| ()>
+                            <button class="act" on:click=move |_| run("cnpg-resume", serde_json::json!({}))>"Resume"</button>
+                        </Show>
+                    </Show>
+                })}
                 {is_pod.then(|| {
                     view! { <Show when=move || allows(ResourceAction::Exec)>
                         <button class="act" on:click=move |_| {
@@ -306,6 +332,10 @@ pub(crate) fn RowDetail(
                 {is_cronjob.then(|| view! {
                     <button class="rd-tab" class:active=move || tab.get() == Tab::Jobs on:click=move |_| tab.set(Tab::Jobs)>"Jobs"</button>
                 })}
+                {is_cnpg_cluster.then(|| view! {
+                    <button class="rd-tab" class:active=move || tab.get() == Tab::Instances on:click=move |_| tab.set(Tab::Instances)>"Instances"</button>
+                    <button class="rd-tab" class:active=move || tab.get() == Tab::Backups on:click=move |_| tab.set(Tab::Backups)>"Backups"</button>
+                })}
             </div>
 
             <Suspense fallback=|| view! { <div class="pad muted">"Loading…"</div> }>
@@ -329,6 +359,8 @@ pub(crate) fn RowDetail(
                         Tab::Metrics => view! { <MetricsChart namespace=ns.clone() name=pod.clone() /> }.into_any(),
                         Tab::Talos => view! { <TalosNodeView node=pod.clone() key=tv.get_value().key actions=talos_actions() config=talos_config() /> }.into_any(),
                         Tab::Jobs => view! { <CronJobJobs target=tv.get_value() /> }.into_any(),
+                        Tab::Instances => view! { <PodsTab namespace=ns.clone() selector=format!("cnpg.io/cluster={}", pod) cnpg_instances_only=true /> }.into_any(),
+                        Tab::Backups => view! { <CnpgBackupsTab namespace=ns.clone() cluster=pod.clone() /> }.into_any(),
                         Tab::Yaml => view! {
                             <div class="yaml-pane">
                                 <div class="yaml-head">

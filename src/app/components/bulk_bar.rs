@@ -44,6 +44,8 @@ pub(crate) fn BulkBar(
     let show_eso = kk.supports(ResourceAction::ExternalSecretsRefresh);
     let show_cronjob = kk.supports(ResourceAction::CronJobTrigger);
     let show_kopiur = kk.supports(ResourceAction::KopiurSnapshotNow);
+    let show_cnpg_backup = kk.supports(ResourceAction::CnpgBackup);
+    let show_cnpg_suspend = kk.supports(ResourceAction::CnpgSuspend);
 
     let is_pod_kind = kind.group.is_empty() && kind.kind == "Pod";
     let key_sv = StoredValue::new(kind.key.clone());
@@ -160,6 +162,25 @@ pub(crate) fn BulkBar(
                 })}
                 {show_kopiur.then(|| view! {
                     <button class="act" disabled=move || !allowed(ResourceAction::KopiurSnapshotNow) on:click=move |_| do_bulk("kopiur-snapshot-now")>{move || label(ResourceAction::KopiurSnapshotNow, "Snapshot now")}</button>
+                })}
+                {show_cnpg_backup.then(|| view! {
+                    <button class="act" disabled=move || !allowed(ResourceAction::CnpgBackup) on:click=move |_| {
+                        let n = selected.get_untracked().len();
+                        ask_confirm(
+                            confirm,
+                            format!("Create immediate Backups for {n} Clusters? Completion is reported separately."),
+                            "Create backup",
+                            move || do_bulk("cnpg-backup"),
+                        );
+                    }>{move || label(ResourceAction::CnpgBackup, "Create backup")}</button>
+                })}
+                {show_cnpg_suspend.then(|| view! {
+                    {move || show_suspend().then(|| view! {
+                        <button class="act" disabled=move || !allowed(ResourceAction::CnpgSuspend) on:click=move |_| do_bulk("cnpg-suspend")>{move || label(ResourceAction::CnpgSuspend, "Suspend")}</button>
+                    })}
+                    {move || show_resume().then(|| view! {
+                        <button class="act" disabled=move || !allowed(ResourceAction::CnpgSuspend) on:click=move |_| do_bulk("cnpg-resume")>{move || label(ResourceAction::CnpgSuspend, "Resume")}</button>
+                    })}
                 })}
                 <button class="act danger" disabled=move || !allowed(ResourceAction::Delete) on:click=move |_| {
                     let n = selected.get_untracked().len();

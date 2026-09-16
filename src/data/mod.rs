@@ -14,7 +14,9 @@ mod sse;
 mod storage;
 mod urls;
 
-pub use age::{cell_needs_tick, humanize_age, humanize_cell, looks_like_rfc3339};
+pub use age::{
+    cell_needs_tick, humanize_age, humanize_cell, looks_like_rfc3339, timestamp_is_past,
+};
 pub use http::{fetch_json, post_action, post_json, probe_error};
 pub use sse::{reconnect_delay, subscribe_lines, subscribe_multi, subscribe_with_error, SseHandle};
 pub use storage::{

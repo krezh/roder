@@ -29,6 +29,7 @@ mod alerts;
 mod exec;
 mod files;
 pub use files::normalize_file_path;
+mod cnpg;
 mod flux;
 mod helm_release;
 mod kopiur;

@@ -24,9 +24,6 @@
 - Add FailoverQuorum row projection
 - Add ImageCatalog and ClusterImageCatalog row projections
 - Add Barman ObjectStore row projection and health semantics
-- Add Instances and Backups tabs to Cluster details
-- Add Backup and ScheduledBackup detail summaries
-- Add safe create-backup and schedule suspend/resume actions with semantic RBAC checks
 - Detect under-provisioned Poolers instead of relying only on phase
 
 ## Rook Ceph

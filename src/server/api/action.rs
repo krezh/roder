@@ -268,6 +268,9 @@ pub async fn action(
             "cronjob-trigger" => b.cronjob_trigger(key, ns, name).await,
             "job-rerun" => b.job_rerun(key, ns, name).await,
             "kopiur-snapshot-now" => b.kopiur_snapshot_now(key, ns, name).await,
+            "cnpg-backup" => b.cnpg_backup(key, ns, name).await,
+            "cnpg-suspend" => b.cnpg_suspend(key, ns, name, true).await,
+            "cnpg-resume" => b.cnpg_suspend(key, ns, name, false).await,
             other => {
                 return (StatusCode::BAD_REQUEST, format!("unknown action: {other}"))
                     .into_response()
@@ -367,6 +370,23 @@ mod tests {
         assert!(validate_resource_action("restart", &deployment).is_ok());
         assert!(validate_resource_action("scale", &deployment).is_ok());
         assert!(validate_resource_action("flux-force", &helm_release).is_ok());
+
+        let cluster = kind(
+            "postgresql.cnpg.io/v1/Cluster",
+            "postgresql.cnpg.io",
+            "v1",
+            "Cluster",
+        );
+        let schedule = kind(
+            "postgresql.cnpg.io/v1/ScheduledBackup",
+            "postgresql.cnpg.io",
+            "v1",
+            "ScheduledBackup",
+        );
+        assert!(validate_resource_action("cnpg-backup", &cluster).is_ok());
+        assert!(validate_resource_action("cnpg-suspend", &schedule).is_ok());
+        assert!(validate_resource_action("cnpg-resume", &schedule).is_ok());
+        assert!(validate_resource_action("cnpg-resume", &cluster).is_err());
     }
 
     #[test]

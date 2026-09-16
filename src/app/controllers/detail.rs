@@ -84,6 +84,8 @@ pub(crate) enum DetailTab {
     Metrics,
     Talos,
     Jobs,
+    Instances,
+    Backups,
 }
 
 #[derive(Clone, Default)]
@@ -158,7 +160,14 @@ impl ResourceDetailController {
                     if action == "delete" {
                         on_delete();
                     }
-                    if matches!(action, "flux-suspend" | "flux-resume" | "certificate-renew") {
+                    if matches!(
+                        action,
+                        "flux-suspend"
+                            | "flux-resume"
+                            | "certificate-renew"
+                            | "cnpg-suspend"
+                            | "cnpg-resume"
+                    ) {
                         self.object.refetch();
                     }
                 }
@@ -173,9 +182,14 @@ pub(crate) struct PodWatch {
     pub(crate) rows: RwSignal<HashMap<String, ResourceRow>>,
     pub(crate) shown_uids: Memo<Vec<String>>,
     pub(crate) pod_kind: Memo<Option<roder_core::ResourceKind>>,
+    pub(crate) error: RwSignal<Option<String>>,
 }
 
-pub(crate) fn use_pod_watch(namespace: String, selector: String) -> PodWatch {
+pub(crate) fn use_pod_watch(
+    namespace: String,
+    selector: String,
+    cnpg_instances_only: bool,
+) -> PodWatch {
     let catalog = expect_context::<Catalog>().0;
     let pod_kind = Memo::new(move |_| {
         catalog
@@ -186,7 +200,7 @@ pub(crate) fn use_pod_watch(namespace: String, selector: String) -> PodWatch {
     let rows = RwSignal::new(HashMap::new());
     let entering = RwSignal::new(BTreeSet::new());
     let removing = RwSignal::new(BTreeSet::new());
-    use_sse_subscription(rows, entering, removing, None, move || {
+    let error = use_sse_subscription(rows, entering, removing, None, move || {
         rows.set(HashMap::new());
         let kind = pod_kind.get()?;
         Some(data::watch_url(
@@ -197,7 +211,10 @@ pub(crate) fn use_pod_watch(namespace: String, selector: String) -> PodWatch {
     });
     let shown_uids = Memo::new(move |_| {
         rows.with(|rows| {
-            let mut rows = rows.values().collect::<Vec<_>>();
+            let mut rows = rows
+                .values()
+                .filter(|row| !cnpg_instances_only || is_cnpg_instance(row))
+                .collect::<Vec<_>>();
             rows.sort_by(|a, b| a.name.cmp(&b.name));
             rows.into_iter().map(|row| row.uid.clone()).collect()
         })
@@ -206,7 +223,14 @@ pub(crate) fn use_pod_watch(namespace: String, selector: String) -> PodWatch {
         rows,
         shown_uids,
         pod_kind,
+        error,
     }
+}
+
+fn is_cnpg_instance(row: &ResourceRow) -> bool {
+    row.labels
+        .get("cnpg.io/podRole")
+        .is_some_and(|role| role == "instance")
 }
 
 pub(crate) fn use_metrics(namespace: String, name: String) -> RwSignal<Option<Vec<MetricsPoint>>> {
@@ -363,6 +387,31 @@ pub(crate) struct CnpgClusterSummary {
     pub(crate) replication_note: String,
 }
 
+pub(crate) struct CnpgBackupSummary {
+    pub(crate) phase: String,
+    pub(crate) phase_class: &'static str,
+    pub(crate) error: String,
+    pub(crate) cluster: String,
+    pub(crate) method: String,
+    pub(crate) started: String,
+    pub(crate) started_raw: String,
+    pub(crate) completed: String,
+    pub(crate) completed_raw: String,
+}
+
+pub(crate) struct CnpgScheduledBackupSummary {
+    pub(crate) state: String,
+    pub(crate) state_class: &'static str,
+    pub(crate) error: String,
+    pub(crate) cluster: String,
+    pub(crate) schedule: String,
+    pub(crate) method: String,
+    pub(crate) last_schedule: String,
+    pub(crate) last_schedule_raw: String,
+    pub(crate) next_schedule: String,
+    pub(crate) next_schedule_raw: String,
+}
+
 pub(crate) fn cnpg_cluster_summary(object: &serde_json::Value) -> Option<CnpgClusterSummary> {
     let api_version = json_str(object, &["apiVersion"])?;
     if json_str(object, &["kind"]).as_deref() != Some("Cluster")
@@ -511,6 +560,85 @@ pub(crate) fn cnpg_cluster_summary(object: &serde_json::Value) -> Option<CnpgClu
     })
 }
 
+pub(crate) fn cnpg_backup_summary(object: &serde_json::Value) -> Option<CnpgBackupSummary> {
+    if !is_cnpg_kind(object, "Backup") {
+        return None;
+    }
+    let phase = json_str(object, &["status", "phase"]).unwrap_or_else(|| "Pending".into());
+    let started_raw = json_str(object, &["status", "startedAt"]).unwrap_or_default();
+    let completed_raw = json_str(object, &["status", "stoppedAt"]).unwrap_or_default();
+    Some(CnpgBackupSummary {
+        phase_class: cnpg_backup_phase_class(&phase),
+        phase,
+        error: json_str(object, &["status", "error"]).unwrap_or_default(),
+        cluster: json_str(object, &["spec", "cluster", "name"]).unwrap_or_else(|| "-".into()),
+        method: json_str(object, &["status", "method"])
+            .or_else(|| json_str(object, &["spec", "method"]))
+            .unwrap_or_else(|| "barmanObjectStore".into()),
+        started: display_cnpg_time(&started_raw),
+        started_raw,
+        completed: display_cnpg_time(&completed_raw),
+        completed_raw,
+    })
+}
+
+pub(crate) fn cnpg_scheduled_backup_summary(
+    object: &serde_json::Value,
+) -> Option<CnpgScheduledBackupSummary> {
+    if !is_cnpg_kind(object, "ScheduledBackup") {
+        return None;
+    }
+    let suspended = object
+        .pointer("/spec/suspend")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let error = json_str(object, &["status", "error"]).unwrap_or_default();
+    let last_schedule_raw = json_str(object, &["status", "lastScheduleTime"]).unwrap_or_default();
+    let next_schedule_raw = json_str(object, &["status", "nextScheduleTime"]).unwrap_or_default();
+    let overdue = data::timestamp_is_past(&next_schedule_raw);
+    let (state, state_class) = if !error.is_empty() {
+        ("Error".to_string(), "error")
+    } else if suspended {
+        ("Suspended".to_string(), "warning")
+    } else if overdue {
+        ("Overdue".to_string(), "warning")
+    } else if last_schedule_raw.is_empty() && next_schedule_raw.is_empty() {
+        ("Waiting".to_string(), "pending")
+    } else {
+        ("Active".to_string(), "ok")
+    };
+    Some(CnpgScheduledBackupSummary {
+        state,
+        state_class,
+        error,
+        cluster: json_str(object, &["spec", "cluster", "name"]).unwrap_or_else(|| "-".into()),
+        schedule: json_str(object, &["spec", "schedule"]).unwrap_or_else(|| "-".into()),
+        method: json_str(object, &["spec", "method"]).unwrap_or_else(|| "barmanObjectStore".into()),
+        last_schedule: display_cnpg_time(&last_schedule_raw),
+        last_schedule_raw,
+        next_schedule: display_cnpg_time(&next_schedule_raw),
+        next_schedule_raw,
+    })
+}
+
+fn is_cnpg_kind(object: &serde_json::Value, kind: &str) -> bool {
+    json_str(object, &["apiVersion"])
+        .is_some_and(|api_version| api_version.split('/').next() == Some("postgresql.cnpg.io"))
+        && json_str(object, &["kind"]).as_deref() == Some(kind)
+}
+
+fn cnpg_backup_phase_class(phase: &str) -> &'static str {
+    match phase.to_ascii_lowercase().as_str() {
+        "completed" | "succeeded" => "ok",
+        "failed" | "error" | "walarchivingfailing" | "invalid backup definition" => "error",
+        _ => "pending",
+    }
+}
+
+fn display_cnpg_time(value: &str) -> String {
+    display_certificate_time(value)
+}
+
 fn cnpg_phase_class(phase: &str, ready: &str, desired: &str) -> &'static str {
     let phase = phase.to_ascii_lowercase();
     if phase.contains("unrecoverable")
@@ -597,6 +725,28 @@ fn display_certificate_time(value: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn cnpg_instance_filter_excludes_pooler_pods() {
+        let row = |role: &str| {
+            let mut row = ResourceRow {
+                uid: role.into(),
+                namespace: Some("databases".into()),
+                name: role.into(),
+                created: None,
+                cells: vec![],
+                trends: vec![],
+                status: roder_core::RowStatus::Unknown,
+                suspended: false,
+                labels: Default::default(),
+            };
+            row.labels.insert("cnpg.io/podRole".into(), role.into());
+            row
+        };
+
+        assert!(is_cnpg_instance(&row("instance")));
+        assert!(!is_cnpg_instance(&row("pooler")));
+    }
 
     #[test]
     fn format_bytes_steps_up_units_and_stops_at_tib() {
@@ -818,6 +968,59 @@ mod tests {
         let summary = cnpg_cluster_summary(&object).expect("CNPG cluster");
         assert_eq!(summary.replication, "Not reported");
         assert_eq!(summary.replication_note, "1/3 instances ready");
+    }
+
+    #[test]
+    fn cnpg_backup_summary_reports_lifecycle_and_defaults() {
+        let summary = cnpg_backup_summary(&json!({
+            "apiVersion": "postgresql.cnpg.io/v1",
+            "kind": "Backup",
+            "spec": {"cluster": {"name": "app"}},
+            "status": {
+                "phase": "completed",
+                "method": "plugin",
+                "startedAt": "2026-09-15T01:00:00Z",
+                "stoppedAt": "2026-09-15T01:04:00Z"
+            }
+        }))
+        .unwrap();
+        assert_eq!(summary.phase_class, "ok");
+        assert_eq!(summary.cluster, "app");
+        assert_eq!(summary.method, "plugin");
+        assert_eq!(summary.completed, "2026-09-15 01:04:00");
+
+        assert!(cnpg_backup_summary(&json!({
+            "apiVersion": "postgresql.cnpg.io/v1",
+            "kind": "Cluster"
+        }))
+        .is_none());
+    }
+
+    #[test]
+    fn cnpg_schedule_summary_prioritizes_errors_then_suspension() {
+        let error = cnpg_scheduled_backup_summary(&json!({
+            "apiVersion": "postgresql.cnpg.io/v1",
+            "kind": "ScheduledBackup",
+            "spec": {"suspend": true},
+            "status": {"error": "invalid schedule"}
+        }))
+        .unwrap();
+        assert_eq!(
+            (error.state.as_str(), error.state_class),
+            ("Error", "error")
+        );
+
+        let suspended = cnpg_scheduled_backup_summary(&json!({
+            "apiVersion": "postgresql.cnpg.io/v1",
+            "kind": "ScheduledBackup",
+            "spec": {"cluster": {"name": "app"}, "schedule": "0 0 2 * * *", "suspend": true}
+        }))
+        .unwrap();
+        assert_eq!(
+            (suspended.state.as_str(), suspended.state_class),
+            ("Suspended", "warning")
+        );
+        assert_eq!(suspended.cluster, "app");
     }
 
     fn certificate(conditions: serde_json::Value) -> serde_json::Value {

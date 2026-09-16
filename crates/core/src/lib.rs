@@ -127,6 +127,8 @@ mod tests {
         assert!(!service.supports(ResourceAction::ExternalSecretsRefresh));
         assert!(!service.supports(ResourceAction::CertificateRenew));
         assert!(!service.supports(ResourceAction::KopiurSnapshotNow));
+        assert!(!service.supports(ResourceAction::CnpgBackup));
+        assert!(!service.supports(ResourceAction::CnpgSuspend));
 
         let store = capabilities("external-secrets.io", "v1", "SecretStore");
         assert!(!store.supports(ResourceAction::ExternalSecretsRefresh));
@@ -135,6 +137,13 @@ mod tests {
         let cluster_external_secret =
             capabilities("external-secrets.io", "v1", "ClusterExternalSecret");
         assert!(cluster_external_secret.supports(ResourceAction::ExternalSecretsRefresh));
+
+        let cluster = capabilities("postgresql.cnpg.io", "v1", "Cluster");
+        assert!(cluster.supports(ResourceAction::CnpgBackup));
+        assert!(!cluster.supports(ResourceAction::CnpgSuspend));
+        let schedule = capabilities("postgresql.cnpg.io", "v1", "ScheduledBackup");
+        assert!(schedule.supports(ResourceAction::CnpgSuspend));
+        assert!(!schedule.supports(ResourceAction::CnpgBackup));
     }
 
     #[test]
@@ -148,6 +157,10 @@ mod tests {
             Some(ResourceAction::Cordon)
         );
         assert_eq!(ResourceAction::from_api_name("apply"), None);
+        assert_eq!(
+            ResourceAction::from_api_name("cnpg-resume"),
+            Some(ResourceAction::CnpgSuspend)
+        );
         assert_eq!(
             ResourceAction::from_api_name("flux-resume")
                 .unwrap()
@@ -165,6 +178,13 @@ mod tests {
         assert!(permissions.allows_api_name("flux-suspend"));
         assert!(permissions.allows_api_name("flux-resume"));
         assert!(!permissions.allows_api_name("flux-reconcile"));
+
+        let permissions = ActionPermissions {
+            apply: false,
+            actions: BTreeMap::from([("cnpg-suspend".into(), true)]),
+        };
+        assert!(permissions.allows_api_name("cnpg-suspend"));
+        assert!(permissions.allows_api_name("cnpg-resume"));
     }
 
     #[test]

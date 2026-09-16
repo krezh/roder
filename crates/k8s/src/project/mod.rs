@@ -612,7 +612,9 @@ pub(crate) fn resource_suspended(group: &str, kind: &str, data: &Value) -> bool 
 }
 
 fn row_suspended(group: &str, kind: &str, data: &Value) -> bool {
-    (group.ends_with("fluxcd.io") || group == "kopiur.home-operations.com")
+    (group.ends_with("fluxcd.io")
+        || group == "kopiur.home-operations.com"
+        || (group == "postgresql.cnpg.io" && kind == "ScheduledBackup"))
         && resource_suspended(group, kind, data)
 }
 
@@ -1857,7 +1859,7 @@ mod tests {
             "HelmRelease",
             &json!({"metadata": {"deletionTimestamp": "2026-08-26T10:00:00Z"}})
         ));
-        assert!(!row_suspended(
+        assert!(row_suspended(
             "postgresql.cnpg.io",
             "ScheduledBackup",
             &json!({"spec": {"suspend": true}})

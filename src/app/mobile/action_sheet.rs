@@ -147,6 +147,27 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
             let trigger   = bulk_act!("cronjob-trigger");
             let rerun     = bulk_act!("job-rerun");
             let snapshot_now = bulk_act!("kopiur-snapshot-now");
+            let cnpg_suspend = bulk_act!("cnpg-suspend");
+            let cnpg_resume = bulk_act!("cnpg-resume");
+            let create_cnpg_backup = {
+                let ts = targets.clone();
+                move |_| {
+                    let ts = ts.clone();
+                    let n = ts.len();
+                    let label = if n == 1 {
+                        "Create an immediate Backup for this Cluster? Completion is reported separately.".to_string()
+                    } else {
+                        format!("Create immediate Backups for {n} Clusters? Completion is reported separately.")
+                    };
+                    ask_confirm(confirm, label, "Create backup", move || {
+                        fire_action(toast, "cnpg-backup", &ts);
+                        if let Some(sel) = table_selected.get_value() {
+                            sel.set(Default::default());
+                        }
+                    });
+                    do_close();
+                }
+            };
             let renew_certificate = {
                 let ts = targets.clone();
                 move |_| {
@@ -255,6 +276,9 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
                     {actions.supports(ResourceMenuAction::CronJobTrigger).then(|| view! { <button class="sheet-item" on:click=trigger>"Trigger"</button> })}
                     {actions.supports(ResourceMenuAction::JobRerun).then(|| view! { <button class="sheet-item" on:click=rerun>"Re-run"</button> })}
                     {actions.supports(ResourceMenuAction::KopiurSnapshotNow).then(|| view! { <button class="sheet-item" on:click=snapshot_now>"Snapshot Now"</button> })}
+                    {actions.supports(ResourceMenuAction::CnpgBackup).then(|| view! { <button class="sheet-item" on:click=create_cnpg_backup>"Create backup..."</button> })}
+                    {actions.supports(ResourceMenuAction::CnpgSuspend).then(|| view! { <button class="sheet-item" on:click=cnpg_suspend>"Suspend schedule"</button> })}
+                    {actions.supports(ResourceMenuAction::CnpgResume).then(|| view! { <button class="sheet-item" on:click=cnpg_resume>"Resume schedule"</button> })}
                     {has_flux.then(|| view! {
                         {actions.supports(ResourceMenuAction::FluxReconcile).then(|| view! {
                             <button class="sheet-item" on:click=reconcile>"Reconcile"</button>

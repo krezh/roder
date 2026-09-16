@@ -60,6 +60,9 @@ pub(crate) enum ResourceMenuAction {
     CronJobTrigger,
     JobRerun,
     KopiurSnapshotNow,
+    CnpgBackup,
+    CnpgSuspend,
+    CnpgResume,
     Cordon,
     Uncordon,
     Drain,
@@ -71,7 +74,7 @@ pub(crate) enum ResourceMenuAction {
 }
 
 impl ResourceMenuAction {
-    const ALL: [Self; 31] = [
+    const ALL: [Self; 34] = [
         Self::OpenDetails,
         Self::Relationships,
         Self::Logs,
@@ -95,6 +98,9 @@ impl ResourceMenuAction {
         Self::CronJobTrigger,
         Self::JobRerun,
         Self::KopiurSnapshotNow,
+        Self::CnpgBackup,
+        Self::CnpgSuspend,
+        Self::CnpgResume,
         Self::Cordon,
         Self::Uncordon,
         Self::Drain,
@@ -238,6 +244,20 @@ impl ResourceActionModel {
             ResourceMenuAction::KopiurSnapshotNow => {
                 available.supports(ResourceAction::KopiurSnapshotNow)
                     && permitted(ResourceAction::KopiurSnapshotNow)
+            }
+            ResourceMenuAction::CnpgBackup => {
+                available.supports(ResourceAction::CnpgBackup)
+                    && permitted(ResourceAction::CnpgBackup)
+            }
+            ResourceMenuAction::CnpgSuspend => {
+                available.supports(ResourceAction::CnpgSuspend)
+                    && suspended != Some(true)
+                    && permitted(ResourceAction::CnpgSuspend)
+            }
+            ResourceMenuAction::CnpgResume => {
+                available.supports(ResourceAction::CnpgSuspend)
+                    && suspended != Some(false)
+                    && permitted(ResourceAction::CnpgSuspend)
             }
             ResourceMenuAction::Cordon => {
                 is_node && cordoned != Some(true) && permitted(ResourceAction::Cordon)
@@ -417,5 +437,60 @@ mod tests {
         );
 
         assert!(!model.supports(ResourceMenuAction::NodeShell));
+    }
+
+    #[test]
+    fn cnpg_actions_follow_capabilities_permissions_and_schedule_state() {
+        let cluster = [target("postgresql.cnpg.io/v1/Cluster")];
+        let model = ResourceActionModel::for_selection(
+            ActionSurface::Desktop,
+            &cluster,
+            &[],
+            None,
+            None,
+            false,
+            |_| true,
+        );
+        assert!(model.supports(ResourceMenuAction::CnpgBackup));
+        assert!(!model.supports(ResourceMenuAction::CnpgSuspend));
+
+        let schedules = [target("postgresql.cnpg.io/v1/ScheduledBackup")];
+        let mut row = ResourceRow {
+            uid: "schedule".into(),
+            namespace: Some("default".into()),
+            name: "example".into(),
+            created: None,
+            cells: vec![],
+            trends: vec![],
+            status: RowStatus::Ok,
+            suspended: false,
+            labels: Default::default(),
+        };
+        let mut rows = HashMap::from([(row.uid.clone(), row.clone())]);
+        let model = ResourceActionModel::for_selection(
+            ActionSurface::Desktop,
+            &schedules,
+            &[row.uid.clone()],
+            Some(&rows),
+            None,
+            false,
+            |_| true,
+        );
+        assert!(model.supports(ResourceMenuAction::CnpgSuspend));
+        assert!(!model.supports(ResourceMenuAction::CnpgResume));
+
+        row.suspended = true;
+        rows.insert(row.uid.clone(), row.clone());
+        let model = ResourceActionModel::for_selection(
+            ActionSurface::Desktop,
+            &schedules,
+            &[row.uid],
+            Some(&rows),
+            None,
+            false,
+            |action| action == ResourceAction::CnpgSuspend,
+        );
+        assert!(!model.supports(ResourceMenuAction::CnpgSuspend));
+        assert!(model.supports(ResourceMenuAction::CnpgResume));
     }
 }

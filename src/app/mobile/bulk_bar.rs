@@ -38,6 +38,9 @@ pub(crate) fn MobileBulkBar(
     #[prop(default = false)] bulk_eso: bool,
     #[prop(default = false)] bulk_cronjob: bool,
     #[prop(default = false)] bulk_kopiur: bool,
+    #[prop(default = false)] bulk_cnpg_backup: bool,
+    #[prop(default = false)] bulk_cnpg_suspend: bool,
+    #[prop(optional, into)] suspend_state: Option<Signal<Option<bool>>>,
 ) -> impl IntoView {
     let confirm = expect_context::<RwSignal<Option<Confirm>>>();
     let delete_confirm = expect_context::<RwSignal<Option<DeleteRequest>>>();
@@ -87,8 +90,12 @@ pub(crate) fn MobileBulkBar(
                     })}
                 })}
                 {bulk_flux_suspend.then(|| view! {
-                    <button class="act" disabled=move || !allowed(ResourceAction::FluxSuspend) on:click=move |_| do_bulk("flux-suspend")>{move || label(ResourceAction::FluxSuspend, "Suspend")}</button>
-                    <button class="act" disabled=move || !allowed(ResourceAction::FluxSuspend) on:click=move |_| do_bulk("flux-resume")>{move || label(ResourceAction::FluxSuspend, "Resume")}</button>
+                    {move || (suspend_state.and_then(|signal| signal.get()) != Some(true)).then(|| view! {
+                        <button class="act" disabled=move || !allowed(ResourceAction::FluxSuspend) on:click=move |_| do_bulk("flux-suspend")>{move || label(ResourceAction::FluxSuspend, "Suspend")}</button>
+                    })}
+                    {move || (suspend_state.and_then(|signal| signal.get()) != Some(false)).then(|| view! {
+                        <button class="act" disabled=move || !allowed(ResourceAction::FluxSuspend) on:click=move |_| do_bulk("flux-resume")>{move || label(ResourceAction::FluxSuspend, "Resume")}</button>
+                    })}
                 })}
                 {bulk_certificate.then(|| view! {
                     <button class="act" disabled=move || !allowed(ResourceAction::CertificateRenew) on:click=move |_| {
@@ -109,6 +116,25 @@ pub(crate) fn MobileBulkBar(
                 })}
                 {bulk_kopiur.then(|| view! {
                     <button class="act" disabled=move || !allowed(ResourceAction::KopiurSnapshotNow) on:click=move |_| do_bulk("kopiur-snapshot-now")>{move || label(ResourceAction::KopiurSnapshotNow, "Snapshot now")}</button>
+                })}
+                {bulk_cnpg_backup.then(|| view! {
+                    <button class="act" disabled=move || !allowed(ResourceAction::CnpgBackup) on:click=move |_| {
+                        let n = selected.get_untracked().len();
+                        ask_confirm(
+                            confirm,
+                            format!("Create immediate Backups for {n} Clusters? Completion is reported separately."),
+                            "Create backup",
+                            move || do_bulk("cnpg-backup"),
+                        );
+                    }>{move || label(ResourceAction::CnpgBackup, "Create backup")}</button>
+                })}
+                {bulk_cnpg_suspend.then(|| view! {
+                    {move || (suspend_state.and_then(|signal| signal.get()) != Some(true)).then(|| view! {
+                        <button class="act" disabled=move || !allowed(ResourceAction::CnpgSuspend) on:click=move |_| do_bulk("cnpg-suspend")>{move || label(ResourceAction::CnpgSuspend, "Suspend")}</button>
+                    })}
+                    {move || (suspend_state.and_then(|signal| signal.get()) != Some(false)).then(|| view! {
+                        <button class="act" disabled=move || !allowed(ResourceAction::CnpgSuspend) on:click=move |_| do_bulk("cnpg-resume")>{move || label(ResourceAction::CnpgSuspend, "Resume")}</button>
+                    })}
                 })}
                 <button class="act danger" disabled=move || !allowed(ResourceAction::Delete) on:click=move |_| {
                     let n = selected.get_untracked().len();

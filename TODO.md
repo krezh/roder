@@ -1,9 +1,5 @@
 # TODO
 
-## Actions And Access
-
-- Group Access Review rows by category or operator
-
 ## Resource Relationships
 
 - Add ObjectBucketClaim to ObjectBucket, Secret, and ConfigMap relationships

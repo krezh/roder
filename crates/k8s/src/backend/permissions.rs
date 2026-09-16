@@ -336,11 +336,19 @@ impl Backend {
                 kind: k.kind,
                 group: k.group,
                 namespaced: k.namespaced,
+                category: k.category,
                 operations,
             }
         });
         let mut rows = futures::future::join_all(futs).await;
-        rows.sort_by(|a, b| a.kind.cmp(&b.kind).then(a.group.cmp(&b.group)));
+        rows.sort_by(|a, b| {
+            a.category
+                .order()
+                .cmp(&b.category.order())
+                .then_with(|| a.category.label().cmp(&b.category.label()))
+                .then_with(|| a.kind.cmp(&b.kind))
+                .then_with(|| a.group.cmp(&b.group))
+        });
         rows
     }
 }

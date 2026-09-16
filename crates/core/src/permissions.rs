@@ -158,6 +158,7 @@ pub struct AccessRow {
     pub kind: String,
     pub group: String,
     pub namespaced: bool,
+    pub category: crate::Category,
     /// `None` means the operation does not apply to this kind.
     pub operations: Vec<(String, Option<bool>)>,
 }

@@ -667,17 +667,6 @@ button.node {
   &:hover .usage-tip {
     display: block;
   }
-  .tu-warn {
-    color: var(--warn);
-    width: 1rem;
-    height: 1rem;
-    border: 1px solid var(--warn);
-    font-family: var(--font-mono);
-    font-size: 0.65rem;
-    line-height: calc(1rem - 2px);
-    text-align: center;
-    cursor: default;
-  }
   &.tu-stale {
     .tu-fill { opacity: 0.45; }
     .tu-reading, .tu-nodes { opacity: 0.72; }

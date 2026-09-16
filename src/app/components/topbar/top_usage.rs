@@ -71,11 +71,6 @@ pub(crate) fn TopUsage() -> impl IntoView {
                             <span class="tu-node-dot" aria-hidden="true"></span>
                             <b>{ready}"/"{total}</b>
                         </button>
-                        {move || overview.stale.get().then(|| view! {
-                            <span class="tu-warn" aria-label="Usage data is stale"
-                                data-tip="Failed to refresh — showing last known values">"!"
-                            </span>
-                        })}
                         <div class="tooltip usage-tip">
                             <div class="tip-row tip-head" aria-hidden="true">
                                 <span>"Node"</span>

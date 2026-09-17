@@ -1,5 +1,7 @@
 /* ---- dashboard ---- */
 .dashboard {
+  container-type: inline-size;
+  container-name: dashboard;
   width: min(100%, 1500px);
   margin: 0 auto;
   padding: 1.35rem 1.5rem 3rem;
@@ -535,6 +537,20 @@ button.node {
   .capacity-card { grid-column: 1 / -1; }
 }
 
+@container dashboard (max-width: 980px) {
+  .cluster-health {
+    grid-template-columns: auto 1fr;
+  }
+  .health-facts {
+    grid-column: 2;
+    flex-wrap: wrap;
+  }
+  .dashboard-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .capacity-card { grid-column: 1 / -1; }
+}
+
 @media (max-width: 760px) {
   .dashboard {
     padding: 1rem 0.7rem 2rem;
@@ -568,7 +584,40 @@ button.node {
   button.dashboard-card,
   button.controller-card,
   button.node {
-    min-height: 44px;
+    padding: 0.85rem;
+    &:hover:not(:disabled) { transform: none; }
+  }
+  .controller-grid {
+    grid-template-columns: 1fr;
+    gap: 0.6rem;
+  }
+  .controller-card {
+    min-height: auto;
+    padding: 0.85rem;
+  }
+}
+
+@container dashboard (max-width: 760px) {
+  .cluster-health {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+  }
+  .health-facts {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.35rem 0.8rem;
+    white-space: normal;
+  }
+  .dashboard-grid,
+  .dashboard-skeleton {
+    grid-template-columns: 1fr;
+  }
+  .capacity-card,
+  .skeleton-wide { grid-column: auto; }
+  .nodes { grid-template-columns: 1fr; }
+  .controller-grid {
+    grid-template-columns: 1fr;
+    gap: 0.6rem;
   }
 }
 

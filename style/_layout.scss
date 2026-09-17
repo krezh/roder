@@ -15,7 +15,7 @@
   border-bottom: 1px solid var(--border);
   box-shadow: 0 4px 10px -4px rgba(0, 0, 0, 0.55);
   position: relative;
-  z-index: 3;
+  z-index: var(--z-topbar);
   flex: 0 0 auto;
 
   .topbar-group {
@@ -354,7 +354,7 @@
     top: 0;
     bottom: 0;
     left: 0;
-    z-index: 10;
+    z-index: var(--z-sidebar);
     --item-h: 2.75rem;
     width: min(86vw, 320px);
     transform: translateX(-100%);

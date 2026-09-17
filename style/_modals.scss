@@ -1435,7 +1435,7 @@
   position: fixed;
   right: 1.25rem;
   bottom: 1.25rem;
-  z-index: 90;
+  z-index: var(--z-toast);
   display: flex;
   align-items: flex-start;
   gap: 0.55rem;

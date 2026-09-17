@@ -34,3 +34,4 @@ heaptrack.*.zst
 docs/
 .claude/scheduled_tasks.lock
 .impeccable/
+/*.png

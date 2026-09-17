@@ -572,13 +572,17 @@ pub fn App() -> impl IntoView {
 
     // Poll for firing alerts so the panel stays current.
     //
-    // Re-armed from the last fetch, so the next poll is always one period after
-    // whatever landed last — manual refresh included. That keeps it in phase
-    // with the countdown the refresh button draws.
+    // Re-armed from the last completed attempt, so the next poll is always one
+    // period after whatever landed last — manual refresh included. That keeps
+    // it in phase with the countdown the refresh button draws. Keyed on
+    // `alert_attempt` rather than `last_refresh` alone: a failure leaves
+    // `last_refresh` unadvanced, but polling must still continue.
+    let alert_attempt = RwSignal::new(0u32);
     Effect::new(move |previous: Option<Option<TimeoutHandle>>| {
         if let Some(Some(handle)) = previous {
             handle.clear();
         }
+        alert_attempt.track();
         // Read through the bundle: the destructured binding is wasm-only.
         alerts.last_refresh.track();
         set_timeout_with_handle(
@@ -591,6 +595,7 @@ pub fn App() -> impl IntoView {
                     if let Ok(list) = fetch_alerts(false).await {
                         update_alerts(alerts_data, alerts_last_refresh, list);
                     }
+                    alert_attempt.update(|n| *n = n.wrapping_add(1));
                 });
             },
             std::time::Duration::from_secs(ALERTS_POLL_SECS),

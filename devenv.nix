@@ -94,22 +94,18 @@
 
     "test:fmt" = {
       exec = "cargo fmt --all -- --check";
-      before = [ "devenv:enterTest" ];
     };
 
     "test:lint-ssr" = {
       exec = "cargo clippy --workspace --features ssr -- -D warnings";
-      before = [ "devenv:enterTest" ];
     };
 
     "test:lint-hydrate" = {
       exec = "cargo clippy -p roder --no-default-features --features hydrate -- -D warnings";
-      before = [ "devenv:enterTest" ];
     };
 
     "test:cargo" = {
       exec = "cargo test --workspace --features ssr";
-      before = [ "devenv:enterTest" ];
     };
 
     "test:helm" = {
@@ -118,7 +114,6 @@
         helm template roder helm >/dev/null
         helm template roder-ha helm --set replicaCount=2 >/dev/null
       '';
-      before = [ "devenv:enterTest" ];
     };
 
     "test:docker" = {
@@ -126,9 +121,12 @@
         WBG_VER=$(${lib.getExe pkgs.yq-go} .workspace.dependencies.wasm-bindgen Cargo.toml)
         docker buildx build --build-arg WB_VERSION="$WBG_VER" --build-arg RELEASE=false -t roder:test .
       '';
-      before = [ "devenv:enterTest" ];
     };
   };
+  enterTest = ''
+    devenv tasks run test:cargo test:fmt test:lint-ssr test:lint-hydrate test:helm test:docker
+  '';
+
   enterShell = ''
     echo "roder dev environment"
     echo "  rustc: $(rustc --version)"

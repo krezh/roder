@@ -136,7 +136,7 @@
 .grid-row.head {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: var(--z-sticky);
   background: color-mix(in srgb, var(--panel) 72%, transparent);
   backdrop-filter: blur(10px);
   .cell {
@@ -159,7 +159,7 @@
    is frequently both at once — and costs no layout. */
 .grid-row.row.cursor {
   position: relative;
-  z-index: 2;
+  z-index: var(--z-elevated);
   outline: 1px solid var(--accent);
   outline-offset: -1px;
 }

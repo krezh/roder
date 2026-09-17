@@ -7,6 +7,8 @@
   box-shadow: inset 2px 0 var(--accent);
 }
 .rd {
+  container-type: inline-size;
+  container-name: rd;
   display: flex;
   flex-direction: column;
   animation: rd-in 0.18s ease;
@@ -1360,6 +1362,29 @@ table.cond {
   .condition-head time { margin-left: auto; }
   .events .event-head { align-items: flex-start; }
   .events .event-meta { padding-top: 0.1rem; }
+}
+
+@container (max-width: 540px) {
+  .detail-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .detail-stat {
+    border-bottom: 1px solid var(--border);
+    &:nth-child(2) { border-right: 0; }
+    &:nth-child(n + 3) { border-bottom: 0; }
+  }
+  .kv-grid.overview-grid {
+    grid-template-columns: 1fr;
+    .kv {
+      &:nth-child(odd) { padding-left: 0; }
+      &:nth-child(even) { border-left: none; }
+    }
+  }
+  .json-field-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.12rem;
+    padding-block: 0.5rem;
+  }
+  .condition-head { flex-wrap: wrap; }
+  .condition-head time { margin-left: auto; }
 }
 .talos-config-diff {
   display: grid;

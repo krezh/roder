@@ -32,7 +32,7 @@
   position: absolute;
   top: 0;
   right: 0;
-  z-index: 71;
+  z-index: calc(var(--z-dropdown) + 1);
   background: var(--panel-2);
   border: 1px solid var(--border);
   border-radius: 0;
@@ -56,7 +56,7 @@
 .dropdown-scrim {
   position: fixed;
   inset: 0;
-  z-index: 70;
+  z-index: var(--z-dropdown);
 }
 
 /* -- face 1: the closed button -- */
@@ -129,7 +129,7 @@
 }
 .ns-dropdown-shortcut {
   position: absolute;
-  z-index: 72;
+  z-index: calc(var(--z-dropdown) + 2);
   top: 50%;
   right: 0.45rem;
   translate: 0 -50%;

@@ -3,7 +3,7 @@
   position: fixed;
   inset: 0;
   margin: auto;
-  z-index: 65;
+  z-index: var(--z-modal);
   width: min(70vw, 980px);
   height: 74vh;
   display: flex;
@@ -22,7 +22,7 @@
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.6);
-  z-index: 64;
+  z-index: var(--z-modal-scrim);
   animation: scrim-in 0.15s ease;
 }
 .tree-head {

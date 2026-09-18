@@ -1,6 +1,6 @@
 /* ---- shared overlay animations ---- */
 
-/* Centered modals, palettes, dialogs: pop in from center with spring overshoot. */
+/* Centered modals, palettes, dialogs: pop in from center. */
 @keyframes overlay-in {
   from { opacity: 0; scale: 0.82; }
 }
@@ -72,7 +72,7 @@
   border-radius: 0;
   box-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.9);
   overflow: hidden;
-  animation: overlay-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: overlay-in 0.28s cubic-bezier(0.25, 1, 0.5, 1);
 }
 .exec-head {
   display: flex;
@@ -170,7 +170,7 @@
   border-radius: 8px;
   background: var(--panel);
   box-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.9);
-  animation: overlay-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: overlay-in 0.28s cubic-bezier(0.25, 1, 0.5, 1);
 }
 .files-window-head {
   display: flex;
@@ -232,7 +232,7 @@
   border: 1px solid var(--border);
   border-radius: 0;
   box-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.9);
-  animation: overlay-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: overlay-in 0.28s cubic-bezier(0.25, 1, 0.5, 1);
 
   &.closing {
     animation: overlay-out 0.16s ease-in forwards;
@@ -287,6 +287,7 @@
 }
 
 .alerts-refresh {
+  position: relative;
   background: var(--panel-2);
   border: 1px solid var(--border);
   color: var(--fg);
@@ -297,6 +298,68 @@
 
   &:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
   &:disabled { color: var(--muted); cursor: wait; }
+}
+
+/* Time until the next automatic refresh, traced around the button's whole
+   outline: bare just after a fetch, a closed ring as the next one lands.
+   Duration and the negative start offset come from the rect's inline style, so
+   the period has a single source of truth in Rust.
+
+   An SVG stroke rather than a conic-gradient ring: `pathLength` normalises the
+   perimeter, so the head travels at one speed the whole way round instead of
+   racing the short edges as an angular sweep would. `stroke-dashoffset` also
+   animates without touching layout. */
+.alerts-staleness {
+  position: absolute;
+  /* Negative inset so the box covers the BORDER box; `inset: 0` resolves
+     against the padding box, which sits inside the button's own border. */
+  inset: -1px;
+  width: calc(100% + 2px);
+  height: calc(100% + 2px);
+  pointer-events: none;
+  overflow: visible;
+
+  rect {
+    /* Half a stroke in, so a 1px stroke sits centred on the button's 1px
+       border and replaces it as it sweeps round. */
+    x: 0.5px;
+    y: 0.5px;
+    width: calc(100% - 1px);
+    height: calc(100% - 1px);
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 1px;
+    /* Overridden inline with the arc the previous cycle drew. */
+    stroke-dasharray: 0 100;
+    stroke-dashoffset: 0;
+    /* Two passes: the tail runs down the head, then the new cycle fills. Their
+       durations and the fill's start offset come from the inline style. */
+    animation-name: alerts-staleness-catchup, alerts-staleness-fill;
+    /* Quart ease-out on the whip so it leaves fast and settles; the fill has to
+       stay linear or the countdown would misreport the time remaining. */
+    animation-timing-function: cubic-bezier(0.25, 1, 0.5, 1), linear;
+    animation-fill-mode: forwards, forwards;
+  }
+}
+
+/* No `from`: the tail starts from whatever arc is set inline, so a refresh
+   part-way through a cycle shortens exactly what is on screen. */
+@keyframes alerts-staleness-catchup {
+  to {
+    stroke-dasharray: 0 100;
+    stroke-dashoffset: -100;
+  }
+}
+
+@keyframes alerts-staleness-fill {
+  from {
+    stroke-dasharray: 0 100;
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dasharray: 100 0;
+    stroke-dashoffset: 0;
+  }
 }
 
 .alerts-close {
@@ -612,7 +675,7 @@
   border: 1px solid var(--border);
   border-radius: 0;
   box-shadow: 0 16px 40px -8px rgba(0, 0, 0, 0.85);
-  animation: overlay-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: overlay-in 0.28s cubic-bezier(0.25, 1, 0.5, 1);
 }
 .pmodal-head {
   position: sticky;
@@ -665,7 +728,7 @@
   overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
-  animation: popup-in 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: popup-in 0.2s cubic-bezier(0.25, 1, 0.5, 1);
 }
 .ctx-header {
   color: var(--fg);
@@ -836,7 +899,7 @@
   padding: 1.1rem 1.2rem;
   width: min(380px, 92vw);
   height: fit-content;
-  animation: overlay-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: overlay-in 0.28s cubic-bezier(0.25, 1, 0.5, 1);
   .modal-msg {
     margin-bottom: 1rem;
     white-space: pre-line;
@@ -1069,7 +1132,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  animation: overlay-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: overlay-in 0.28s cubic-bezier(0.25, 1, 0.5, 1);
 }
 .shortcuts-head {
   display: flex;
@@ -1204,7 +1267,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  animation: overlay-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: overlay-in 0.28s cubic-bezier(0.25, 1, 0.5, 1);
 }
 .access-head {
   display: flex;
@@ -1445,7 +1508,7 @@
   padding: 0.6rem 0.9rem;
   box-shadow: 0 14px 34px -8px rgba(0, 0, 0, 0.85);
   cursor: pointer;
-  animation: toast-in 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: toast-in 0.2s cubic-bezier(0.25, 1, 0.5, 1);
   .toast-icon {
     flex: none;
     line-height: 1.3;
@@ -1518,4 +1581,271 @@
   &.closing {
     animation: toast-out 0.16s ease-in forwards;
   }
+}
+
+
+// Resource recommendations. The panel chrome is the alerts panel's — this adds
+// the summary strip, the grouped CPU/Memory columns, and the per-value bars.
+.recommend-panel {
+  width: 82vw;
+  max-width: 1500px;
+
+  // Reserve the width of the longer label so swapping "Scan" for "Scanning..."
+  // does not resize the button and shift the close control beside it.
+  .alerts-refresh {
+    min-width: 6rem;
+  }
+}
+
+.recommend-list {
+  padding: 0;
+}
+
+// Summary strip. Same visual weight as `.stat-strip` above the resource table:
+// a band of readings between the header and the data.
+.rsum {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.9rem;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+  flex-shrink: 0;
+}
+
+.rsum-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+
+  b {
+    font-size: 1.05rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  // Freeing capacity is the good outcome; needing more is a warning.
+  &.down b { color: var(--ok); }
+  &.up b { color: var(--warn); }
+}
+
+.rsum-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.rsum-sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border);
+}
+
+.rsum-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+
+  b {
+    color: var(--fg);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.recommend-table {
+  width: 100%;
+  border-collapse: collapse;
+
+  // Headers match `.grid-row.head .cell`, so the panel reads at the same scale
+  // as the resource table behind it.
+  th {
+    position: sticky;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    background: var(--panel);
+    padding: 0.4rem 0.75rem;
+    z-index: 1;
+  }
+
+  // The resource row sits above the knob row, so each sticks at its own offset.
+  .rt-group th { top: 0; }
+  thead tr:last-child th {
+    top: 1.65rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  td {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+
+  tr.rt-row:hover td {
+    background: var(--panel-2);
+  }
+}
+
+// A vertical rule opening each resource group, so four value columns read as
+// two pairs rather than an undifferentiated run.
+.recommend-table .rt-cpu,
+.recommend-table .rt-mem {
+  border-left: 1px solid var(--border);
+}
+
+// Severity as a left accent on the row — the dot alone was too quiet to scan.
+.rt-row td:first-child {
+  border-left: 3px solid transparent;
+}
+.rt-row.rt-critical td:first-child { border-left-color: var(--error); }
+.rt-row.rt-warning td:first-child { border-left-color: var(--warn); }
+.rt-row.rt-ok td:first-child,
+.rt-row.rt-good td:first-child { border-left-color: var(--ok); }
+
+.rt-workload {
+  white-space: nowrap;
+}
+
+.rt-ns {
+  color: var(--muted);
+  &::after {
+    content: "/";
+    margin: 0 0.15rem;
+    opacity: 0.5;
+  }
+}
+
+.rt-name {
+  font-weight: 500;
+}
+
+.rt-kind {
+  margin-left: 0.45rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+}
+
+.rt-container {
+  // The container name identifies the row; only the namespace prefix is chrome.
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+// One value cell: the numbers, then the bars and the percentage beneath them.
+.rc {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 9.5rem;
+}
+
+.rc-values {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+// Nothing set, nothing advised. Faint so it reads as "not applicable".
+.rc-empty {
+  color: var(--muted);
+  opacity: 0.4;
+}
+
+.rc-current {
+  // What is set today is half the comparison, not a caption for the other half.
+  color: var(--fg);
+  &.unset {
+    font-style: italic;
+    opacity: 0.7;
+  }
+}
+
+.rc-arrow {
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+.rc-target {
+  font-weight: 500;
+  &.up { color: var(--warn); }
+  &.down { color: var(--ok); }
+  &.flat { color: var(--fg); }
+}
+
+.rc-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+// Two stacked tracks — current over recommended — sized against the larger of
+// the pair, so the ratio is legible without reading the numbers.
+.rc-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.rc-track {
+  height: 3px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+
+// No transition, matching `.tu-fill`: widths only change when a scan replaces
+// the rows, and animating width across every bar at once thrashes layout.
+.rc-fill {
+  display: block;
+  height: 100%;
+
+  &.cur { background: var(--muted); }
+  &.rec.up { background: var(--warn); }
+  &.rec.down { background: var(--ok); }
+  &.rec.flat { background: var(--fg); }
+}
+
+.rc-change {
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  min-width: 3.2rem;
+  text-align: right;
+
+  &.up { color: var(--warn); }
+  &.down { color: var(--ok); }
+}
+
+.recommend-note td {
+  padding-top: 0;
+  // "Not enough data" / "HPA detected" is the answer for that row.
+  color: var(--fg);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+.recommend-failures {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.75rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.8rem;
+  color: var(--fg);
+}
+
+.recommend-failures-title {
+  color: var(--warn);
 }

@@ -442,7 +442,7 @@ impl GraphState {
     }
 }
 
-fn format_cpu(v: f64) -> String {
+pub(crate) fn format_cpu(v: f64) -> String {
     if v >= 1.0 {
         format!("{v:.1}")
     } else {
@@ -450,7 +450,7 @@ fn format_cpu(v: f64) -> String {
     }
 }
 
-fn format_mem(v: f64) -> String {
+pub(crate) fn format_mem(v: f64) -> String {
     if v >= 1024.0 * 1024.0 * 1024.0 {
         format!("{:.1}Gi", v / (1024.0 * 1024.0 * 1024.0))
     } else if v >= 1024.0 * 1024.0 {

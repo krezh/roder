@@ -249,7 +249,9 @@
   }
   .ev-msg {
     margin: 0;
-    color: var(--muted);
+    // The event text is the reason the row exists; the meta around it (type,
+    // age, count) stays muted.
+    color: var(--fg);
     line-height: 1.5;
   }
   &.ev-warning .ev-reason {
@@ -1047,7 +1049,8 @@ table.cond {
     overflow-wrap: anywhere;
   }
   .cond-msg {
-    color: var(--muted);
+    // Why a condition is false is the payload of the conditions table.
+    color: var(--fg);
   }
   .cond-ok {
     color: var(--ok);
@@ -1602,5 +1605,6 @@ table.rules {
     cursor: default;
     opacity: 0.55;
   }
-  .pm-phase { color: var(--muted); }
+  // A pod's phase is status, not chrome.
+  .pm-phase { color: var(--fg); }
 }

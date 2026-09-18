@@ -33,3 +33,4 @@ heaptrack.*.zst
 .superpowers/
 docs/
 .claude/scheduled_tasks.lock
+.impeccable/

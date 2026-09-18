@@ -176,6 +176,31 @@ pub(crate) struct AlertsLastRefresh(pub(crate) RwSignal<Option<f64>>);
 #[derive(Clone, Copy)]
 pub(crate) struct AlertSilencesEnabled(pub(crate) RwSignal<bool>);
 
+/// Whether the resource recommendation panel is open.
+#[derive(Clone, Copy)]
+pub(crate) struct RecommendOpen(pub(crate) RwSignal<bool>);
+
+/// The last completed scan (None = never run). Deliberately not persisted to
+/// storage the way alerts are: a scan is a point-in-time reading that gets
+/// misleading rather than merely stale.
+#[derive(Clone, Copy)]
+pub(crate) struct RecommendData(pub(crate) RwSignal<Option<roder_core::ResourceScan>>);
+
+/// Whether a scan is in flight. Scans take seconds to minutes, so the button
+/// and the panel both have to say so.
+#[derive(Clone, Copy)]
+pub(crate) struct RecommendScanning(pub(crate) RwSignal<bool>);
+
+/// Why the last scan failed, if it did.
+#[derive(Clone, Copy)]
+pub(crate) struct RecommendError(pub(crate) RwSignal<Option<String>>);
+
+/// Whether the server has Prometheus configured. Unlike the alerts equivalent
+/// this has to be a context: the button appears before any scan has run, so it
+/// can't infer availability from the data being present.
+#[derive(Clone, Copy)]
+pub(crate) struct RecommendEnabled(pub(crate) RwSignal<bool>);
+
 /// `None` = SSE stream is live. `Some(msg)` = disconnected, with the HTTP status
 /// or network error that caused it (e.g. "401 Unauthorized", "Network error").
 #[derive(Clone, PartialEq, Eq)]

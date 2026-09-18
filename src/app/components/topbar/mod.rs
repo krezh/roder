@@ -9,6 +9,7 @@ mod brand;
 mod failing_badge;
 mod flux_failing_badge;
 mod identity;
+mod recommend_button;
 mod sanitize_button;
 mod sync_button;
 mod top_usage;
@@ -16,6 +17,7 @@ mod top_usage;
 pub(crate) use alerts_button::AlertsButton;
 pub(crate) use failing_badge::FailingBadge;
 pub(crate) use flux_failing_badge::FluxFailingBadge;
+pub(crate) use recommend_button::RecommendButton;
 pub(crate) use sanitize_button::SanitizeButton;
 pub(crate) use sync_button::SyncButton;
 pub(crate) use top_usage::TopUsage;
@@ -73,6 +75,7 @@ pub(crate) fn Topbar() -> impl IntoView {
             </div>
             <div class="topbar-group topbar-actions">
                 <SanitizeButton />
+                <RecommendButton />
                 <SyncButton />
             </div>
             <div class="topbar-group topbar-health">

@@ -37,6 +37,7 @@ mod logs;
 mod mutations;
 mod overview;
 mod permissions;
+mod recommend;
 mod sanitize;
 mod tree;
 

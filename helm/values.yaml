@@ -51,6 +51,14 @@ talos:
   # be set explicitly; e.g. os:reader for read-only, os:operator or os:admin
   roles: []
 
+# Resource recommendations (KRR-style requests/limits from usage history).
+# Needs cAdvisor and kube-state-metrics in the same Prometheus.
+prometheus:
+  # In-cluster Prometheus URL — sets RODER_PROMETHEUS_URL. Empty disables the
+  # panel. Example:
+  #   http://prometheus-operated.monitoring.svc.cluster.local:9090
+  url: ""
+
 # Alertmanager alerts panel (cluster-wide alerts, fetched by roder's SA).
 alertmanager:
   # In-cluster Alertmanager URL — sets RODER_ALERTMANAGER_URL. Empty disables

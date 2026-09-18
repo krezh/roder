@@ -163,10 +163,12 @@ pub async fn features(
     let alertmanager = alerts.is_some() && state.config.can_read_alerts(&identity.groups);
     let alertmanager_silences = alertmanager && state.config.can_silence_alerts(&identity.groups);
     let talos = talos_capabilities(&state, &identity);
+    let recommendations = state.prometheus.read().await.is_some();
     Json(serde_json::json!({
         "talos": talos,
         "alertmanager": alertmanager,
         "alertmanager_silences": alertmanager_silences,
+        "recommendations": recommendations,
         "debug_image": b.debug_image(),
     }))
     .into_response()

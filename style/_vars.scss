@@ -80,7 +80,10 @@ body {
   background: var(--bg);
   color: var(--fg);
   font-family: "Rubik", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  font-size: 13px;
+  /* The rem fractions throughout the stylesheet read as if the root were
+     browser-default, so the root has to stay near it: at 13px half of them
+     render under 10px. 14px keeps the grid dense and most of them legible. */
+  font-size: 14px;
   line-height: 1.45;
 }
 
@@ -110,7 +113,7 @@ body {
   background: transparent;
 }
 
-// 13px suits the desktop's dense grid, but reads as tiny on a phone held at
+// 14px suits the desktop's dense grid, but reads as tiny on a phone held at
 // arm's length — bump the root so every rem-based size (text, padding, touch
 // targets) scales up together.
 @media (max-width: 760px) {

@@ -20,6 +20,9 @@ http = "1"
 reqwest = { version = "0.13.4", default-features = false, features = [
   "rustls",
   "json",
+  # Prometheus queries POST form-encoded parameters; a long PromQL subquery
+  # outgrows what proxies accept in a URL.
+  "form",
 ] }
 arc-swap = "1"
 tokio = { workspace = true }

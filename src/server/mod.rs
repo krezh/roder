@@ -68,6 +68,10 @@ pub struct AppState {
     pub provider: Option<Arc<OidcProvider>>,
     /// Alertmanager HTTP cache. `None` if no Alertmanager was discovered.
     pub alerts: Arc<RwLock<Option<Arc<roder_k8s::AlertsCache>>>>,
+    /// Prometheus query client for resource recommendations. `None` if no
+    /// Prometheus was configured. Unlike `alerts` this holds no cache: a
+    /// resource scan is explicit and one-shot, so there is nothing to keep warm.
+    pub prometheus: Arc<RwLock<Option<Arc<roder_k8s::PromClient>>>>,
     /// Shared, ServiceAccount-owned cluster metadata and enrichment caches.
     /// Built once at startup and read by every per-user `Backend`.
     pub shared: std::sync::Arc<roder_k8s::SharedCluster>,
@@ -115,6 +119,7 @@ pub async fn build_state(leptos_options: LeptosOptions) -> Result<AppState, Stri
     // each user's own passthrough token, via their per-subject `Backend` in
     // `backends` (built lazily on first use by `BackendRegistry::resolve`).
     let alerts = Arc::new(RwLock::new(None));
+    let prometheus = Arc::new(RwLock::new(None));
     let talos = match roder_talos::Backend::connect_in_cluster().await {
         Ok(client) => {
             if client.is_some() {
@@ -195,6 +200,9 @@ pub async fn build_state(leptos_options: LeptosOptions) -> Result<AppState, Stri
     let url = roder_k8s::alertmanager_url()?;
     *alerts.write().await = url.map(|u| Arc::new(roder_k8s::AlertsCache::new(u)));
 
+    let url = roder_k8s::prometheus_url()?;
+    *prometheus.write().await = url.map(|u| Arc::new(roder_k8s::PromClient::new(u)));
+
     // Per-subject backend registry (token passthrough): this is the live
     // request-path source of each caller's `Backend`, resolved by
     // `require_auth` and passed downstream via request extensions.
@@ -263,6 +271,7 @@ pub async fn build_state(leptos_options: LeptosOptions) -> Result<AppState, Stri
         config: Arc::new(config),
         provider,
         alerts,
+        prometheus,
         shared,
         talos,
         talos_action_lock: Arc::new(Mutex::new(())),

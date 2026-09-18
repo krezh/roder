@@ -12,6 +12,8 @@ mod discovery;
 mod informers;
 mod metrics;
 mod project;
+pub mod promql;
+pub mod recommend;
 mod shared;
 #[allow(dead_code)]
 mod table;
@@ -27,4 +29,6 @@ pub use coordination::{
 };
 pub use informers::WatchHandle;
 pub use kube::api::{AttachedProcess, TerminalSize};
+pub use promql::{prometheus_url, PromClient, PromError, RangeSeries, Sample};
+pub use recommend::{ContainerSpec, ScanRequest, ScanSettings, Scanner, WorkloadRef};
 pub use shared::SharedCluster;

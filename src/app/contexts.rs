@@ -12,7 +12,8 @@ use leptos::prelude::*;
 use crate::app::state::{
     AccessReviewOpen, AlertSilencesEnabled, AlertsData, AlertsLastRefresh, AlertsOpen,
     DetailTarget, DrainOpen, DrainTarget, ExecOpen, ExecTarget, FileBrowserOpen, NsPaletteOpen,
-    PaletteOpen, PodModalTarget, ShortcutsOpen, TableRows, TableSelected, TableTargets, TreeOpen,
+    PaletteOpen, PodModalTarget, RecommendData, RecommendEnabled, RecommendError, RecommendOpen,
+    RecommendScanning, ShortcutsOpen, TableRows, TableSelected, TableTargets, TreeOpen,
 };
 use crate::app::ui::confirm::Confirm;
 use crate::app::ui::delete::DeleteRequest;
@@ -29,6 +30,7 @@ pub(crate) struct Overlays {
     pub(crate) ns_palette: RwSignal<bool>,
     pub(crate) shortcuts: RwSignal<bool>,
     pub(crate) alerts: RwSignal<bool>,
+    pub(crate) recommend: RwSignal<bool>,
     pub(crate) access_review: RwSignal<bool>,
     pub(crate) exec: RwSignal<Option<ExecTarget>>,
     pub(crate) file_browser: RwSignal<Option<DetailTarget>>,
@@ -47,6 +49,7 @@ impl Overlays {
             ns_palette: RwSignal::new(false),
             shortcuts: RwSignal::new(false),
             alerts: RwSignal::new(false),
+            recommend: RwSignal::new(false),
             access_review: RwSignal::new(false),
             exec: RwSignal::new(None),
             file_browser: RwSignal::new(None),
@@ -66,6 +69,7 @@ impl Overlays {
             || self.ns_palette.get()
             || self.shortcuts.get()
             || self.alerts.get()
+            || self.recommend.get()
             || self.access_review.get()
             || self.exec.with(Option::is_some)
             || self.file_browser.with(Option::is_some)
@@ -83,6 +87,7 @@ impl Overlays {
         provide_context(NsPaletteOpen(self.ns_palette));
         provide_context(ShortcutsOpen(self.shortcuts));
         provide_context(AlertsOpen(self.alerts));
+        provide_context(RecommendOpen(self.recommend));
         provide_context(AccessReviewOpen(self.access_review));
         provide_context(ExecOpen(self.exec));
         provide_context(FileBrowserOpen(self.file_browser));
@@ -126,6 +131,36 @@ impl Alerts {
         provide_context(AlertsData(self.data));
         provide_context(AlertsLastRefresh(self.last_refresh));
         provide_context(AlertSilencesEnabled(self.silences_enabled));
+    }
+}
+
+/// The resource scan's shared state: the last report, whether one is running,
+/// and whether this deployment has Prometheus at all.
+#[derive(Clone, Copy)]
+pub(crate) struct Recommendations {
+    pub(crate) data: RwSignal<Option<roder_core::ResourceScan>>,
+    pub(crate) scanning: RwSignal<bool>,
+    pub(crate) error: RwSignal<Option<String>>,
+    /// Whether the server has Prometheus configured. Gates the topbar button,
+    /// the same way `Alerts::enabled` gates the alerts one.
+    pub(crate) enabled: RwSignal<bool>,
+}
+
+impl Recommendations {
+    pub(crate) fn new() -> Self {
+        Self {
+            data: RwSignal::new(None),
+            scanning: RwSignal::new(false),
+            error: RwSignal::new(None),
+            enabled: RwSignal::new(false),
+        }
+    }
+
+    pub(crate) fn provide(self) {
+        provide_context(RecommendData(self.data));
+        provide_context(RecommendScanning(self.scanning));
+        provide_context(RecommendError(self.error));
+        provide_context(RecommendEnabled(self.enabled));
     }
 }
 

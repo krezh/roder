@@ -77,6 +77,10 @@ spec:
             - name: RODER_ALERTMANAGER_URL
               value: {{ . | quote }}
             {{- end }}
+            {{- with .Values.prometheus.url }}
+            - name: RODER_PROMETHEUS_URL
+              value: {{ . | quote }}
+            {{- end }}
             - name: RODER_ALERTS_GROUPS
               value: {{ toJson .Values.alertmanager.readerGroups | quote }}
             - name: RODER_ALERTS_ACTIONS_ENABLED

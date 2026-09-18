@@ -10,7 +10,7 @@ use roder_core::ResourceKind;
 
 use crate::data;
 
-use contexts::{provide_table_handles, Alerts, Overlays};
+use contexts::{provide_table_handles, Alerts, Overlays, Recommendations};
 
 mod alert_utils;
 mod cnpg;
@@ -62,7 +62,7 @@ use overlays::shortcuts::ShortcutsHelp;
 use overlays::sweep::SweepDialog;
 use overlays::toast::ToastView;
 use overlays::tree::ResourceTreeWindow;
-use overlays::AlertsPanel;
+use overlays::{AlertsPanel, RecommendPanel};
 use state::{
     Catalog, ConnectionState, Connectivity, CtxMenu, DebugImage, FilterFocus, LogPods, LogTarget,
     NavOpen, NavigationRestored, OnlyProblems, PinnedKinds, ResourceFilter, TalosFeatures, Tick,
@@ -104,6 +104,11 @@ fn asset_version() -> String {
     }
 }
 
+/// How often firing alerts are re-fetched. The refresh button fills its
+/// progress bar over the same period, so the bar reaches full exactly as the
+/// next poll lands.
+pub(crate) const ALERTS_POLL_SECS: u64 = 30;
+
 #[cfg(target_arch = "wasm32")]
 async fn fetch_alerts(force_refresh: bool) -> Result<Vec<roder_core::FiringAlert>, String> {
     let url = if force_refresh {
@@ -112,6 +117,22 @@ async fn fetch_alerts(force_refresh: bool) -> Result<Vec<roder_core::FiringAlert
         "/api/alerts"
     };
     data::fetch_json(url).await
+}
+
+/// Run a resource scan. Long-running by nature — a two-week Prometheus query
+/// per workload — so this is only ever called from an explicit user action.
+#[cfg(target_arch = "wasm32")]
+async fn fetch_recommendations(
+    namespace: Option<String>,
+) -> Result<roder_core::ResourceScan, String> {
+    let url = match namespace {
+        Some(namespace) => format!(
+            "/api/recommendations?namespace={}",
+            js_sys::encode_uri_component(&namespace)
+        ),
+        None => "/api/recommendations".to_string(),
+    };
+    data::fetch_json(&url).await
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -244,6 +265,10 @@ pub fn App() -> impl IntoView {
     overlays.provide();
     let alerts = Alerts::new();
     alerts.provide();
+    let recommendations = Recommendations::new();
+    recommendations.provide();
+    #[cfg(target_arch = "wasm32")]
+    let recommendations_enabled = recommendations.enabled;
     // Rebound as locals: the feature-probe and poll effects below read these
     // directly rather than going back through context. Those effects are
     // wasm-only, so on the SSR build nothing reads them and the bindings would
@@ -508,6 +533,13 @@ pub fn App() -> impl IntoView {
                 .and_then(|value| value.as_bool())
                 .unwrap_or(false),
         );
+        recommendations_enabled.set(
+            features
+                .as_ref()
+                .and_then(|value| value.get("recommendations"))
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false),
+        );
         talos_features.set(
             features
                 .as_ref()
@@ -538,9 +570,18 @@ pub fn App() -> impl IntoView {
         }
     });
 
-    // Poll for firing alerts every 30 s so the panel stays current.
-    Effect::new(move |_| {
-        set_interval(
+    // Poll for firing alerts so the panel stays current.
+    //
+    // Re-armed from the last fetch, so the next poll is always one period after
+    // whatever landed last — manual refresh included. That keeps it in phase
+    // with the countdown the refresh button draws.
+    Effect::new(move |previous: Option<Option<TimeoutHandle>>| {
+        if let Some(Some(handle)) = previous {
+            handle.clear();
+        }
+        // Read through the bundle: the destructured binding is wasm-only.
+        alerts.last_refresh.track();
+        set_timeout_with_handle(
             move || {
                 #[cfg(target_arch = "wasm32")]
                 leptos::task::spawn_local(async move {
@@ -552,8 +593,9 @@ pub fn App() -> impl IntoView {
                     }
                 });
             },
-            std::time::Duration::from_secs(30),
-        );
+            std::time::Duration::from_secs(ALERTS_POLL_SECS),
+        )
+        .ok()
     });
 
     // Persist kind/detail on change (only after restore, so we don't clobber them).
@@ -680,6 +722,7 @@ pub fn App() -> impl IntoView {
                         <ResourceTreeWindow />
                         <ShortcutsHelp />
                         <AlertsPanel />
+                        <RecommendPanel />
                         <AccessReview />
                         <ToastView />
                         <keys::KeyLayer />

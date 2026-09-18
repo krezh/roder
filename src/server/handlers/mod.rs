@@ -81,6 +81,7 @@ pub(crate) mod fixtures {
             asset_version: Arc::from("test-version"),
             provider: None,
             alerts: Arc::new(RwLock::new(None)),
+            prometheus: Arc::new(RwLock::new(None)),
             backends: Arc::new(crate::server::backends::BackendRegistry::new(
                 shared.clone(),
                 None,

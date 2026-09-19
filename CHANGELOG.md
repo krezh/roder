@@ -1,5 +1,97 @@
 # Changelog
 
+## [0.1.49](https://github.com/krezh/roder/compare/0.1.48...0.1.49) (2026-09-19)
+
+
+### Features
+
+* **access:** improve access review navigation ([0ef5790](https://github.com/krezh/roder/commit/0ef579073ab06df6536337772933ea21b427fbce))
+* **actions:** centralize resource capabilities ([d134dfc](https://github.com/krezh/roder/commit/d134dfc1c565a7c081a3d990c009b1d71c7b99d1))
+* **actions:** enforce permission-aware resource actions ([4b13dad](https://github.com/krezh/roder/commit/4b13dadf18f856097e62ee8f0919a66aff7dcd65))
+* **alerts:** configure silence matchers ([342efbe](https://github.com/krezh/roder/commit/342efbeaf8cee8aa6d59a5295e26aeda4ada53b8))
+* **alerts:** link alerts to Kubernetes resources ([fe68f57](https://github.com/krezh/roder/commit/fe68f5725334b7d97ba1b1d6c8ea017f327b4945))
+* **cnpg:** add cluster operations and detail views ([0f5ea3e](https://github.com/krezh/roder/commit/0f5ea3ed5ca868d3d05943d31c9f59a778ab5b03))
+* **dashboard:** group cluster stats with infrastructure ([d1213dd](https://github.com/krezh/roder/commit/d1213dd842a88c1e705dc928ba10d5b0a2f25880))
+* **detail:** redesign resource describe view ([6677a18](https://github.com/krezh/roder/commit/6677a1841287157c5459e37a297a365e668e8ae6))
+* **events:** improve events view ([26500ac](https://github.com/krezh/roder/commit/26500acecfcc57114ec3120125a336aa2e88d4bb))
+* **kopiur:** add backup health semantics ([2716021](https://github.com/krezh/roder/commit/27160216e1570306a1cac2d719fb61965b593e36))
+* **mobile:** reuse resource tree category icons ([297d177](https://github.com/krezh/roder/commit/297d1773d8c384c8eb93f06c827a9544f4e543f9))
+* **network:** link EndpointSlices to Services ([41841a0](https://github.com/krezh/roder/commit/41841a0b75d02a83cb4b2696e2e0a5943956ed1b))
+* resource recommendations; bump base font to 14px, drop overlay overshoot ([1775b10](https://github.com/krezh/roder/commit/1775b10af459bd2ee012ef099c32a505ff6d5d23)), closes [#250](https://github.com/krezh/roder/issues/250)
+* **resources:** add operator health and relationships ([daafaa8](https://github.com/krezh/roder/commit/daafaa85ddda0aa1df91bf4324308b9450423bd2))
+* **resources:** expand operational health views ([d7591b0](https://github.com/krezh/roder/commit/d7591b048b6938a1b27b4f361d846517f7168734))
+* **resources:** improve health and action coverage ([7482a11](https://github.com/krezh/roder/commit/7482a1128e7cedad599713334714be00d784c991))
+* **storage:** add VolumeAttachment diagnostics ([019e0bf](https://github.com/krezh/roder/commit/019e0bfed9f18ff8d5d2628b26a518ca16f67ca6))
+* **tree:** link HPAs to scale targets ([9d1684a](https://github.com/krezh/roder/commit/9d1684a0fb14d0fa9d4a2bf49964268dccda5818))
+
+
+### Bug Fixes
+
+* **app:** color mobile boolean cells by value ([7d2376f](https://github.com/krezh/roder/commit/7d2376faeecd1e64588300a54bfa83a2c8d74803))
+* **cargo:** update rust crate reqwest (0.13.4 ➔ 0.13.5) ([#229](https://github.com/krezh/roder/issues/229)) ([ecff70c](https://github.com/krezh/roder/commit/ecff70c3dd6e1268bfea692b71df41169217f4d0))
+* **cargo:** update rust crate rustls (0.23.43 ➔ 0.23.44) ([#226](https://github.com/krezh/roder/issues/226)) ([b43ed6b](https://github.com/krezh/roder/commit/b43ed6bfd79df3e800c3693924dab4319be27a71))
+* **cargo:** update rust crate rustls (0.23.44 ➔ 0.23.45) ([#241](https://github.com/krezh/roder/issues/241)) ([4fd81ee](https://github.com/krezh/roder/commit/4fd81ee86498e1b70af5d7abbaa14353cc79ed1d))
+* **cargo:** update rustwright digest (3bf0f19 ➔ 9347986) ([#223](https://github.com/krezh/roder/issues/223)) ([761f545](https://github.com/krezh/roder/commit/761f54532a7b52501ceabb0a432513da15ba97c1))
+* **cargo:** update rustwright digest (9347986 ➔ a5edad0) ([#224](https://github.com/krezh/roder/issues/224)) ([ddb1eb6](https://github.com/krezh/roder/commit/ddb1eb6c95948c8aa9a1f6e8d934a1e03f180d23))
+* **cargo:** update rustwright digest (a5edad0 ➔ bcd8b68) ([#234](https://github.com/krezh/roder/issues/234)) ([53561aa](https://github.com/krezh/roder/commit/53561aa3b5bd3bd21463e25a26eab426834fa7f5))
+* **cargo:** update rustwright digest (bcd8b68 ➔ dfb481b) ([#237](https://github.com/krezh/roder/issues/237)) ([f028e12](https://github.com/krezh/roder/commit/f028e12f489cfc2dc347128b1de50137b879f37d))
+* **cargo:** update wasm-bindgen ([#228](https://github.com/krezh/roder/issues/228)) ([05115b9](https://github.com/krezh/roder/commit/05115b94e2d9c1fda25daf61ed702c92567a6252))
+* **container:** update image gcr.io/distroless/cc-debian13 (9b615ff ➔ 4594d59) ([#239](https://github.com/krezh/roder/issues/239)) ([07d87e2](https://github.com/krezh/roder/commit/07d87e29c9a53b38e06b91e4260132e7f49cb750))
+* **container:** update image ghcr.io/rust-lang/rust (1.98.0 ➔ 1.98.1) ([#227](https://github.com/krezh/roder/issues/227)) ([9daa2a4](https://github.com/krezh/roder/commit/9daa2a449a67958ea6b3df6b44b502bb7cdc4c53))
+* **container:** update image ghcr.io/rust-lang/rust (620dbcd ➔ bf5a9aa) ([#232](https://github.com/krezh/roder/issues/232)) ([ac21ece](https://github.com/krezh/roder/commit/ac21ece7b8f71b6ec95b142cbaf206db5f7d7253))
+* **container:** update image ghcr.io/rust-lang/rust (bf5a9aa ➔ 4c61226) ([#252](https://github.com/krezh/roder/issues/252)) ([6e15c58](https://github.com/krezh/roder/commit/6e15c586a49626382b5f3df9b3a04b6699d05909))
+* **dashboard:** unify resource health rollups ([6a99cd3](https://github.com/krezh/roder/commit/6a99cd3b9787ee2e8d7e67057f1e967dd3231007))
+* **events:** virtualize variable-height rows ([594119a](https://github.com/krezh/roder/commit/594119ab339d5e698b39307e8cca10a519c401fe))
+* **kopiur:** remove backup freshness cards ([42c7d2e](https://github.com/krezh/roder/commit/42c7d2e22029b226ee695c234d62fdc2f3afad8f))
+* **mobile:** use category icons across resource navigation ([35231ad](https://github.com/krezh/roder/commit/35231adbf1fe27138ea84fc88a12502c36ba9166))
+* **status:** detect endpoints without ready backends ([addc012](https://github.com/krezh/roder/commit/addc0121f2d22878aab79d4649be4369926334d7))
+* **status:** harden resource health semantics ([f480868](https://github.com/krezh/roder/commit/f480868b2e62408abfc0b9a04c46d4106f8faf60))
+* **tables:** prevent gaps during bulk row animations ([c84b262](https://github.com/krezh/roder/commit/c84b2626c50d7dfb2206c1e7a7f943cf53d1fec6))
+* **topbar:** remove redundant connection warning ([e9d0788](https://github.com/krezh/roder/commit/e9d078880adce350f3cc448723d37c39bec22400))
+
+
+### Documentation
+
+* document devenv process management ([c42bdf0](https://github.com/krezh/roder/commit/c42bdf0688ddab7375a98ae73386da6002deeb65))
+
+
+### Styles
+
+* **app:** refine scrollbars ([8d3d81a](https://github.com/krezh/roder/commit/8d3d81a919ddd91c598b92c91a077e6848503695))
+
+
+### Miscellaneous Chores
+
+* **build:** speed up development builds ([66ec470](https://github.com/krezh/roder/commit/66ec470e3aba2177585b796067269357ff6cb936))
+* **cargo:** lock file maintenance cargo.lock ([#221](https://github.com/krezh/roder/issues/221)) ([c1fcd19](https://github.com/krezh/roder/commit/c1fcd19d89a8945d3f4ac6f2a73b790aab965e78))
+* **cargo:** lock file maintenance cargo.lock ([#225](https://github.com/krezh/roder/issues/225)) ([6183153](https://github.com/krezh/roder/commit/6183153e45f70ce5a334bdba729260ad0a0542cd))
+* **cargo:** lock file maintenance cargo.lock ([#230](https://github.com/krezh/roder/issues/230)) ([8008768](https://github.com/krezh/roder/commit/800876829e8f9cebf99c5c8d8fa07efb0874b7b8))
+* **cargo:** lock file maintenance cargo.lock ([#231](https://github.com/krezh/roder/issues/231)) ([f69628c](https://github.com/krezh/roder/commit/f69628ceddb31bf3c59e0d732ce32f36aa38f330))
+* **cargo:** lock file maintenance cargo.lock ([#233](https://github.com/krezh/roder/issues/233)) ([30d9813](https://github.com/krezh/roder/commit/30d981307e8a23896e2a62c08abaa7e1bf50cd25))
+* **cargo:** lock file maintenance cargo.lock ([#236](https://github.com/krezh/roder/issues/236)) ([d1c57a6](https://github.com/krezh/roder/commit/d1c57a6276390c38810a691e6d72a6711f952b98))
+* **cargo:** lock file maintenance cargo.lock ([#238](https://github.com/krezh/roder/issues/238)) ([bc19d52](https://github.com/krezh/roder/commit/bc19d52d38116f981d4247394ae17812ee6696cb))
+* **cargo:** lock file maintenance cargo.lock ([#240](https://github.com/krezh/roder/issues/240)) ([114863d](https://github.com/krezh/roder/commit/114863d689c2fea4aec65dcb1f8976aea159aba0))
+* **cargo:** lock file maintenance cargo.lock ([#242](https://github.com/krezh/roder/issues/242)) ([525dd49](https://github.com/krezh/roder/commit/525dd49c222b1060022888aa170700ae1eae116d))
+* **cargo:** lock file maintenance cargo.lock ([#245](https://github.com/krezh/roder/issues/245)) ([7f3e6e3](https://github.com/krezh/roder/commit/7f3e6e34bf4f4859ee7fab59b410ce68e4dc2cb8))
+* **cargo:** lock file maintenance cargo.lock ([#247](https://github.com/krezh/roder/issues/247)) ([1b03622](https://github.com/krezh/roder/commit/1b0362262cac01844a7c2076c7a4d966ee691355))
+* **cargo:** lock file maintenance cargo.lock ([#248](https://github.com/krezh/roder/issues/248)) ([7e6a49d](https://github.com/krezh/roder/commit/7e6a49d0ef5ecee22ceabaeb596c0f63f9b7b5f5))
+* **cargo:** lock file maintenance cargo.lock ([#249](https://github.com/krezh/roder/issues/249)) ([27b6cad](https://github.com/krezh/roder/commit/27b6cada50596ade67b37d4b57e0ede4603be4c4))
+* **cargo:** lock file maintenance cargo.lock ([#251](https://github.com/krezh/roder/issues/251)) ([9fb8fed](https://github.com/krezh/roder/commit/9fb8fedf68799384638068acf4dd18324f340ec0))
+* **deps:** update devenv inputs ([e620145](https://github.com/krezh/roder/commit/e6201459ef90b7fdea6b2d129a1671461b453f48))
+
+
+### Code Refactoring
+
+* **app:** centralize shared resource logic ([5b75e57](https://github.com/krezh/roder/commit/5b75e575ef192affab401c0e1a066a871a1d467f))
+* **app:** unify column rendering and split oversized modules ([0e22a35](https://github.com/krezh/roder/commit/0e22a35a2f01602e051d23a5aca69f45009821da))
+* share the staleness ring with the dashboard refresh button ([64fd0db](https://github.com/krezh/roder/commit/64fd0db06254ec5b277af0b2cc9b74049c5514c4))
+* **ui:** reuse shared tooltip layer ([caaffb9](https://github.com/krezh/roder/commit/caaffb9618afb552e7c769ccb22efbfa34cfcc9d))
+
+
+### Tests
+
+* **k8s:** expand projector coverage ([728b5b0](https://github.com/krezh/roder/commit/728b5b09ba104fd71ad705ac8f14e3b419a61544))
+
 ## [0.1.48](https://github.com/krezh/roder/compare/0.1.47...0.1.48) (2026-09-04)
 
 

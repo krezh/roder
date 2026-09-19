@@ -5,13 +5,20 @@ use crate::app::util::format::camel_label;
 use crate::data;
 
 const OVERVIEW_STORAGE_KEY: &str = "roder.overview";
-const OVERVIEW_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
+/// How often the overview is re-fetched, and one full turn of the refresh
+/// button's ring.
+pub(crate) const OVERVIEW_POLL_SECS: u64 = 10;
+const OVERVIEW_POLL_INTERVAL: std::time::Duration =
+    std::time::Duration::from_secs(OVERVIEW_POLL_SECS);
 
 #[derive(Clone, Copy)]
 pub(crate) struct OverviewState {
     pub(crate) data: RwSignal<Option<ClusterOverview>>,
     pub(crate) error: RwSignal<Option<String>>,
     pub(crate) stale: RwSignal<bool>,
+    /// When the last fetch landed, in browser milliseconds. Drives the refresh
+    /// button's countdown ring.
+    pub(crate) last_refresh: RwSignal<Option<f64>>,
     resource: LocalResource<Result<ClusterOverview, String>>,
 }
 
@@ -20,6 +27,9 @@ impl OverviewState {
         let data = RwSignal::new(None);
         let error = RwSignal::new(None);
         let stale = RwSignal::new(false);
+        let last_refresh = RwSignal::new(None);
+        // Bumped by every completed attempt, success or failure.
+        let attempt = RwSignal::new(0u32);
 
         Effect::new(move |_| {
             if let Some(cached) = data::storage_get(OVERVIEW_STORAGE_KEY)
@@ -36,6 +46,7 @@ impl OverviewState {
             data,
             error,
             stale,
+            last_refresh,
             resource,
         };
 
@@ -57,14 +68,26 @@ impl OverviewState {
                     state.stale.set(true);
                 }
             }
+            // Only a landed fetch advances the ring, so a failing one leaves it
+            // closed — which is what "stale" should look like.
+            if state.error.get_untracked().is_none() {
+                state
+                    .last_refresh
+                    .set(Some(crate::app::ui::staleness::now_ms()));
+            }
+            attempt.update(|count| *count = count.wrapping_add(1));
         });
 
-        Effect::new(move |_| {
-            if let Ok(handle) =
-                set_interval_with_handle(move || state.resource.refetch(), OVERVIEW_POLL_INTERVAL)
-            {
-                on_cleanup(move || handle.clear());
+        // Re-armed from the last completed attempt, so the poll stays in phase
+        // with the countdown the refresh button draws. Keyed on `attempt`
+        // rather than `last_refresh`: a run of failures never advances the
+        // latter, and polling would stop.
+        Effect::new(move |previous: Option<Option<TimeoutHandle>>| {
+            if let Some(Some(handle)) = previous {
+                handle.clear();
             }
+            attempt.track();
+            set_timeout_with_handle(move || state.resource.refetch(), OVERVIEW_POLL_INTERVAL).ok()
         });
 
         state

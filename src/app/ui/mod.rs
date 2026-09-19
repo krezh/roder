@@ -18,9 +18,11 @@ pub(crate) mod delete;
 pub(crate) mod filter;
 pub(crate) mod fuzzy;
 pub(crate) mod overlay;
+pub(crate) mod staleness;
 pub(crate) mod sweep;
 pub(crate) mod toast;
 
 pub(crate) use filter::{filter_kinds, filter_namespaces};
 pub(crate) use fuzzy::highlight;
 pub(crate) use overlay::{use_bool_overlay, use_dialog_focus, use_option_overlay};
+pub(crate) use staleness::StalenessRing;

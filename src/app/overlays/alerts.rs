@@ -6,7 +6,7 @@ use crate::app::components::dropdown::{Dropdown, DropdownClose};
 use crate::app::state::{
     AlertSilencesEnabled, AlertsData, AlertsLastRefresh, AlertsOpen, DetailTarget, Tick,
 };
-use crate::app::ui::use_bool_overlay;
+use crate::app::ui::{use_bool_overlay, StalenessRing};
 
 #[component]
 pub(crate) fn AlertsPanel() -> impl IntoView {
@@ -21,14 +21,6 @@ pub(crate) fn AlertsPanel() -> impl IntoView {
     let refresh_error = RwSignal::new(None::<String>);
     let dialog_ref = NodeRef::<leptos::html::Div>::new();
     crate::app::ui::use_dialog_focus(dialog_ref);
-
-    // `(this fetch, the one before it)`. The ring's tail starts from the arc
-    // on screen, which needs the previous fetch time. One memo keeps both
-    // values from the same update; separate signals can be read mid-swap.
-    let ring = Memo::new(move |prior: Option<&(Option<f64>, Option<f64>)>| {
-        let current = last_refresh.get();
-        (current, prior.and_then(|(previous, _)| *previous))
-    });
 
     let refresh = move |_| {
         #[cfg(target_arch = "wasm32")]
@@ -100,21 +92,7 @@ pub(crate) fn AlertsPanel() -> impl IntoView {
                         // Label stays fixed so the button keeps its width; the
                         // fetch is too fast for a transient one to register.
                         "Refresh"
-                        // Keyed on the fetch time so each fetch replaces the
-                        // node: a CSS animation only restarts when its element
-                        // does, not when its delay is patched.
-                        <For
-                            each=move || ring.get().0.map(|ms| ms as u64)
-                            key=|stamp| *stamp
-                            let:_stamp
-                        >
-                            <svg class="alerts-staleness" aria-hidden="true">
-                                <rect
-                                    pathLength="100"
-                                    style=staleness_style(ring.get_untracked(), now_ms())
-                                ></rect>
-                            </svg>
-                        </For>
+                        <StalenessRing last_refresh period_secs=crate::app::ALERTS_POLL_SECS />
                     </button>
                     <button class="alerts-close" on:click=move |_| do_close()>"✕"</button>
                 </div>
@@ -133,61 +111,6 @@ pub(crate) fn AlertsPanel() -> impl IntoView {
             </div>
         </Show>
     }
-}
-
-/// Browser clock in milliseconds; 0 on the server, where the bar never renders.
-fn now_ms() -> f64 {
-    #[cfg(target_arch = "wasm32")]
-    {
-        js_sys::Date::now()
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        0.0
-    }
-}
-
-/// How long the tail takes to run down the head when a fetch lands.
-const CATCHUP_SECS: f64 = 0.45;
-/// Only play the catch-up for a fetch that just landed. Opening the panel long
-/// after one should resume the fill, not replay the whip.
-const CATCHUP_WINDOW_SECS: f64 = 1.5;
-
-/// Inline timing for the ring, from `(this fetch, the one before it)`.
-///
-/// Two animations share the element: the tail catching up, then the fill. The
-/// dash array is the arc the previous cycle drew, which the catch-up keyframes
-/// pick up as their implicit start.
-///
-/// The fill's negative delay places a panel opened mid-cycle at the point the
-/// countdown has actually reached. Never refreshed reads as fully stale.
-fn staleness_style(ring: (Option<f64>, Option<f64>), now_ms: f64) -> String {
-    let (last_refresh_ms, previous_ms) = ring;
-    let period = crate::app::ALERTS_POLL_SECS as f64;
-    let elapsed = last_refresh_ms
-        .map(|ms| ((now_ms - ms) / 1000.0).clamp(0.0, period))
-        .unwrap_or(period);
-
-    // The arc the last cycle reached — the distance the tail travels.
-    let drawn = match (last_refresh_ms, previous_ms) {
-        (Some(current), Some(previous)) => {
-            (((current - previous) / 1000.0) / period).clamp(0.0, 1.0) * 100.0
-        }
-        _ => 0.0,
-    };
-    let catchup = if elapsed < CATCHUP_WINDOW_SECS && drawn > 0.0 {
-        CATCHUP_SECS
-    } else {
-        0.0
-    };
-
-    format!(
-        "stroke-dasharray:{drawn:.2} {:.2};\
-         animation-duration:{catchup}s,{period}s;\
-         animation-delay:0s,{:.2}s",
-        100.0 - drawn,
-        catchup - elapsed,
-    )
 }
 
 fn refresh_status(last_refresh_ms: Option<f64>, failed: bool) -> String {

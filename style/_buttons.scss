@@ -224,3 +224,65 @@
 }
 .act-ok { color: var(--ok); font-size: 0.8rem; }
 .act-err { color: var(--error); font-size: 0.8rem; }
+
+/* Time until the next automatic refresh, traced around a refresh button
+   outline: bare just after a fetch, a closed ring as the next one lands.
+   Duration and the negative start offset come from the rect's inline style, so
+   the period has a single source of truth in Rust.
+
+   An SVG stroke rather than a conic-gradient ring: `pathLength` normalises the
+   perimeter, so the head travels at one speed the whole way round instead of
+   racing the short edges as an angular sweep would. `stroke-dashoffset` also
+   animates without touching layout. */
+.staleness-ring {
+  position: absolute;
+  /* Negative inset so the box covers the BORDER box; `inset: 0` resolves
+     against the padding box, which sits inside the button's own border. */
+  inset: -1px;
+  width: calc(100% + 2px);
+  height: calc(100% + 2px);
+  pointer-events: none;
+  overflow: visible;
+
+  rect {
+    /* Half a stroke in, so a 1px stroke sits centred on the button's 1px
+       border and replaces it as it sweeps round. */
+    x: 0.5px;
+    y: 0.5px;
+    width: calc(100% - 1px);
+    height: calc(100% - 1px);
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 1px;
+    /* Overridden inline with the arc the previous cycle drew. */
+    stroke-dasharray: 0 100;
+    stroke-dashoffset: 0;
+    /* Two passes: the tail runs down the head, then the new cycle fills. Their
+       durations and the fill's start offset come from the inline style. */
+    animation-name: staleness-ring-catchup, staleness-ring-fill;
+    /* Quart ease-out on the whip so it leaves fast and settles; the fill has to
+       stay linear or the countdown would misreport the time remaining. */
+    animation-timing-function: cubic-bezier(0.25, 1, 0.5, 1), linear;
+    animation-fill-mode: forwards, forwards;
+  }
+}
+
+/* No `from`: the tail starts from whatever arc is set inline, so a refresh
+   part-way through a cycle shortens exactly what is on screen. */
+@keyframes staleness-ring-catchup {
+  to {
+    stroke-dasharray: 0 100;
+    stroke-dashoffset: -100;
+  }
+}
+
+@keyframes staleness-ring-fill {
+  from {
+    stroke-dasharray: 0 100;
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dasharray: 100 0;
+    stroke-dashoffset: 0;
+  }
+}

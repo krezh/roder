@@ -12,6 +12,7 @@ use crate::app::overview::{
     ControllerState, HealthState, OverviewState,
 };
 use crate::app::state::{Catalog, DetailTarget, Tick};
+use crate::app::ui::StalenessRing;
 use crate::app::util::format::{cluster_usage_pct, fmt_cores, fmt_mem, pct, talos_version};
 use crate::data;
 
@@ -37,7 +38,13 @@ pub(crate) fn Dashboard() -> impl IntoView {
                     <button type="button" class="dashboard-refresh"
                         disabled=move || overview.refreshing()
                         on:click=move |_| overview.refresh()>
-                        {move || if overview.refreshing() { "Refreshing" } else { "Refresh" }}
+                        // Label stays fixed so the button keeps its width; the
+                        // ring carries how stale the data is.
+                        "Refresh"
+                        <StalenessRing
+                            last_refresh=overview.last_refresh
+                            period_secs=crate::app::overview::OVERVIEW_POLL_SECS
+                        />
                     </button>
                 </div>
             </header>

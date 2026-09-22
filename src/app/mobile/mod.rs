@@ -68,7 +68,8 @@ pub(crate) fn MobileShell() -> impl IntoView {
     });
 
     view! {
-        <div class="mobile-shell" class:nav-open=move || nav_open.get()>
+        <div class="mobile-shell" class:nav-open=move || nav_open.get()
+            on:pointermove=super::interactive_card::update_hover_origin>
             <MobileHeader />
             <div class="mobile-sidebar-scrim" class:open=move || nav_open.get()
                 on:click=move |_| nav_open.set(false)></div>

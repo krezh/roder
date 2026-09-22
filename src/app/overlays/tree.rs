@@ -202,7 +202,7 @@ fn BranchCard(node: ResourceTreeNode, is_root: bool) -> AnyView {
 
     view! {
         <div
-            class=format!("tree-owner-card {border_class}")
+            class=format!("tree-owner-card interactive-card {border_class}")
             class:tree-selected=selected
             role="button"
             tabindex="0"
@@ -289,7 +289,7 @@ fn LeafChip(node: ResourceTreeNode) -> impl IntoView {
     };
     view! {
         <div
-            class="tree-leaf-chip"
+            class="tree-leaf-chip interactive-card"
             class:tree-leaf-disabled=!clickable
             class:tree-selected=selected
             data-tip=(!clickable).then_some("Kind not found in this cluster's catalog")

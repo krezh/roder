@@ -82,7 +82,7 @@ fn MobileRelationshipNode(node: ResourceTreeNode, root: bool) -> AnyView {
     view! {
         <div class="mobile-relationship-node">
             <div class="mobile-relationship-row">
-                <button class="mobile-relationship-main" disabled=key.is_none() on:click=move |_| {
+                <button class="mobile-relationship-main interactive-card" disabled=key.is_none() on:click=move |_| {
                     if let Some(key) = key.clone() {
                         detail.set(Some(DetailTarget { key, namespace: namespace.clone(), name: name.clone() }));
                         tree_open.set(None);

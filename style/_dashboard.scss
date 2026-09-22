@@ -135,15 +135,14 @@ button.dashboard-card,
 button.controller-card,
 button.node {
   appearance: none;
+  background: var(--panel);
   color: var(--fg);
   text-align: left;
   cursor: pointer;
-  transition: border-color 0.14s ease, background 0.14s ease, transform 0.14s ease;
+  transition: border-color 0.18s ease;
 
   &:hover:not(:disabled) {
     border-color: color-mix(in srgb, var(--accent) 65%, var(--border));
-    background: color-mix(in srgb, var(--accent) 4%, var(--panel));
-    transform: translateY(-1px);
   }
   &:focus-visible {
     outline: 2px solid color-mix(in srgb, var(--accent) 42%, transparent);
@@ -589,7 +588,6 @@ button.node {
   button.controller-card,
   button.node {
     padding: 0.85rem;
-    &:hover:not(:disabled) { transform: none; }
   }
   .controller-grid {
     grid-template-columns: 1fr;

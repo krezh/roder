@@ -58,7 +58,7 @@ pub(crate) fn CronJobJobs(target: DetailTarget) -> impl IntoView {
                                                 name: job.name.clone(),
                                             });
                                             view! {
-                                                <button class="job-mini-row" disabled=job_target.is_none()
+                                                <button class="job-mini-row interactive-card" disabled=job_target.is_none()
                                                     on:click=move |_| detail.set(job_target.clone())>
                                                     <span class=format!("pm-dot {}", dot_class(status))></span>
                                                     <span class="pm-name">{job.name}</span>

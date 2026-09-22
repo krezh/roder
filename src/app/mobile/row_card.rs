@@ -110,7 +110,7 @@ pub(crate) fn MobileRowCard(
     let uid_menu = uid.clone();
 
     view! {
-        <div class="mobile-card" role="button" tabindex="0"
+        <div class="mobile-card interactive-card" role="button" tabindex="0"
             class:selected=move || selected.get().contains(&uid_chk)
             on:click=move |_| {
                 if press.fired.get_value() { press.fired.set_value(false); return; }

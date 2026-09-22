@@ -79,10 +79,10 @@ fn mobile_dashboard_sections(
                     {mobile_usage_meter("CPU", cpu, cpu_available)}{mobile_usage_meter("Memory", memory, memory_available)}
                     {(!cpu_available || !memory_available).then(|| view! { <p>"Some usage metrics are unavailable. Capacity values are still shown per node."</p> })}
                 </article>
-                <button class="mobile-dashboard-card mobile-inventory" on:click=move |_| select_kind(catalog, selected, "Pod")><small>"Workloads"</small><h2>"Pods"</h2><strong>{overview.pod_total}</strong>
+                <button class="mobile-dashboard-card mobile-inventory interactive-card" on:click=move |_| select_kind(catalog, selected, "Pod")><small>"Workloads"</small><h2>"Pods"</h2><strong>{overview.pod_total}</strong>
                     <span><i class="ok"></i>{overview.pod_running}" running"</span><span><i class="pending"></i>{overview.pod_pending}" pending"</span><span><i class="error"></i>{overview.pod_failed}" failed"</span>
                 </button>
-                <button class="mobile-dashboard-card mobile-inventory" on:click=move |_| select_kind(catalog, selected, "Namespace")><small>"Inventory"</small><h2>"Namespaces"</h2><strong>{overview.namespace_count}</strong><span>"Kubernetes "{overview.kubernetes_version}</span></button>
+                <button class="mobile-dashboard-card mobile-inventory interactive-card" on:click=move |_| select_kind(catalog, selected, "Namespace")><small>"Inventory"</small><h2>"Namespaces"</h2><strong>{overview.namespace_count}</strong><span>"Kubernetes "{overview.kubernetes_version}</span></button>
             </section>
             <section class="mobile-dashboard-section"><header><h2>"Nodes"</h2><span>{health_summary.ready_nodes}" of "{nodes.len()}" ready"</span></header>
                 <div class="mobile-node-list">{nodes.into_iter().map(|node| mobile_node(node, node_kind.clone(), selected, detail)).collect_view()}</div>
@@ -135,7 +135,7 @@ fn mobile_rollup(
         ControllerState::Error => "error",
     };
     let label = derived.label;
-    view! { <button class=format!("mobile-controller-card {state}") data-tip=error on:click=move |_| select_kind(catalog, selected, &target)><i></i><span><strong>{label}</strong><b>{if only_unclassified { health.total.to_string() } else { format!("{} / {}", health.ready, health.total) }}</b><small>{if only_unclassified { "resources" } else { "ready" }}</small></span><em>
+    view! { <button class=format!("mobile-controller-card interactive-card {state}") data-tip=error on:click=move |_| select_kind(catalog, selected, &target)><i></i><span><strong>{label}</strong><b>{if only_unclassified { health.total.to_string() } else { format!("{} / {}", health.ready, health.total) }}</b><small>{if only_unclassified { "resources" } else { "ready" }}</small></span><em>
         {(health.reconciling > 0).then(|| view! { <span>{health.reconciling}" reconciling"</span> })}{(health.suspended > 0).then(|| view! { <span>{health.suspended}" suspended"</span> })}
         {(health.warning > 0).then(|| view! { <span>{health.warning}" warning"</span> })}{(health.failing > 0).then(|| view! { <span>{health.failing}" failing"</span> })}
         {(health.unknown > 0).then(|| view! { <span>{health.unknown}" health status unrecognized"</span> })}{unreadable.then(|| view! { <span>"unreadable"</span> })}
@@ -175,7 +175,7 @@ fn mobile_node(
     let name = node.name.clone();
     let cpu = pct(node.cpu_used, node.cpu_cores);
     let memory = pct(node.mem_used, node.mem_bytes);
-    view! { <button class="mobile-node-card" class:error=!node.ready disabled=kind.is_none() on:click=move |_| if let Some(kind) = kind.clone() {
+    view! { <button class="mobile-node-card interactive-card" class:error=!node.ready disabled=kind.is_none() on:click=move |_| if let Some(kind) = kind.clone() {
         detail.set(Some(DetailTarget { key: kind.key.clone(), namespace: None, name: name.clone() })); selected.set(Some(kind));
     }><header><i></i><strong>{node.name}</strong><span>{if node.ready { "Ready" } else { "Not ready" }}</span></header><div class="mobile-node-versions">
         {node.os_image.as_deref().and_then(talos_version).map(|value| view! { <span>"Talos "{value}</span> })}{node.kubelet_version.map(|value| view! { <span>"k8s "{value}</span> })}
@@ -200,7 +200,7 @@ fn mobile_warning(
     } else {
         format!("{} / {}", warning.involved_kind, warning.involved_name)
     };
-    view! { <button class="mobile-warning-row" disabled=kind.is_none() || event_name.is_empty() on:click=move |_| if let Some(kind) = kind.clone() { detail.set(Some(DetailTarget { key: kind.key, namespace: namespace.clone(), name: event_name.clone() })); }>
+    view! { <button class="mobile-warning-row interactive-card" disabled=kind.is_none() || event_name.is_empty() on:click=move |_| if let Some(kind) = kind.clone() { detail.set(Some(DetailTarget { key: kind.key, namespace: namespace.clone(), name: event_name.clone() })); }>
         <i></i><span><span><strong>{warning.reason}</strong><small>{move || { tick.get(); data::humanize_age(&timestamp) }}</small></span><em>
             {warning.namespace.map(|value| view! { <b>{value}</b> })}<span>{object}</span>{(!warning.source.is_empty()).then(|| view! { <span>{warning.source}</span> })}
         </em><p>{warning.message}</p></span>{(warning.count > 1).then(|| view! { <b>"×"{warning.count}</b> })}

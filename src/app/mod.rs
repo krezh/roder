@@ -24,6 +24,7 @@ mod failure_watch;
 mod files;
 mod hooks;
 mod icons;
+mod interactive_card;
 mod jobs;
 mod keys;
 mod log_stream;
@@ -704,7 +705,8 @@ pub fn App() -> impl IntoView {
                 view! { <MobileShell /> }.into_any()
             } else {
                 view! {
-                    <div class="app" class:nav-open=move || nav_open.get()>
+                    <div class="app" class:nav-open=move || nav_open.get()
+                        on:pointermove=interactive_card::update_hover_origin>
                         <Topbar />
                         <div class="body">
                             <Sidebar />

@@ -60,7 +60,7 @@ pub(crate) fn CnpgBackupsTab(namespace: String, cluster: String) -> impl IntoVie
                             }
                         };
                         view! {
-                            <button class="cnpg-backup-row" on:click=open>
+                            <button class="cnpg-backup-row interactive-card" on:click=open>
                                 <span class=move || format!("pm-dot {}", dot_class(row.get().map(|row| row.status).unwrap_or(RowStatus::Unknown)))></span>
                                 <span class="pm-name">{move || row.get().map(|row| row.name).unwrap_or_default()}</span>
                                 <span class="cnpg-backup-phase">{phase}</span>

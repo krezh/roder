@@ -166,7 +166,7 @@ fn dashboard_view(
                     })}
                 </section>
 
-                <button type="button" class="card dashboard-card inventory-card"
+                <button type="button" class="card dashboard-card inventory-card interactive-card"
                     on:click=move |_| select_kind(catalog, selected_kind, "Pod")>
                     <div class="card-heading">
                         <div>
@@ -182,7 +182,7 @@ fn dashboard_view(
                     </div>
                 </button>
 
-                <button type="button" class="card dashboard-card inventory-card"
+                <button type="button" class="card dashboard-card inventory-card interactive-card"
                     on:click=move |_| select_kind(catalog, selected_kind, "Namespace")>
                     <div class="card-heading">
                         <div>
@@ -270,7 +270,7 @@ fn warning_row(
     };
 
     view! {
-        <button type="button" class="warning-row" role="listitem" disabled=!can_open
+        <button type="button" class="warning-row interactive-card" role="listitem" disabled=!can_open
             on:click=move |_| {
                 let Some(kind) = event_kind.clone() else { return; };
                 detail.set(Some(DetailTarget {
@@ -349,7 +349,7 @@ fn rollup_card(
         ControllerState::Error => "controller-error",
     };
     view! {
-        <button type="button" class=format!("card controller-card {state}")
+        <button type="button" class=format!("card controller-card interactive-card {state}")
             data-tip=error
             on:click=move |_| select_kind(catalog, selected_kind, &target)>
             <div class="controller-status" aria-hidden="true"></div>
@@ -440,7 +440,7 @@ fn node_card(
     let name = node.name.clone();
 
     view! {
-        <button type="button" class="card node"
+        <button type="button" class="card node interactive-card"
             class:node-unready=!node.ready
             disabled=node_kind.is_none()
             on:click=move |_| {

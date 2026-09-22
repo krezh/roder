@@ -69,7 +69,7 @@ use state::{
     NavOpen, NavigationRestored, OnlyProblems, PinnedKinds, ResourceFilter, TalosFeatures, Tick,
     WorkspaceConf, WorkspaceConfig,
 };
-use ui::toast::Toast;
+use ui::toast::Toasts;
 use views::resource::ResourceView;
 use views::search::SearchResultsView;
 use views::workspace::WorkspaceView;
@@ -306,7 +306,7 @@ pub fn App() -> impl IntoView {
     let requested_tab = RwSignal::new(None::<DetailTab>);
     let tick = RwSignal::new(0u32);
     let only_problems = RwSignal::new(false);
-    let toast = RwSignal::new(None::<Toast>);
+    let toast = Toasts::new();
     let talos_features = RwSignal::new(roder_core::TalosCapabilities::default());
     let debug_image = RwSignal::new(String::new());
     let resource_filter = RwSignal::new(String::new());

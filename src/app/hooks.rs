@@ -10,7 +10,7 @@ use roder_core::WatchEvent;
 
 use crate::app::events::{apply_event, RowMap, UidSet};
 use crate::app::state::{ConnectionState, Connectivity, SortKey};
-use crate::app::ui::toast::Toast;
+use crate::app::ui::toast::Toasts;
 use crate::data;
 
 /// How long an SSE burst accumulates before it's drained in one reactive flush.
@@ -105,7 +105,7 @@ pub(crate) fn use_sse_subscription(
     // A counter that the error handler bumps to re-trigger the subscription Effect.
     let reconnect: RwSignal<u32> = RwSignal::new(0);
     let conn = use_context::<ConnectionState>().map(|c| c.0);
-    let toast = expect_context::<RwSignal<Option<Toast>>>();
+    let toast = expect_context::<Toasts>();
     let watch_error = RwSignal::new(None::<String>);
 
     // Coalesce the per-event SSE deltas of a burst (notably a metrics scrape's one

@@ -9,14 +9,14 @@ use crate::app::hooks::Coalescer;
 use crate::app::state::{
     Catalog, ConnectionState, Connectivity, DetailTarget, PaneConfig, WorkspaceConf,
 };
-use crate::app::ui::toast::{show_toast_detail, Toast, ToastKind};
+use crate::app::ui::toast::{show_toast_detail, ToastKind, Toasts};
 use crate::data;
 
 #[component]
 pub(crate) fn WorkspaceView() -> impl IntoView {
     let ws = expect_context::<WorkspaceConf>().0;
     let connection = expect_context::<ConnectionState>().0;
-    let toast = expect_context::<RwSignal<Option<Toast>>>();
+    let toast = expect_context::<Toasts>();
 
     // One row signal per pane (keyed by kind_key). Non-reactive storage so the
     // multi-watch Effect can write into individual signals without loops.

@@ -16,7 +16,7 @@ use crate::app::state::LogPods;
 use crate::app::table_logic;
 use crate::app::ui::confirm::{ask_confirm, Confirm};
 use crate::app::ui::delete::{ask_delete, DeleteRequest};
-use crate::app::ui::toast::Toast;
+use crate::app::ui::toast::Toasts;
 use crate::app::util::predicate::KindKind;
 
 #[component]
@@ -27,7 +27,7 @@ pub(crate) fn BulkBar(
     /// The rows currently passing the filter — what "Select all" selects.
     shown_uids: Memo<Vec<String>>,
 ) -> impl IntoView {
-    let toast = expect_context::<RwSignal<Option<Toast>>>();
+    let toast = expect_context::<Toasts>();
     let confirm = expect_context::<RwSignal<Option<Confirm>>>();
     let delete_confirm = expect_context::<RwSignal<Option<DeleteRequest>>>();
     let log_pods = expect_context::<LogPods>().0;

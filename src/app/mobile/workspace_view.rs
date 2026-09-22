@@ -19,7 +19,7 @@ use crate::app::state::{
     Tick, WorkspaceConf,
 };
 use crate::app::table_logic;
-use crate::app::ui::toast::{show_toast_detail, Toast, ToastKind};
+use crate::app::ui::toast::{show_toast_detail, ToastKind, Toasts};
 use crate::app::util::predicate::KindKind;
 use crate::data;
 
@@ -28,7 +28,7 @@ pub(crate) fn MobileWorkspaceView() -> impl IntoView {
     let ws = expect_context::<WorkspaceConf>().0;
     let catalog = expect_context::<Catalog>().0;
     let connection = expect_context::<ConnectionState>().0;
-    let toast = expect_context::<RwSignal<Option<Toast>>>();
+    let toast = expect_context::<Toasts>();
 
     let pane_rows: StoredValue<HashMap<String, RowMap>> = StoredValue::new(HashMap::new());
     let pane_columns: StoredValue<HashMap<String, RwSignal<Vec<String>>>> =
@@ -202,7 +202,7 @@ pub(crate) fn MobileWorkspaceView() -> impl IntoView {
 fn MobilePane(kind: ResourceKind, rows: RowMap, columns: RwSignal<Vec<String>>) -> impl IntoView {
     let detail = expect_context::<RwSignal<Option<DetailTarget>>>();
     let ctx_menu = expect_context::<RwSignal<Option<CtxMenu>>>();
-    let toast = expect_context::<RwSignal<Option<Toast>>>();
+    let toast = expect_context::<Toasts>();
     let only_problems = expect_context::<OnlyProblems>().0;
     let log_pods = expect_context::<LogPods>().0;
     let tick = expect_context::<Tick>().0;

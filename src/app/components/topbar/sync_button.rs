@@ -4,13 +4,13 @@
 use leptos::prelude::*;
 use roder_core::ActionSummary;
 
-use crate::app::ui::toast::{show_toast, show_toast_detail, Toast, ToastKind};
+use crate::app::ui::toast::{show_toast, show_toast_detail, ToastKind, Toasts};
 use crate::data;
 
 #[component]
 pub(crate) fn SyncButton() -> impl IntoView {
     let selected_ns = expect_context::<RwSignal<Option<String>>>();
-    let toast = expect_context::<RwSignal<Option<Toast>>>();
+    let toast = expect_context::<Toasts>();
 
     let do_sync = move |_| {
         let ns = selected_ns.get_untracked();

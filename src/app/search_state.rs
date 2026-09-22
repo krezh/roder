@@ -8,7 +8,7 @@ use leptos::prelude::*;
 use roder_core::{ResourceKind, ResourceRow, WatchEvent};
 
 use crate::app::events::UidSet;
-use crate::app::ui::toast::{show_toast_detail, Toast, ToastKind};
+use crate::app::ui::toast::{show_toast_detail, ToastKind, Toasts};
 
 #[derive(Clone, PartialEq)]
 pub(crate) struct MergedRow {
@@ -102,7 +102,7 @@ pub(crate) fn apply_event(
     entering: UidSet,
     removing: UidSet,
     columns: RwSignal<HashMap<String, Vec<String>>>,
-    toast: RwSignal<Option<Toast>>,
+    toast: Toasts,
     kind: Arc<ResourceKind>,
     event: WatchEvent,
 ) {

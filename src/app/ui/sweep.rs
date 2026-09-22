@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use leptos::prelude::*;
 
-use super::toast::{show_toast, show_toast_detail, Toast, ToastKind};
+use super::toast::{show_toast, show_toast_detail, ToastKind, Toasts};
 
 #[derive(Clone)]
 pub(crate) struct SweepRequest {
@@ -34,7 +34,7 @@ pub(crate) fn sweep_result(summary: &roder_core::CleanupSummary) -> (String, Opt
 }
 
 pub(crate) fn run_sweep(
-    toast: RwSignal<Option<Toast>>,
+    toast: Toasts,
     namespace: Option<String>,
     options: roder_core::SweepOptions,
 ) {

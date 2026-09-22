@@ -15,7 +15,7 @@ use crate::app::state::{
 use crate::app::table_logic::resolve_current_action_targets;
 use crate::app::ui::confirm::{ask_confirm, Confirm};
 use crate::app::ui::delete::{ask_delete, delete_extra, DeleteRequest};
-use crate::app::ui::toast::{show_toast, Toast, ToastKind};
+use crate::app::ui::toast::{show_toast, ToastKind, Toasts};
 use crate::app::ui::use_option_overlay;
 use crate::app::util::clipboard::copy_to_clipboard;
 use crate::app::util::format::parse_key;
@@ -36,7 +36,7 @@ pub(crate) fn MobileActionSheet() -> impl IntoView {
     let table_selected = expect_context::<TableSelected>().0;
     let table_rows = expect_context::<TableRows>().0;
     let table_targets = expect_context::<TableTargets>().0;
-    let toast = expect_context::<RwSignal<Option<Toast>>>();
+    let toast = expect_context::<Toasts>();
     let tree_open = expect_context::<TreeOpen>().0;
 
     let (snapshot, closing, do_close) = use_option_overlay(ctx);

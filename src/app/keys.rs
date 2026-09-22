@@ -32,7 +32,7 @@ use crate::app::table_logic::{bulk_targets, move_cursor};
 use crate::app::ui::confirm::Confirm;
 use crate::app::ui::delete::{ask_delete, delete_extra, DeleteRequest};
 use crate::app::ui::sweep::SweepRequest;
-use crate::app::ui::toast::{show_toast, Toast, ToastKind};
+use crate::app::ui::toast::{show_toast, ToastKind, Toasts};
 use crate::app::util::clipboard::copy_to_clipboard;
 use crate::app::util::format::parse_key;
 use crate::app::util::predicate::KindKind;
@@ -327,7 +327,7 @@ fn use_key_dispatch() {
     let confirm = expect_context::<RwSignal<Option<Confirm>>>();
     let delete_confirm = expect_context::<RwSignal<Option<DeleteRequest>>>();
     let sweep = expect_context::<RwSignal<Option<SweepRequest>>>();
-    let toast = expect_context::<RwSignal<Option<Toast>>>();
+    let toast = expect_context::<Toasts>();
 
     // The pending buffer self-clears, so a `g` or `5` abandoned mid-chord can't
     // silently capture the next real keypress minutes later.

@@ -10,7 +10,8 @@ use roder_core::{DrainBlocker, DrainEvent, DrainEventKind, DrainJobRef, DrainOpt
 
 use crate::app::state::{DrainOpen, DrainTarget};
 use crate::app::ui::toast::{
-    show_progress_toast, show_toast, show_toast_detail, update_progress_toast, Toast, ToastKind,
+    dismiss_toast, show_progress_toast, show_toast, show_toast_detail, update_progress_toast,
+    ToastKind, Toasts,
 };
 
 #[derive(Clone, PartialEq)]
@@ -65,7 +66,7 @@ fn DrainOpenView(
     closing: RwSignal<bool>,
     do_close: impl Fn() + Copy + Send + 'static,
 ) -> impl IntoView {
-    let toast = expect_context::<RwSignal<Option<Toast>>>();
+    let toast = expect_context::<Toasts>();
     let phase = RwSignal::new(match target.job.clone() {
         Some(job) => Phase::Running { job },
         None => Phase::Options,
@@ -112,7 +113,7 @@ fn DrainForm(
     // component-body level and only carries the `Copy` handle across the
     // await, since `expect_context` isn't guaranteed to resolve once a task
     // has been polled back in after suspending.
-    let toast = expect_context::<RwSignal<Option<Toast>>>();
+    let toast = expect_context::<Toasts>();
     let force = RwSignal::new(false);
     let delete_emptydir = RwSignal::new(false);
     let ignore_daemonsets = RwSignal::new(true);
@@ -274,7 +275,7 @@ fn DrainProgress(
     disable_eviction: RwSignal<bool>,
     grace: RwSignal<String>,
     timeout: RwSignal<String>,
-    toast: RwSignal<Option<Toast>>,
+    toast: Toasts,
     request_pending: RwSignal<bool>,
     do_close: impl Fn() + Copy + Send + 'static,
 ) -> impl IntoView {
@@ -644,7 +645,7 @@ fn detach_and_close(
     job: DrainJobRef,
     name: String,
     power: Option<String>,
-    toast: RwSignal<Option<Toast>>,
+    toast: Toasts,
     do_close: impl Fn(),
 ) {
     do_close();
@@ -755,6 +756,7 @@ fn detach_and_close(
             _ => None,
         };
         if let Some((text, kind)) = msg {
+            dismiss_toast(toast, progress_toast);
             show_toast(toast, text, kind);
             sse_bg2.borrow_mut().take(); // drop handle → closes the stream
         }

@@ -3,7 +3,7 @@ use leptos::task::spawn_local;
 
 use crate::app::events::{apply_event, RowMap};
 use crate::app::state::{Catalog, ConnectionState, Connectivity};
-use crate::app::ui::toast::Toast;
+use crate::app::ui::toast::Toasts;
 use crate::data;
 
 #[derive(Clone, Copy)]
@@ -16,7 +16,7 @@ pub(crate) struct FailureWatchRows {
 pub(crate) fn use_failure_watch() {
     let catalog = expect_context::<Catalog>().0;
     let connection = expect_context::<ConnectionState>().0;
-    let toast = expect_context::<RwSignal<Option<Toast>>>();
+    let toast = expect_context::<Toasts>();
     let rows = FailureWatchRows {
         pods: RwSignal::new(Default::default()),
         kustomizations: RwSignal::new(Default::default()),

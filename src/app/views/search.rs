@@ -20,7 +20,7 @@ use crate::app::state::{
     MultiKindSearch, OnlyProblems, ResourceFilter, SortKey, TableRows, TableSelected, TableTargets,
 };
 use crate::app::ui::delete::{ask_delete, DeleteRequest};
-use crate::app::ui::toast::Toast;
+use crate::app::ui::toast::Toasts;
 #[cfg(target_arch = "wasm32")]
 use crate::app::util::history::history_back;
 use crate::data;
@@ -135,7 +135,7 @@ pub(crate) fn SearchResultsView() -> impl IntoView {
     let only_problems = expect_context::<OnlyProblems>().0;
     let resource_filter = expect_context::<ResourceFilter>().0;
     let delete_confirm = expect_context::<RwSignal<Option<DeleteRequest>>>();
-    let toast = expect_context::<RwSignal<Option<Toast>>>();
+    let toast = expect_context::<Toasts>();
 
     let t = use_table_state();
     let action_targets = RwSignal::new(HashMap::<String, DetailTarget>::new());

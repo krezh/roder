@@ -16,7 +16,7 @@ use crate::app::state::{
     TableSelected, Tick,
 };
 use crate::app::table_logic;
-use crate::app::ui::toast::Toast;
+use crate::app::ui::toast::Toasts;
 use crate::app::util::predicate::KindKind;
 use crate::data;
 
@@ -68,7 +68,7 @@ fn MobileKindList(
     let ctx_menu = expect_context::<RwSignal<Option<CtxMenu>>>();
     let only_problems = expect_context::<OnlyProblems>().0;
     let log_pods = expect_context::<LogPods>().0;
-    let toast = expect_context::<RwSignal<Option<Toast>>>();
+    let toast = expect_context::<Toasts>();
     let tick = expect_context::<Tick>().0;
 
     let t = use_table_state();

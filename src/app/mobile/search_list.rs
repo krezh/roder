@@ -19,7 +19,7 @@ use crate::app::state::{
     MultiKindSearch, OnlyProblems, ResourceFilter, TableRows, TableSelected, TableTargets, Tick,
 };
 use crate::app::table_logic;
-use crate::app::ui::toast::Toast;
+use crate::app::ui::toast::Toasts;
 #[cfg(target_arch = "wasm32")]
 use crate::app::util::history::history_back;
 use crate::data;
@@ -32,7 +32,7 @@ pub(crate) fn MobileSearchList() -> impl IntoView {
     let tick = expect_context::<Tick>().0;
     let only_problems = expect_context::<OnlyProblems>().0;
     let resource_filter = expect_context::<ResourceFilter>().0;
-    let toast = expect_context::<RwSignal<Option<Toast>>>();
+    let toast = expect_context::<Toasts>();
     let catalog = expect_context::<Catalog>().0;
 
     let t = use_table_state();

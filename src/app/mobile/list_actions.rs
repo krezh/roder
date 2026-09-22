@@ -3,7 +3,7 @@ use roder_core::ActionSummary;
 
 use crate::app::state::OnlyProblems;
 use crate::app::ui::sweep::{ask_sweep, run_sweep, SweepRequest};
-use crate::app::ui::toast::{show_toast, show_toast_detail, Toast, ToastKind};
+use crate::app::ui::toast::{show_toast, show_toast_detail, ToastKind, Toasts};
 use crate::data;
 
 #[component]
@@ -20,7 +20,7 @@ pub(crate) fn MobileListActions() -> impl IntoView {
 fn MobileSanitizeButton() -> impl IntoView {
     let sweep = expect_context::<RwSignal<Option<SweepRequest>>>();
     let namespace = expect_context::<RwSignal<Option<String>>>();
-    let toast = expect_context::<RwSignal<Option<Toast>>>();
+    let toast = expect_context::<Toasts>();
     let sanitize = move |options: roder_core::SweepOptions| {
         run_sweep(toast, namespace.get_untracked(), options);
     };
@@ -30,7 +30,7 @@ fn MobileSanitizeButton() -> impl IntoView {
 #[component]
 fn MobileSyncButton() -> impl IntoView {
     let namespace = expect_context::<RwSignal<Option<String>>>();
-    let toast = expect_context::<RwSignal<Option<Toast>>>();
+    let toast = expect_context::<Toasts>();
     view! { <button type="button" class="mobile-sync-btn" on:click=move |_| {
         let payload = serde_json::json!({ "action": "flux-reconcile-all", "namespace": namespace.get_untracked() });
         leptos::task::spawn_local(async move { match data::post_action(&payload).await {

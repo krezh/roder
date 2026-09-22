@@ -8,7 +8,7 @@ use crate::app::controllers::drain::{
     DrainProgressState,
 };
 use crate::app::state::{DrainOpen, DrainTarget};
-use crate::app::ui::toast::{show_toast_detail, Toast, ToastKind};
+use crate::app::ui::toast::{show_toast_detail, ToastKind, Toasts};
 
 #[component]
 pub(crate) fn MobileDrainOverlay() -> impl IntoView {
@@ -85,7 +85,7 @@ fn MobileDrainDialog(
             match start(&target_value.get_value(), &options).await {
                 Ok(job) => phase.set(DrainPhase::Running(job)),
                 Err(error) => show_toast_detail(
-                    expect_context::<RwSignal<Option<Toast>>>(),
+                    expect_context::<Toasts>(),
                     "Drain failed",
                     Some(error),
                     ToastKind::Err,
@@ -141,7 +141,7 @@ fn MobileDrainProgress(
     let progress = RwSignal::new(DrainProgressState::default());
     let cancel_pending = RwSignal::new(false);
     let retry_choices = RwSignal::new(Vec::<(String, RwSignal<bool>)>::new());
-    let toast = expect_context::<RwSignal<Option<Toast>>>();
+    let toast = expect_context::<Toasts>();
     Effect::new(move |_previous: Option<Option<crate::data::SseHandle>>| {
         subscribe(&job_value.get_value(), move |event| {
             progress.update(|state| state.apply(event.kind));

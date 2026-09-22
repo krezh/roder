@@ -10,7 +10,7 @@ use crate::app::state::{open_logs, DetailTarget, LogTarget};
 use crate::app::table_logic;
 use crate::app::ui::delete::delete_extra;
 use crate::app::ui::toast::{
-    show_toast, show_toast_detail, show_toast_full, show_toast_list, Toast, ToastKind,
+    show_toast, show_toast_detail, show_toast_full, show_toast_list, ToastKind, Toasts,
 };
 use crate::data;
 
@@ -60,17 +60,13 @@ fn describe_names(names: &[String]) -> String {
 
 /// Fire a mutation against every target concurrently, then report one aggregated
 /// toast once they've all landed (rather than one per row on bulk actions).
-pub(crate) fn fire_action(
-    toast: RwSignal<Option<Toast>>,
-    action: &'static str,
-    targets: &[DetailTarget],
-) {
+pub(crate) fn fire_action(toast: Toasts, action: &'static str, targets: &[DetailTarget]) {
     fire_action_with(toast, action, targets, serde_json::Value::Null);
 }
 
 /// Like [`fire_action`] but merges extra fields into each request body (e.g. `{"replicas": 3}`).
 pub(crate) fn fire_action_with(
-    toast: RwSignal<Option<Toast>>,
+    toast: Toasts,
     action: &'static str,
     targets: &[DetailTarget],
     extra: serde_json::Value,
@@ -148,7 +144,7 @@ pub(crate) fn fire_action_with(
 /// `action`, then run `reset` (e.g. clearing `selected` or `select_mode`).
 /// Shared by `KindTable` and the mobile single-kind resource/workspace lists.
 pub(crate) fn make_do_bulk(
-    toast: RwSignal<Option<Toast>>,
+    toast: Toasts,
     key_sv: StoredValue<String>,
     rows: RowMap,
     selected: UidSet,
@@ -165,7 +161,7 @@ pub(crate) fn make_do_bulk(
 
 /// Same shape as [`make_do_bulk`] but for delete's force/propagation options.
 pub(crate) fn make_do_delete(
-    toast: RwSignal<Option<Toast>>,
+    toast: Toasts,
     key_sv: StoredValue<String>,
     rows: RowMap,
     selected: UidSet,
@@ -184,7 +180,7 @@ pub(crate) fn make_do_delete(
 /// rows live in a `MergedRow` map keyed by uid rather than a single-kind
 /// `RowMap` sharing one `key`.
 pub(crate) fn make_do_delete_multi(
-    toast: RwSignal<Option<Toast>>,
+    toast: Toasts,
     merged_rows: RwSignal<HashMap<String, MergedRow>>,
     selected: UidSet,
     reset: impl Fn() + Copy + Send + Sync + 'static,
@@ -268,7 +264,7 @@ pub(crate) fn apply_event(
     entering: UidSet,
     removing: UidSet,
     columns: Option<RwSignal<Vec<String>>>,
-    toast: RwSignal<Option<Toast>>,
+    toast: Toasts,
     ev: WatchEvent,
 ) {
     match ev {

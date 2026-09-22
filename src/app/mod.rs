@@ -105,9 +105,11 @@ fn asset_version() -> String {
 }
 
 /// How often firing alerts are re-fetched. The refresh button fills its
-/// progress bar over the same period, so the bar reaches full exactly as the
-/// next poll lands.
+/// progress bar over the same period, so the bar reaches full as the next poll
+/// begins.
 pub(crate) const ALERTS_POLL_SECS: u64 = 30;
+#[cfg(target_arch = "wasm32")]
+const ALERTS_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 #[cfg(target_arch = "wasm32")]
 async fn fetch_alerts(force_refresh: bool) -> Result<Vec<roder_core::FiringAlert>, String> {
@@ -116,7 +118,7 @@ async fn fetch_alerts(force_refresh: bool) -> Result<Vec<roder_core::FiringAlert
     } else {
         "/api/alerts"
     };
-    data::fetch_json(url).await
+    data::fetch_json_with_timeout(url, ALERTS_REQUEST_TIMEOUT).await
 }
 
 /// Run a resource scan. Long-running by nature — a two-week Prometheus query
@@ -140,13 +142,40 @@ fn update_alerts(
     data: RwSignal<Option<Vec<roder_core::FiringAlert>>>,
     last_refresh: RwSignal<Option<f64>>,
     alerts: Vec<roder_core::FiringAlert>,
+    refreshed_at: f64,
 ) {
     if let Ok(json) = serde_json::to_string(&alerts) {
         crate::data::storage_set("roder.alerts", &json);
     }
     data.set(Some(alerts));
-    last_refresh.set(Some(js_sys::Date::now()));
+    last_refresh.set(Some(refreshed_at));
 }
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn refresh_alerts(alerts: Alerts, force_refresh: bool) {
+    if !alerts.enabled.get_untracked() || alerts.refreshing.get_untracked() {
+        return;
+    }
+
+    alerts.refreshing.set(true);
+    alerts.next_refresh.set(None);
+    alerts.error.set(None);
+    leptos::task::spawn_local(async move {
+        let result = fetch_alerts(force_refresh).await;
+        let completed_at = crate::app::ui::staleness::now_ms();
+        match result {
+            Ok(list) => update_alerts(alerts.data, alerts.last_refresh, list, completed_at),
+            Err(error) => alerts.error.set(Some(error)),
+        }
+        alerts
+            .next_refresh
+            .set(Some(completed_at + ALERTS_POLL_SECS as f64 * 1000.0));
+        alerts.refreshing.set(false);
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn refresh_alerts(_alerts: Alerts, _force_refresh: bool) {}
 
 fn alert_silence_matchers(
     all: &[String],
@@ -269,17 +298,6 @@ pub fn App() -> impl IntoView {
     recommendations.provide();
     #[cfg(target_arch = "wasm32")]
     let recommendations_enabled = recommendations.enabled;
-    // Rebound as locals: the feature-probe and poll effects below read these
-    // directly rather than going back through context. Those effects are
-    // wasm-only, so on the SSR build nothing reads them and the bindings would
-    // be dead.
-    #[cfg(target_arch = "wasm32")]
-    let Alerts {
-        data: alerts_data,
-        last_refresh: alerts_last_refresh,
-        silences_enabled: alert_silences_enabled,
-        enabled: alertmanager_enabled,
-    } = alerts;
     provide_table_handles();
 
     let catalog = RwSignal::new(Vec::<ResourceKind>::new());
@@ -525,8 +543,8 @@ pub fn App() -> impl IntoView {
             .as_ref()
             .and_then(|v| v.get("alertmanager").and_then(|v| v.as_bool()))
             .unwrap_or(false);
-        alertmanager_enabled.set(enabled);
-        alert_silences_enabled.set(
+        alerts.enabled.set(enabled);
+        alerts.silences_enabled.set(
             features
                 .as_ref()
                 .and_then(|value| value.get("alertmanager_silences"))
@@ -554,7 +572,7 @@ pub fn App() -> impl IntoView {
             debug_image.set(img.to_string());
         }
         if !enabled {
-            alerts_data.set(None);
+            alerts.data.set(None);
             data::storage_remove("roder.alerts");
             return;
         }
@@ -563,42 +581,28 @@ pub fn App() -> impl IntoView {
         if let Some(cached) = data::storage_get("roder.alerts")
             .and_then(|s| serde_json::from_str::<Vec<roder_core::FiringAlert>>(&s).ok())
         {
-            alerts_data.set(Some(cached));
+            alerts.data.set(Some(cached));
         }
-        if let Ok(list) = fetch_alerts(false).await {
-            update_alerts(alerts_data, alerts_last_refresh, list);
-        }
+        refresh_alerts(alerts, false);
     });
 
     // Poll for firing alerts so the panel stays current.
     //
-    // Re-armed from the last completed attempt, so the next poll is always one
-    // period after whatever landed last — manual refresh included. That keeps
-    // it in phase with the countdown the refresh button draws. Keyed on
-    // `alert_attempt` rather than `last_refresh` alone: a failure leaves
-    // `last_refresh` unadvanced, but polling must still continue.
-    let alert_attempt = RwSignal::new(0u32);
+    // Manual and automatic refreshes share one slot and one deadline.
     Effect::new(move |previous: Option<Option<TimeoutHandle>>| {
         if let Some(Some(handle)) = previous {
             handle.clear();
         }
-        alert_attempt.track();
-        // Read through the bundle: the destructured binding is wasm-only.
-        alerts.last_refresh.track();
+        if !alerts.enabled.get() || alerts.refreshing.get() {
+            return None;
+        }
+        let deadline = alerts.next_refresh.get()?;
         set_timeout_with_handle(
             move || {
                 #[cfg(target_arch = "wasm32")]
-                leptos::task::spawn_local(async move {
-                    if !alertmanager_enabled.get_untracked() {
-                        return;
-                    }
-                    if let Ok(list) = fetch_alerts(false).await {
-                        update_alerts(alerts_data, alerts_last_refresh, list);
-                    }
-                    alert_attempt.update(|n| *n = n.wrapping_add(1));
-                });
+                refresh_alerts(alerts, false);
             },
-            std::time::Duration::from_secs(ALERTS_POLL_SECS),
+            crate::app::ui::staleness::duration_until(deadline),
         )
         .ok()
     });

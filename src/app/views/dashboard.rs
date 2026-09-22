@@ -6,6 +6,7 @@ use roder_core::{
     ResourceKind, RowStatus,
 };
 
+use crate::app::alert_utils::elapsed_since_ms;
 use crate::app::components::table::StatusDot;
 use crate::app::overview::{
     cluster_health, controller_rollup, controller_signal_state, core_kind, kind_for_target,
@@ -37,12 +38,20 @@ pub(crate) fn Dashboard() -> impl IntoView {
                     })}
                     <button type="button" class="dashboard-refresh"
                         disabled=move || overview.refreshing()
+                        data-tip=move || {
+                            tick.track();
+                            refresh_status(overview.last_refresh.get())
+                        }
+                        aria-label=move || {
+                            tick.track();
+                            format!("Refresh cluster overview. {}", refresh_status(overview.last_refresh.get()))
+                        }
                         on:click=move |_| overview.refresh()>
                         // Label stays fixed so the button keeps its width; the
                         // ring carries how stale the data is.
                         "Refresh"
                         <StalenessRing
-                            last_refresh=overview.last_refresh
+                            next_refresh=overview.next_refresh
                             period_secs=crate::app::overview::OVERVIEW_POLL_SECS
                         />
                     </button>
@@ -74,6 +83,16 @@ pub(crate) fn Dashboard() -> impl IntoView {
             }}
         </div>
     }
+}
+
+fn refresh_status(last_refresh_ms: Option<f64>) -> String {
+    let Some(timestamp) = last_refresh_ms else {
+        return "Not refreshed yet".to_string();
+    };
+    elapsed_since_ms(timestamp).map_or_else(
+        || "Last refreshed".into(),
+        |age| format!("Last refreshed {age} ago"),
+    )
 }
 
 fn select_kind(

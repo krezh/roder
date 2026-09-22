@@ -153,6 +153,8 @@ gloo-net = { version = "0.7", default-features = false, features = [
   "json",
 ], optional = true }
 web-sys = { version = "0.3.105", features = [
+  "AbortController",
+  "AbortSignal",
   "EventSource",
   "MessageEvent",
   "Window",

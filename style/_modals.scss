@@ -296,7 +296,7 @@
   cursor: pointer;
   font-size: 0.78rem;
 
-  &:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  &:hover:not(:disabled) { color: var(--accent); }
   &:disabled { color: var(--muted); cursor: wait; }
 }
 

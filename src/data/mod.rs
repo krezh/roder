@@ -17,7 +17,7 @@ mod urls;
 pub use age::{
     cell_needs_tick, humanize_age, humanize_cell, looks_like_rfc3339, timestamp_is_past,
 };
-pub use http::{fetch_json, post_action, post_json, probe_error};
+pub use http::{fetch_json, fetch_json_with_timeout, post_action, post_json, probe_error};
 pub use sse::{reconnect_delay, subscribe_lines, subscribe_multi, subscribe_with_error, SseHandle};
 pub use storage::{
     has_text_selection, is_text_input_focused, storage_get, storage_remove, storage_set,

@@ -25,6 +25,37 @@ fn redirect_to_login_if_unauthorized(status: u16) -> bool {
 pub async fn fetch_json<T: DeserializeOwned>(url: &str) -> Result<T, String> {
     use gloo_net::http::Request;
     let resp = Request::get(url).send().await.map_err(|e| e.to_string())?;
+    decode_json(resp).await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_json_with_timeout<T: DeserializeOwned>(
+    url: &str,
+    timeout: std::time::Duration,
+) -> Result<T, String> {
+    use gloo_net::http::Request;
+    use leptos::prelude::set_timeout_with_handle;
+
+    let controller = web_sys::AbortController::new().map_err(|error| format!("{error:?}"))?;
+    let signal = controller.signal();
+    let timeout_controller = controller.clone();
+    let handle = set_timeout_with_handle(move || timeout_controller.abort(), timeout)
+        .map_err(|error| format!("{error:?}"))?;
+    let response = Request::get(url).abort_signal(Some(&signal)).send().await;
+    let result = match response {
+        Ok(response) => decode_json(response).await,
+        Err(error) => Err(error.to_string()),
+    };
+    handle.clear();
+    if signal.aborted() && result.is_err() {
+        Err("Request timed out".to_string())
+    } else {
+        result
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn decode_json<T: DeserializeOwned>(resp: gloo_net::http::Response) -> Result<T, String> {
     if !resp.ok() {
         redirect_to_login_if_unauthorized(resp.status());
         let fallback = format!("{} {}", resp.status(), resp.status_text());
@@ -38,6 +69,14 @@ pub async fn fetch_json<T: DeserializeOwned>(url: &str) -> Result<T, String> {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn fetch_json<T: DeserializeOwned>(_url: &str) -> Result<T, String> {
+    Err("fetch is only available in the browser".to_string())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_json_with_timeout<T: DeserializeOwned>(
+    _url: &str,
+    _timeout: std::time::Duration,
+) -> Result<T, String> {
     Err("fetch is only available in the browser".to_string())
 }
 

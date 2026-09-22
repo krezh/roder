@@ -8,8 +8,7 @@ const OVERVIEW_STORAGE_KEY: &str = "roder.overview";
 /// How often the overview is re-fetched, and one full turn of the refresh
 /// button's ring.
 pub(crate) const OVERVIEW_POLL_SECS: u64 = 10;
-const OVERVIEW_POLL_INTERVAL: std::time::Duration =
-    std::time::Duration::from_secs(OVERVIEW_POLL_SECS);
+const OVERVIEW_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 #[derive(Clone, Copy)]
 pub(crate) struct OverviewState {
@@ -19,6 +18,7 @@ pub(crate) struct OverviewState {
     /// When the last fetch landed, in browser milliseconds. Drives the refresh
     /// button's countdown ring.
     pub(crate) last_refresh: RwSignal<Option<f64>>,
+    pub(crate) next_refresh: RwSignal<Option<f64>>,
     resource: LocalResource<Result<ClusterOverview, String>>,
 }
 
@@ -28,8 +28,7 @@ impl OverviewState {
         let error = RwSignal::new(None);
         let stale = RwSignal::new(false);
         let last_refresh = RwSignal::new(None);
-        // Bumped by every completed attempt, success or failure.
-        let attempt = RwSignal::new(0u32);
+        let next_refresh = RwSignal::new(None);
 
         Effect::new(move |_| {
             if let Some(cached) = data::storage_get(OVERVIEW_STORAGE_KEY)
@@ -40,13 +39,18 @@ impl OverviewState {
         });
 
         let resource = LocalResource::new(|| async {
-            data::fetch_json::<ClusterOverview>("/api/overview").await
+            data::fetch_json_with_timeout::<ClusterOverview>(
+                "/api/overview",
+                OVERVIEW_REQUEST_TIMEOUT,
+            )
+            .await
         });
         let state = Self {
             data,
             error,
             stale,
             last_refresh,
+            next_refresh,
             resource,
         };
 
@@ -75,25 +79,33 @@ impl OverviewState {
                     .last_refresh
                     .set(Some(crate::app::ui::staleness::now_ms()));
             }
-            attempt.update(|count| *count = count.wrapping_add(1));
+            state.next_refresh.set(Some(
+                crate::app::ui::staleness::now_ms() + OVERVIEW_POLL_SECS as f64 * 1000.0,
+            ));
         });
 
-        // Re-armed from the last completed attempt, so the poll stays in phase
-        // with the countdown the refresh button draws. Keyed on `attempt`
-        // rather than `last_refresh`: a run of failures never advances the
-        // latter, and polling would stop.
+        // The ring and timeout read the same deadline, so neither can drift
+        // from the other after rendering delays or a suspended tab.
         Effect::new(move |previous: Option<Option<TimeoutHandle>>| {
             if let Some(Some(handle)) = previous {
                 handle.clear();
             }
-            attempt.track();
-            set_timeout_with_handle(move || state.resource.refetch(), OVERVIEW_POLL_INTERVAL).ok()
+            let deadline = state.next_refresh.get()?;
+            set_timeout_with_handle(
+                move || {
+                    state.next_refresh.set(None);
+                    state.resource.refetch();
+                },
+                crate::app::ui::staleness::duration_until(deadline),
+            )
+            .ok()
         });
 
         state
     }
 
     pub(crate) fn refresh(self) {
+        self.next_refresh.set(None);
         self.resource.refetch();
     }
 

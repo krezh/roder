@@ -3,6 +3,7 @@ use roder_core::{AlertResourceTarget, FiringAlert};
 
 use crate::app::alert_utils::{elapsed_since, elapsed_since_ms, sort_alerts};
 use crate::app::components::dropdown::{Dropdown, DropdownClose};
+use crate::app::contexts::Alerts;
 use crate::app::state::{
     AlertSilencesEnabled, AlertsData, AlertsLastRefresh, AlertsOpen, DetailTarget, Tick,
 };
@@ -14,37 +15,16 @@ pub(crate) fn AlertsPanel() -> impl IntoView {
     let data = expect_context::<AlertsData>().0;
     let last_refresh = expect_context::<AlertsLastRefresh>().0;
     let silences_enabled = expect_context::<AlertSilencesEnabled>().0;
+    let alerts_state = expect_context::<Alerts>();
     let tick = expect_context::<Tick>().0;
     let (visible, closing, do_close) = use_bool_overlay(open);
     let show_silenced = RwSignal::new(false);
-    let refreshing = RwSignal::new(false);
-    let refresh_error = RwSignal::new(None::<String>);
+    let refreshing = alerts_state.refreshing;
+    let refresh_error = alerts_state.error;
     let dialog_ref = NodeRef::<leptos::html::Div>::new();
     crate::app::ui::use_dialog_focus(dialog_ref);
 
-    let refresh = move |_| {
-        #[cfg(target_arch = "wasm32")]
-        {
-            if refreshing.get_untracked() {
-                return;
-            }
-            refreshing.set(true);
-            refresh_error.set(None);
-            leptos::task::spawn_local(async move {
-                match crate::app::fetch_alerts(true).await {
-                    Ok(alerts) => crate::app::update_alerts(data, last_refresh, alerts),
-                    Err(error) => {
-                        refresh_error.set(Some(error));
-                        set_timeout(
-                            move || refresh_error.set(None),
-                            std::time::Duration::from_secs(4),
-                        );
-                    }
-                }
-                refreshing.set(false);
-            });
-        }
-    };
+    let refresh = move |_| crate::app::refresh_alerts(alerts_state, true);
 
     let sorted_alerts = Memo::new(move |_| {
         let all = data.get().unwrap_or_default();
@@ -68,7 +48,7 @@ pub(crate) fn AlertsPanel() -> impl IntoView {
                         // Only failures need words; the age lives on the refresh
                         // button's ring.
                         <Show when=move || refresh_error.get().is_some()>
-                            <span class="alerts-refreshed error">
+                            <span class="alerts-refreshed error" role="alert" aria-live="polite">
                                 {move || refresh_error.get().unwrap_or_default()}
                             </span>
                         </Show>
@@ -87,12 +67,16 @@ pub(crate) fn AlertsPanel() -> impl IntoView {
                             tick.track();
                             refresh_status(last_refresh.get(), refresh_error.get().is_some())
                         }
+                        aria-label=move || {
+                            tick.track();
+                            format!("Refresh alerts. {}", refresh_status(last_refresh.get(), refresh_error.get().is_some()))
+                        }
                         on:click=refresh
                     >
                         // Label stays fixed so the button keeps its width; the
                         // fetch is too fast for a transient one to register.
                         "Refresh"
-                        <StalenessRing last_refresh period_secs=crate::app::ALERTS_POLL_SECS />
+                        <StalenessRing next_refresh=alerts_state.next_refresh period_secs=crate::app::ALERTS_POLL_SECS />
                     </button>
                     <button class="alerts-close" on:click=move |_| do_close()>"✕"</button>
                 </div>
@@ -105,7 +89,7 @@ pub(crate) fn AlertsPanel() -> impl IntoView {
                         key=|a| (a.fingerprint.clone(), a.silenced)
                         let:alert
                     >
-                        <AlertRow alert data last_refresh silences_enabled />
+                        <AlertRow alert data silences_enabled />
                     </For>
                 </div>
             </div>
@@ -132,9 +116,9 @@ fn refresh_status(last_refresh_ms: Option<f64>, failed: bool) -> String {
 fn AlertRow(
     alert: FiringAlert,
     data: RwSignal<Option<Vec<FiringAlert>>>,
-    last_refresh: RwSignal<Option<f64>>,
     silences_enabled: RwSignal<bool>,
 ) -> impl IntoView {
+    let alerts_state = expect_context::<Alerts>();
     let tick = use_context::<crate::app::state::Tick>().map(|t| t.0);
     let duration = RwSignal::new("3600".to_string());
     let mut available_matchers: Vec<_> = alert
@@ -213,9 +197,7 @@ fn AlertRow(
                                 alert.silenced = true;
                             }
                         });
-                        if let Ok(alerts) = crate::app::fetch_alerts(true).await {
-                            crate::app::update_alerts(data, last_refresh, alerts);
-                        }
+                        crate::app::refresh_alerts(alerts_state, true);
                     }
                     Err(error) => {
                         silence_error.set(Some(error));

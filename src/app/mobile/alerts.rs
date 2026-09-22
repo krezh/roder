@@ -2,6 +2,7 @@ use leptos::prelude::*;
 use roder_core::{AlertResourceTarget, FiringAlert};
 
 use crate::app::alert_utils::{elapsed_since, elapsed_since_ms, sort_alerts};
+use crate::app::contexts::Alerts;
 use crate::app::state::{
     AlertSilencesEnabled, AlertsData, AlertsLastRefresh, AlertsOpen, DetailTarget, Tick,
 };
@@ -23,11 +24,12 @@ pub(crate) fn MobileAlertsPanel() -> impl IntoView {
     let data = expect_context::<AlertsData>().0;
     let last_refresh = expect_context::<AlertsLastRefresh>().0;
     let silences_enabled = expect_context::<AlertSilencesEnabled>().0;
+    let alerts_state = expect_context::<Alerts>();
     let tick = expect_context::<Tick>().0;
     let (visible, closing, close) = use_bool_overlay(open);
     let show_silenced = RwSignal::new(false);
-    let refreshing = RwSignal::new(false);
-    let refresh_error = RwSignal::new(None::<String>);
+    let refreshing = alerts_state.refreshing;
+    let refresh_error = alerts_state.error;
     let alerts = Memo::new(move |_| {
         let mut alerts: Vec<_> = data
             .get()
@@ -38,37 +40,18 @@ pub(crate) fn MobileAlertsPanel() -> impl IntoView {
         sort_alerts(&mut alerts);
         alerts
     });
-    let refresh = move |_| {
-        #[cfg(target_arch = "wasm32")]
-        if !refreshing.get_untracked() {
-            refreshing.set(true);
-            refresh_error.set(None);
-            leptos::task::spawn_local(async move {
-                match crate::app::fetch_alerts(true).await {
-                    Ok(alerts) => crate::app::update_alerts(data, last_refresh, alerts),
-                    Err(error) => {
-                        refresh_error.set(Some(error));
-                        set_timeout(
-                            move || refresh_error.set(None),
-                            std::time::Duration::from_secs(4),
-                        );
-                    }
-                }
-                refreshing.set(false);
-            });
-        }
-    };
+    let refresh = move |_| crate::app::refresh_alerts(alerts_state, true);
     view! { <Show when=move || visible.get()>
         <section class="mobile-alerts-panel" class:closing=move || closing.get()>
-            <header class="mobile-alerts-head"><div><small>"Monitoring"</small><strong>"Firing alerts"</strong><span class:error=move || refresh_error.get().is_some()>{move || { tick.track(); refresh_label(last_refresh.get(), refresh_error.get().is_some()) }}</span></div>
+            <header class="mobile-alerts-head"><div><small>"Monitoring"</small><strong>"Firing alerts"</strong><span role="status" aria-live="polite" class:error=move || refresh_error.get().is_some()>{move || { tick.track(); refresh_label(last_refresh.get(), refresh_error.get().is_some()) }}</span></div>
                 <button class:active=move || show_silenced.get() on:click=move |_| show_silenced.update(|value| *value = !*value)>"Silenced"</button>
-                <button disabled=move || refreshing.get() on:click=refresh>{move || if refreshing.get() { "…" } else { "↻" }}</button>
+                <button aria-label=move || { tick.track(); format!("Refresh alerts. {}", refresh_label(last_refresh.get(), refresh_error.get().is_some())) } disabled=move || refreshing.get() on:click=refresh>{move || if refreshing.get() { "…" } else { "↻" }}</button>
                 <button aria-label="Close alerts" on:click=move |_| close()>"×"</button>
             </header>
             <div class="mobile-alerts-list">
                 {move || alerts.with(|items| items.is_empty()).then(|| view! { <p class="mobile-alerts-empty">"No firing alerts"</p> })}
                 <For each=move || alerts.get() key=|alert| (alert.fingerprint.clone(), alert.silenced) let:alert>
-                    <MobileAlertRow alert data last_refresh silences_enabled />
+                    <MobileAlertRow alert data silences_enabled />
                 </For>
             </div>
         </section>
@@ -80,9 +63,9 @@ pub(crate) fn MobileAlertsPanel() -> impl IntoView {
 fn MobileAlertRow(
     alert: FiringAlert,
     data: RwSignal<Option<Vec<FiringAlert>>>,
-    last_refresh: RwSignal<Option<f64>>,
     silences_enabled: RwSignal<bool>,
 ) -> impl IntoView {
+    let alerts_state = expect_context::<Alerts>();
     let tick = expect_context::<Tick>().0;
     let duration = RwSignal::new("3600".to_string());
     let mut available_matchers: Vec<_> = alert
@@ -155,9 +138,7 @@ fn MobileAlertRow(
                                 alert.silenced = true;
                             }
                         });
-                        if let Ok(alerts) = crate::app::fetch_alerts(true).await {
-                            crate::app::update_alerts(data, last_refresh, alerts);
-                        }
+                        crate::app::refresh_alerts(alerts_state, true);
                     }
                     Err(error) => {
                         silence_error.set(Some(error));

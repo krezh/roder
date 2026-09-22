@@ -66,6 +66,10 @@
     cursor: wait;
   }
 }
+
+.dashboard-refresh:hover:not(:disabled) {
+  border-color: var(--border);
+}
 .cluster-health {
   --health-color: var(--ok);
   display: grid;

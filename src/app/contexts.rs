@@ -108,11 +108,11 @@ impl Overlays {
 pub(crate) struct Alerts {
     pub(crate) data: RwSignal<Option<Vec<roder_core::FiringAlert>>>,
     pub(crate) last_refresh: RwSignal<Option<f64>>,
+    pub(crate) next_refresh: RwSignal<Option<f64>>,
     pub(crate) silences_enabled: RwSignal<bool>,
-    /// Whether the server has Alertmanager configured at all. Read by `App`'s
-    /// own poll loop to decide whether to fetch, and deliberately not provided
-    /// as a context — no child needs it. That poll loop is wasm-only, so on the
-    /// SSR build the field is genuinely never read.
+    pub(crate) refreshing: RwSignal<bool>,
+    pub(crate) error: RwSignal<Option<String>>,
+    /// Whether the server has Alertmanager configured at all.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub(crate) enabled: RwSignal<bool>,
 }
@@ -122,12 +122,16 @@ impl Alerts {
         Self {
             data: RwSignal::new(None),
             last_refresh: RwSignal::new(None),
+            next_refresh: RwSignal::new(None),
             silences_enabled: RwSignal::new(false),
+            refreshing: RwSignal::new(false),
+            error: RwSignal::new(None),
             enabled: RwSignal::new(false),
         }
     }
 
     pub(crate) fn provide(self) {
+        provide_context(self);
         provide_context(AlertsData(self.data));
         provide_context(AlertsLastRefresh(self.last_refresh));
         provide_context(AlertSilencesEnabled(self.silences_enabled));

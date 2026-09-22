@@ -33,7 +33,7 @@ pub(crate) fn Dashboard() -> impl IntoView {
                     <h1>"Overview"</h1>
                 </div>
                 <div class="dashboard-actions">
-                    {move || overview.error.get().map(|_| view! {
+                    {move || (overview.error.get().is_some() && overview.data.get().is_some()).then(|| view! {
                         <span class="dashboard-stale" role="status">"Showing last known data"</span>
                     })}
                     <button type="button" class="dashboard-refresh"
@@ -68,6 +68,7 @@ pub(crate) fn Dashboard() -> impl IntoView {
                             <h2>"Cluster overview unavailable"</h2>
                             <p>{message}</p>
                             <button type="button" class="dashboard-refresh"
+                                disabled=move || overview.refreshing()
                                 on:click=move |_| overview.refresh()>"Try again"</button>
                         </div>
                     }.into_any()
@@ -128,7 +129,7 @@ fn dashboard_view(
         HealthState::Warning => "health-warn",
         HealthState::Error => "health-error",
     };
-    let catalog_snapshot = catalog.get_untracked();
+    let catalog_snapshot = catalog.get();
     let node_kind = core_kind(&catalog_snapshot, "Node");
     let event_kind = core_kind(&catalog_snapshot, "Event");
 

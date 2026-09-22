@@ -31,12 +31,12 @@ pub(crate) fn MobileDashboard() -> impl IntoView {
     let overview = expect_context::<OverviewState>();
     view! { <div class="mobile-dashboard">
         <header class="mobile-dashboard-head"><div><small>"Cluster"</small><h1>"Overview"</h1></div><div>
-            {move || overview.error.get().map(|_| view! { <span>"Last known data"</span> })}
+            {move || (overview.error.get().is_some() && overview.data.get().is_some()).then(|| view! { <span>"Last known data"</span> })}
             <button disabled=move || overview.refreshing() on:click=move |_| overview.refresh()>{move || if overview.refreshing() { "Refreshing" } else { "Refresh" }}</button>
         </div></header>
         {move || match overview.data.get() {
             Some(value) => mobile_dashboard_sections(value, catalog, selected, detail, tick).into_any(),
-            None if overview.error.get().is_some() => view! { <div class="mobile-dashboard-error" role="alert"><b>"!"</b><h2>"Cluster overview unavailable"</h2><p>{overview.error.get()}</p><button on:click=move |_| overview.refresh()>"Try again"</button></div> }.into_any(),
+            None if overview.error.get().is_some() => view! { <div class="mobile-dashboard-error" role="alert"><b>"!"</b><h2>"Cluster overview unavailable"</h2><p>{overview.error.get()}</p><button disabled=move || overview.refreshing() on:click=move |_| overview.refresh()>"Try again"</button></div> }.into_any(),
             None => view! { <div class="mobile-dashboard-loading" aria-label="Loading cluster overview"><i></i><i></i><i></i></div> }.into_any(),
         }}
     </div> }
@@ -65,7 +65,7 @@ fn mobile_dashboard_sections(
     let memory_available = nodes
         .iter()
         .any(|node| node.mem_used.is_some() && node.mem_bytes.is_some());
-    let catalog_snapshot = catalog.get_untracked();
+    let catalog_snapshot = catalog.get();
     let node_kind = core_kind(&catalog_snapshot, "Node");
     let event_kind = core_kind(&catalog_snapshot, "Event");
     view! {

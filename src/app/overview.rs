@@ -105,12 +105,15 @@ impl OverviewState {
     }
 
     pub(crate) fn refresh(self) {
+        if self.next_refresh.get_untracked().is_none() {
+            return;
+        }
         self.next_refresh.set(None);
         self.resource.refetch();
     }
 
     pub(crate) fn refreshing(self) -> bool {
-        self.resource.get().is_none()
+        self.next_refresh.get().is_none()
     }
 }
 

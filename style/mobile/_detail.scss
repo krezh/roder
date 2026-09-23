@@ -307,6 +307,7 @@
   .mobile-log-caller { flex: 0 0 auto; }
   .mobile-log-message { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
   .mobile-log-lines.nowrap .mobile-log-message { overflow-wrap: normal; white-space: pre; }
+  .mobile-log-line .log-details[open] { flex: 1 0 100%; }
 
   .mobile-metrics { padding: 0.8rem 0.7rem; }
   .mobile-metric-history {

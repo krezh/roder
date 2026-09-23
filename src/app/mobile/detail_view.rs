@@ -9,7 +9,7 @@ use crate::app::controllers::detail::{
     DetailTab, ResourceDetailController,
 };
 use crate::app::jobs::CronJobJobs;
-use crate::app::log_stream::{extract_timestamp, use_log_stream};
+use crate::app::log_stream::use_log_stream;
 use crate::app::resource_actions::AvailableActions;
 use crate::app::state::{
     DetailTarget, DrainOpen, DrainTarget, ExecOpen, ExecTarget, TalosFeatures,
@@ -17,7 +17,7 @@ use crate::app::state::{
 use crate::app::ui::confirm::{ask_confirm, Confirm};
 use crate::app::ui::delete::{ask_delete, delete_extra, DeleteRequest};
 use crate::app::util::format::{
-    ansi_to_html, camel_label, condition_class, counted, log_level, parse_key, parse_log_line,
+    ansi_to_html, camel_label, condition_class, counted, parse_key, parse_log_line,
 };
 use crate::app::util::json::{
     conditions, container_envs, container_images, data_entries, json_map, json_str, owner_refs,
@@ -244,8 +244,9 @@ fn MobileInlineLogs(url: String) -> impl IntoView {
     <div class="mobile-log-levels">{[("", "All"), ("error", "ERR"), ("warn", "WRN"), ("info", "INF"), ("debug", "DBG")].into_iter().map(|(level, label)| view! { <button class:active=move || stream.level_filter.get() == level on:click=move |_| stream.level_filter.set(level.into())>{label}</button> }).collect_view()}</div>
     <div class="mobile-log-toggles"><button class:on=move || stream.show_timestamps.get() on:click=move |_| stream.show_timestamps.update(|value| *value = !*value)>"Time"</button><button class:on=move || stream.follow.get() on:click=move |_| stream.follow.update(|value| *value = !*value)>"Follow"</button><button class:on=move || stream.wrap.get() on:click=move |_| stream.wrap.update(|value| *value = !*value)>"Wrap"</button></div></div>
     <div class="mobile-log-lines" class:nowrap=move || !stream.wrap.get() node_ref=logs_ref><For each=move || stream.filtered_lines.get() key=|(id, _)| *id let:item>{
-        let parsed = parse_log_line(&item.1); let level = log_level(&item.1); let (timestamp, display) = if parsed.is_structured { (parsed.timestamp, parsed.display) } else { extract_timestamp(&parsed.display) }; let html = ansi_to_html(&display);
-        view! { <div class="mobile-log-line">{move || stream.show_timestamps.get().then(|| timestamp.clone().map(|value| view! { <span class="mobile-log-time">{value}</span> }))}<span class=format!("mobile-log-level {level}")>{level.to_uppercase()}</span><span class="mobile-log-message" inner_html=html></span></div> }
+        let parsed = parse_log_line(&item.1); let level = parsed.level; let timestamp = parsed.timestamp; let details = parsed.details; let html = ansi_to_html(&parsed.display);
+        let level_label = match level { "error" => Some("ERR"), "warn" => Some("WRN"), "info" => Some("INF"), "debug" => Some("DBG"), _ => None };
+        view! { <div class="mobile-log-line">{move || stream.show_timestamps.get().then(|| timestamp.clone().map(|value| view! { <span class="mobile-log-time">{value}</span> }))}{level_label.map(|label| view! { <span class=format!("mobile-log-level {level}")>{label}</span> })}<span class="mobile-log-message" inner_html=html></span>{details.map(|details| view! { <details class="log-details"><summary>"Details"</summary>{json_fields(details)}</details> })}</div> }
     }</For></div></section> }
 }
 

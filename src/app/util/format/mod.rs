@@ -6,7 +6,7 @@ mod ansi;
 mod log_line;
 
 pub(crate) use ansi::ansi_to_html;
-pub(crate) use log_line::{log_level, parse_log_line};
+pub(crate) use log_line::parse_log_line;
 
 /// Parse a resource key (`group/version/kind`, with an empty core group).
 pub(crate) fn parse_key(key: &str) -> (String, String, String) {

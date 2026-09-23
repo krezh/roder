@@ -3,10 +3,11 @@
 use leptos::ev;
 use leptos::prelude::*;
 
-use crate::app::log_stream::{extract_timestamp, use_log_stream};
+use crate::app::log_stream::use_log_stream;
 use crate::app::state::{LogPods, LogTarget};
 use crate::app::util::color::hue_of;
-use crate::app::util::format::{ansi_to_html, log_level, parse_log_line};
+use crate::app::util::format::{ansi_to_html, parse_log_line};
+use crate::app::util::json_fields::json_fields;
 
 /// Right-docked, drag-resizable log sidebar. Holds one streaming `LogsView` pane
 /// per open pod, so several pods can be tailed side by side.
@@ -159,18 +160,13 @@ pub(crate) fn LogsView(
                         Some((p, m)) => (Some(p.to_string()), m.to_string()),
                         None => (None, item.1.to_string()),
                     };
-                    let lvl = log_level(&msg);
                     let parsed = parse_log_line(&msg);
+                    let lvl = parsed.level;
                     // Extract caller before consuming the rest of parsed.
                     let caller = parsed.caller;
-                    // Structured logs carry their timestamp as a field; plain logs
-                    // may have an ISO prefix that extract_timestamp can strip.
-                    let (ts, display) = if parsed.is_structured {
-                        (parsed.timestamp, parsed.display)
-                    } else {
-                        let (ts, content) = extract_timestamp(&parsed.display);
-                        (ts, content)
-                    };
+                    let ts = parsed.timestamp;
+                    let details = parsed.details;
+                    let display = parsed.display;
                     let msg_html = ansi_to_html(&display);
                     let lvl_label = match lvl {
                         "error" => Some("ERR"),
@@ -189,6 +185,9 @@ pub(crate) fn LogsView(
                             {lvl_label.map(|label| view! { <span class=format!("log-lvl log-lvl-{lvl}")>{label}</span> })}
                             {caller.map(|c| view! { <span class="log-caller">{c}</span> })}
                             <span class="log-msg" inner_html=msg_html></span>
+                            {details.map(|details| view! {
+                                <details class="log-details"><summary>"Details"</summary>{json_fields(details)}</details>
+                            })}
                         </div>
                     }
                 }

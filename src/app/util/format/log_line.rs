@@ -14,7 +14,12 @@ pub(crate) struct ParsedLog {
     pub caller: Option<String>,
     /// Timestamp from a structured field (`ts`, `time`, `timestamp`).
     pub timestamp: Option<String>,
+    /// Normalized severity used by badges and filters.
+    pub level: &'static str,
+    /// Full structured payload shown on demand when `display` is a summary.
+    pub details: Option<JsonValue>,
     /// True when a structured format (JSON or logfmt) was recognised.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub is_structured: bool,
 }
 
@@ -25,61 +30,91 @@ pub(crate) struct ParsedLog {
 ///
 /// Lines containing ANSI escape codes are returned raw so colours are preserved.
 pub(crate) fn parse_log_line(line: &str) -> ParsedLog {
+    let t = line.trim_start();
+    let (outer_timestamp, payload) = split_timestamp_prefix(t)
+        .map(|(timestamp, rest)| (Some(timestamp.to_string()), rest))
+        .unwrap_or((None, t));
+    let plain_payload = payload.contains('\x1b').then(|| strip_ansi(payload));
+    let level = classify_level(plain_payload.as_deref().unwrap_or(payload));
+    let raw_display = if outer_timestamp.is_some() {
+        strip_level_prefix(payload).unwrap_or(payload)
+    } else {
+        payload
+    };
     let raw = ParsedLog {
-        display: line.to_string(),
+        display: raw_display.to_string(),
         caller: None,
-        timestamp: None,
-        is_structured: false,
+        timestamp: outer_timestamp.clone(),
+        level,
+        details: None,
+        is_structured: outer_timestamp.is_some(),
     };
 
-    // Don't touch ANSI-coloured output — pass it straight through.
-    if line.contains('\x1b') {
+    // Parsing ANSI text would discard styling from extracted fields.
+    if payload.contains('\x1b') {
         return raw;
     }
 
-    let t = line.trim_start();
+    let t = payload;
 
     if t.starts_with('{') {
         if let Ok(JsonValue::Object(obj)) = serde_json::from_str::<JsonValue>(t) {
+            if let Some(parsed) = parse_json_rpc(&obj, outer_timestamp.clone(), level) {
+                return parsed;
+            }
             // Top-level message field (Zap, logrus, slog JSON, …), or tracing-subscriber's
             // nested `fields.message` / `fields.msg`.
-            let msg = ["msg", "message", "event"]
+            let msg = ["msg", "message", "event", "body", "MESSAGE"]
                 .iter()
-                .find_map(|&k| obj.get(k)?.as_str().map(str::to_string))
+                .find_map(|&k| obj.get(k).map(json_message_display))
                 .or_else(|| {
                     let fields = obj.get("fields")?.as_object()?;
-                    ["message", "msg"]
+                    ["message", "msg", "event"]
                         .iter()
-                        .find_map(|&k| fields.get(k)?.as_str().map(str::to_string))
+                        .find_map(|&k| fields.get(k).map(json_message_display))
                 });
 
             if let Some(msg_text) = msg {
                 // `target` is the tracing-subscriber equivalent of `caller`.
-                let caller = ["caller", "source", "logger", "target"]
+                let caller = ["caller", "source", "logger", "target", "name"]
                     .iter()
                     .find_map(|&k| obj.get(k)?.as_str().map(shorten_caller));
 
-                let timestamp = ["ts", "time", "timestamp"].iter().find_map(|&k| {
-                    let v = obj.get(k)?;
-                    v.as_str()
-                        .map(str::to_string)
-                        .or_else(|| v.as_f64().map(|n| format!("{n:.3}s")))
+                let timestamp = outer_timestamp.clone().or_else(|| {
+                    ["ts", "time", "timestamp", "@timestamp"]
+                        .iter()
+                        .find_map(|&k| {
+                            let v = obj.get(k)?;
+                            v.as_str()
+                                .map(str::to_string)
+                                .or_else(|| v.as_f64().map(|n| format!("{n:.3}s")))
+                        })
                 });
 
                 const JSON_META: &[&str] = &[
                     "msg",
                     "message",
                     "event",
+                    "body",
+                    "MESSAGE",
                     "caller",
                     "source",
                     "logger",
                     "target",
+                    "name",
                     "ts",
                     "time",
                     "timestamp",
+                    "@timestamp",
                     "level",
                     "severity",
                     "lvl",
+                    "severity_text",
+                    "severityText",
+                    "level_name",
+                    "v",
+                    "pid",
+                    "hostname",
                     "fields",
                 ];
                 let mut extras: Vec<String> = obj
@@ -104,6 +139,8 @@ pub(crate) fn parse_log_line(line: &str) -> ParsedLog {
                     display,
                     caller,
                     timestamp,
+                    level,
+                    details: None,
                     is_structured: true,
                 };
             }
@@ -115,12 +152,13 @@ pub(crate) fn parse_log_line(line: &str) -> ParsedLog {
     let pairs = logfmt_tokenize(t);
     if let Some(msg_text) = pairs
         .iter()
-        .find(|(k, _)| k == "msg" || k == "message")
+        .find(|(k, _)| k == "msg" || k == "message" || k == "event")
         .map(|(_, v)| v.clone())
     {
         const LOGFMT_META: &[&str] = &[
             "msg",
             "message",
+            "event",
             "caller",
             "source",
             "ts",
@@ -150,32 +188,44 @@ pub(crate) fn parse_log_line(line: &str) -> ParsedLog {
             .iter()
             .find(|(k, _)| k == "caller" || k == "source")
             .map(|(_, v)| shorten_caller(v));
-        let timestamp = pairs
-            .iter()
-            .find(|(k, _)| k == "ts" || k == "time" || k == "timestamp")
-            .map(|(_, v)| v.clone());
+        let timestamp = outer_timestamp.clone().or_else(|| {
+            pairs
+                .iter()
+                .find(|(k, _)| k == "ts" || k == "time" || k == "timestamp")
+                .map(|(_, v)| v.clone())
+        });
         return ParsedLog {
             display,
             caller,
             timestamp,
+            level,
+            details: None,
             is_structured: true,
         };
     }
 
-    // Python logging: "2024-01-15 10:30:45,123 LEVEL message..."
-    if is_python_ts(t) {
-        let after_ts = &t[24..];
-        // Skip the level word; everything after it is the message.
-        let msg_start = after_ts
-            .find(' ')
-            .map(|i| after_ts[i..].trim_start())
-            .unwrap_or(after_ts);
-        return ParsedLog {
-            display: msg_start.to_string(),
-            caller: None,
-            timestamp: Some(t[..23].to_string()),
-            is_structured: true,
-        };
+    // Zap's console encoder uses tab-separated timestamp, level, logger, message, and fields.
+    if outer_timestamp.is_some() && t.contains('\t') {
+        let mut fields = t.split('\t');
+        if fields.next().and_then(level_word).is_some() {
+            let fields = fields.collect::<Vec<_>>();
+            let (caller, message) = match fields.as_slice() {
+                [] => (None, String::new()),
+                [message] => (None, (*message).to_string()),
+                [message, extras] if extras.trim_start().starts_with('{') => {
+                    (None, format!("{message}\t{extras}"))
+                }
+                [caller, rest @ ..] => (Some(shorten_caller(caller)), rest.join("\t")),
+            };
+            return ParsedLog {
+                display: message,
+                caller,
+                timestamp: outer_timestamp,
+                level,
+                details: None,
+                is_structured: true,
+            };
+        }
     }
 
     // Syslog RFC 5424: "<N>1 timestamp hostname app pid msgid [data] message"
@@ -197,59 +247,213 @@ pub(crate) fn parse_log_line(line: &str) -> ParsedLog {
                     return ParsedLog {
                         display: msg.to_string(),
                         caller,
-                        timestamp,
+                        timestamp: outer_timestamp.clone().or(timestamp),
+                        level,
+                        details: None,
                         is_structured: true,
                     };
                 }
             }
             // RFC 3164 with priority: "<N>Mon DD HH:MM:SS hostname app: message"
-            if let Some(parsed) = parse_syslog_3164_body(rest) {
+            if let Some(mut parsed) = parse_syslog_3164_body(rest) {
+                parsed.level = level;
+                parsed.timestamp = outer_timestamp.clone().or(parsed.timestamp);
                 return parsed;
             }
         }
     }
 
     // Syslog RFC 3164 without priority: "Mon DD HH:MM:SS hostname app: message"
-    if let Some(parsed) = parse_syslog_3164_body(t) {
+    if let Some(mut parsed) = parse_syslog_3164_body(t) {
+        parsed.level = level;
+        parsed.timestamp = outer_timestamp.clone().or(parsed.timestamp);
         return parsed;
     }
 
     raw
 }
 
+fn json_message_display(value: &JsonValue) -> String {
+    value
+        .as_str()
+        .map(str::to_string)
+        .unwrap_or_else(|| value.to_string())
+}
+
+fn parse_json_rpc(
+    object: &serde_json::Map<String, JsonValue>,
+    timestamp: Option<String>,
+    level: &'static str,
+) -> Option<ParsedLog> {
+    if object.get("jsonrpc").and_then(JsonValue::as_str) != Some("2.0") {
+        return None;
+    }
+
+    let (display, level) = if let Some(method) = object.get("method").and_then(JsonValue::as_str) {
+        let subject = object
+            .get("params")
+            .and_then(JsonValue::as_object)
+            .and_then(|params| params.get("name"))
+            .and_then(JsonValue::as_str)
+            .map(|name| format!(" | {name}"))
+            .unwrap_or_default();
+        (format!("request | {method}{subject}"), level)
+    } else if let Some(error) = object.get("error") {
+        let message = error
+            .get("message")
+            .and_then(JsonValue::as_str)
+            .unwrap_or("request failed");
+        (format!("error | {message}"), "error")
+    } else if let Some(result) = object.get("result") {
+        (json_rpc_result_summary(result), level)
+    } else {
+        ("response".to_string(), level)
+    };
+
+    Some(ParsedLog {
+        display,
+        caller: Some("jsonrpc".to_string()),
+        timestamp,
+        level,
+        details: Some(JsonValue::Object(object.clone())),
+        is_structured: true,
+    })
+}
+
+fn json_rpc_result_summary(result: &JsonValue) -> String {
+    let Some(object) = result.as_object() else {
+        return match result {
+            JsonValue::Array(items) => format!("response | {} items", items.len()),
+            value => format!("response | {}", json_val_display(value)),
+        };
+    };
+
+    let mut parts = vec!["response".to_string()];
+    if let Some(server) = object
+        .get("_meta")
+        .and_then(JsonValue::as_object)
+        .and_then(|meta| meta.get("io.modelcontextprotocol/serverInfo"))
+        .and_then(JsonValue::as_object)
+    {
+        let name = server.get("name").and_then(JsonValue::as_str);
+        let version = server.get("version").and_then(JsonValue::as_str);
+        if let Some(label) = match (name, version) {
+            (Some(name), Some(version)) => Some(format!("{name} {version}")),
+            (Some(name), None) => Some(name.to_string()),
+            _ => None,
+        } {
+            parts.push(label);
+        }
+    }
+    for (key, singular, plural) in [
+        ("tools", "tool", "tools"),
+        ("resources", "resource", "resources"),
+        (
+            "resourceTemplates",
+            "resource template",
+            "resource templates",
+        ),
+        ("prompts", "prompt", "prompts"),
+        ("content", "content item", "content items"),
+    ] {
+        if let Some(items) = object.get(key).and_then(JsonValue::as_array) {
+            let suffix = if items.len() == 1 { singular } else { plural };
+            parts.push(format!("{} {suffix}", items.len()));
+        }
+    }
+    if let Some(result_type) = object.get("resultType").and_then(JsonValue::as_str) {
+        parts.push(result_type.to_string());
+    }
+    if parts.len() == 1 {
+        parts.push(format!("{} fields", object.len()));
+    }
+    parts.join(" | ")
+}
+
+fn strip_level_prefix(t: &str) -> Option<&str> {
+    if let Some(inner) = t.strip_prefix('[') {
+        let end = inner.find(']')?;
+        level_word(&inner[..end])?;
+        return Some(
+            inner[end + 1..]
+                .trim_start()
+                .trim_start_matches([':', '-'])
+                .trim_start(),
+        );
+    }
+    let end = t
+        .bytes()
+        .position(|byte| !byte.is_ascii_alphabetic())
+        .unwrap_or(t.len());
+    level_word(&t[..end])?;
+    Some(
+        t[end..]
+            .trim_start()
+            .trim_start_matches([':', '-', '|'])
+            .trim_start(),
+    )
+}
+
+fn split_timestamp_prefix(t: &str) -> Option<(&str, &str)> {
+    let bracketed = t.starts_with('[');
+    let start = usize::from(bracketed);
+    let b = t.as_bytes();
+    if b.len() < start + 19
+        || b.get(start + 4) != Some(&b'-')
+        || b.get(start + 7) != Some(&b'-')
+        || !matches!(b.get(start + 10), Some(b'T' | b' '))
+        || b.get(start + 13) != Some(&b':')
+        || b.get(start + 16) != Some(&b':')
+        || !b[start..start + 19].iter().all(u8::is_ascii)
+    {
+        return None;
+    }
+
+    let mut end = start + 19;
+    if matches!(b.get(end), Some(b'.' | b',')) {
+        end += 1;
+        while b.get(end).is_some_and(u8::is_ascii_digit) {
+            end += 1;
+        }
+    }
+    if b.get(end) == Some(&b'Z') {
+        end += 1;
+    } else if matches!(b.get(end), Some(b'+' | b'-')) {
+        end += 1;
+        while b
+            .get(end)
+            .is_some_and(|byte| byte.is_ascii_digit() || *byte == b':')
+        {
+            end += 1;
+        }
+    }
+
+    let timestamp_end = end;
+    if bracketed {
+        if b.get(end) != Some(&b']') {
+            return None;
+        }
+        end += 1;
+    }
+    if !b.get(end).is_some_and(u8::is_ascii_whitespace) {
+        return None;
+    }
+    let mut rest = t[end..].trim_start();
+    if let Some(after_stream) = rest
+        .strip_prefix("stdout ")
+        .or_else(|| rest.strip_prefix("stderr "))
+    {
+        rest = after_stream
+            .strip_prefix("F ")
+            .or_else(|| after_stream.strip_prefix("P "))
+            .unwrap_or(after_stream);
+    }
+    Some((&t[start..timestamp_end], rest))
+}
+
 fn shorten_caller(s: &str) -> String {
     s.rfind('/')
         .map_or_else(|| s.to_string(), |i| s[i + 1..].to_string())
-}
-
-/// True if `t` starts with a Python `logging` timestamp: "YYYY-MM-DD HH:MM:SS,mmm ".
-fn is_python_ts(t: &str) -> bool {
-    let b = t.as_bytes();
-    b.len() > 23
-        && b[0].is_ascii_digit()
-        && b[1].is_ascii_digit()
-        && b[2].is_ascii_digit()
-        && b[3].is_ascii_digit()
-        && b[4] == b'-'
-        && b[5].is_ascii_digit()
-        && b[6].is_ascii_digit()
-        && b[7] == b'-'
-        && b[8].is_ascii_digit()
-        && b[9].is_ascii_digit()
-        && b[10] == b' '
-        && b[11].is_ascii_digit()
-        && b[12].is_ascii_digit()
-        && b[13] == b':'
-        && b[14].is_ascii_digit()
-        && b[15].is_ascii_digit()
-        && b[16] == b':'
-        && b[17].is_ascii_digit()
-        && b[18].is_ascii_digit()
-        && b[19] == b','
-        && b[20].is_ascii_digit()
-        && b[21].is_ascii_digit()
-        && b[22].is_ascii_digit()
-        && b[23] == b' '
 }
 
 /// Extract syslog priority from a `<NNN>` prefix. Returns `(severity 0–7, rest after '>')`.
@@ -311,6 +515,8 @@ fn parse_syslog_3164_body(t: &str) -> Option<ParsedLog> {
         },
         caller,
         timestamp: Some(timestamp),
+        level: "plain",
+        details: None,
         is_structured: true,
     })
 }
@@ -356,11 +562,16 @@ fn rfc5424_message(s: &str) -> &str {
 ///
 /// Deliberately avoids substring search across the full message to prevent false
 /// positives on messages that happen to contain words like "error" or "info".
+#[cfg(test)]
 pub(crate) fn log_level(line: &str) -> &'static str {
     let line = line.split_once(" │ ").map(|(_, r)| r).unwrap_or(line);
     let plain = line.contains('\x1b').then(|| strip_ansi(line));
     let t = plain.as_deref().unwrap_or(line).trim_start();
+    let t = split_timestamp_prefix(t).map(|(_, rest)| rest).unwrap_or(t);
+    classify_level(t)
+}
 
+fn classify_level(t: &str) -> &'static str {
     // klog/glog: E0603, W0603, I0603, D0603, F0603
     {
         let b = t.as_bytes();
@@ -379,14 +590,31 @@ pub(crate) fn log_level(line: &str) -> &'static str {
     // whitespace around separators and escaped content can contain level-like text.
     if t.starts_with('{') {
         if let Ok(JsonValue::Object(object)) = serde_json::from_str::<JsonValue>(t) {
-            for key in ["level", "severity", "lvl"] {
-                if let Some(lvl) = object
-                    .get(key)
-                    .and_then(JsonValue::as_str)
-                    .and_then(level_word)
-                {
-                    return lvl;
+            for key in [
+                "level",
+                "severity",
+                "lvl",
+                "severity_text",
+                "severityText",
+                "level_name",
+            ] {
+                if let Some(value) = object.get(key) {
+                    if let Some(lvl) = value.as_str().and_then(level_word) {
+                        return lvl;
+                    }
+                    if let Some(lvl) = value.as_u64().and_then(numeric_level) {
+                        return lvl;
+                    }
                 }
+            }
+            if let Some(lvl) = object
+                .get("fields")
+                .and_then(JsonValue::as_object)
+                .and_then(|fields| fields.get("level").or_else(|| fields.get("severity")))
+                .and_then(JsonValue::as_str)
+                .and_then(level_word)
+            {
+                return lvl;
             }
         }
         return "plain";
@@ -399,19 +627,6 @@ pub(crate) fn log_level(line: &str) -> &'static str {
         if let Some(lvl) = logfmt_level(t, key) {
             return lvl;
         }
-    }
-
-    // Python logging: "2024-01-15 10:30:45,123 LEVEL ..."
-    if is_python_ts(t) {
-        let after_ts = &t[24..];
-        let word_end = after_ts
-            .bytes()
-            .position(|b| !b.is_ascii_alphabetic())
-            .unwrap_or(after_ts.len());
-        if let Some(lvl) = level_word(&after_ts[..word_end]) {
-            return lvl;
-        }
-        return "plain";
     }
 
     // Syslog with priority prefix: "<N>..." → severity = N % 8
@@ -442,6 +657,15 @@ pub(crate) fn log_level(line: &str) -> &'static str {
     }
 
     "plain"
+}
+
+fn numeric_level(level: u64) -> Option<&'static str> {
+    match level {
+        50.. => Some("error"),
+        40..=49 => Some("warn"),
+        30..=39 => Some("info"),
+        0..=29 => Some("debug"),
+    }
 }
 
 fn logfmt_level(t: &str, key: &str) -> Option<&'static str> {
@@ -601,6 +825,102 @@ mod tests {
         assert_eq!(p.display, "starting");
         assert_eq!(p.caller.as_deref(), Some("main.go:42"));
         assert_eq!(p.timestamp.as_deref(), Some("1234.000s"));
+    }
+
+    #[test]
+    fn parses_timestamp_wrapped_json_consistently() {
+        let p = parse_log_line(
+            r#"2024-01-15T10:30:45.123Z {"severity":"ERROR","message":"request failed"}"#,
+        );
+        assert_eq!(p.timestamp.as_deref(), Some("2024-01-15T10:30:45.123Z"));
+        assert_eq!(p.level, "error");
+        assert_eq!(p.display, "request failed");
+    }
+
+    #[test]
+    fn parses_cri_envelope_before_structured_payload() {
+        let p = parse_log_line(
+            r#"2024-01-15T10:30:45.123456789Z stderr F {"level":"warn","msg":"retrying"}"#,
+        );
+        assert_eq!(
+            p.timestamp.as_deref(),
+            Some("2024-01-15T10:30:45.123456789Z")
+        );
+        assert_eq!(p.level, "warn");
+        assert_eq!(p.display, "retrying");
+    }
+
+    #[test]
+    fn parses_bunyan_numeric_level() {
+        let p = parse_log_line(
+            r#"{"name":"api","hostname":"node-1","pid":12,"level":50,"msg":"failed","time":"2024-01-15T10:30:45Z","v":0}"#,
+        );
+        assert_eq!(p.level, "error");
+        assert_eq!(p.caller.as_deref(), Some("api"));
+        assert_eq!(p.display, "failed");
+    }
+
+    #[test]
+    fn parses_otel_body_and_severity_text() {
+        let p = parse_log_line(
+            r#"{"severityText":"INFO","body":{"operation":"sync","count":2},"attributes":{"cluster":"prod"}}"#,
+        );
+        assert_eq!(p.level, "info");
+        assert!(p.display.starts_with(r#"{"count":2,"operation":"sync"}"#));
+        assert!(p.display.contains(r#"attributes={"cluster":"prod"}"#));
+    }
+
+    #[test]
+    fn parses_json_rpc_response_without_message_field() {
+        let p = parse_log_line(
+            r#"{"jsonrpc":"2.0","id":"request-1|int64:42","result":{"cacheScope":"private","resources":[]}}"#,
+        );
+        assert!(p.is_structured);
+        assert_eq!(p.caller.as_deref(), Some("jsonrpc"));
+        assert_eq!(p.display, "response | 0 resources");
+        assert_eq!(
+            p.details
+                .as_ref()
+                .and_then(|details| details.get("id"))
+                .and_then(JsonValue::as_str),
+            Some("request-1|int64:42")
+        );
+    }
+
+    #[test]
+    fn summarizes_json_rpc_server_info() {
+        let p = parse_log_line(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"_meta":{"io.modelcontextprotocol/serverInfo":{"name":"mcp-nixos","version":"3.1.0"}},"resultType":"complete"}}"#,
+        );
+        assert_eq!(p.display, "response | mcp-nixos 3.1.0 | complete");
+    }
+
+    #[test]
+    fn parses_bracketed_timestamp_and_level() {
+        let p = parse_log_line("[2024-01-15 10:30:45.123] ERROR database unavailable");
+        assert_eq!(p.timestamp.as_deref(), Some("2024-01-15 10:30:45.123"));
+        assert_eq!(p.level, "error");
+        assert_eq!(p.display, "database unavailable");
+    }
+
+    #[test]
+    fn parses_zap_console_line_with_offset_and_tabs() {
+        let p = parse_log_line(
+            "2026-09-17T22:10:28+02:00\tINFO\tsetup\twebhooks enabled\t{\"enabled\":true}",
+        );
+        assert_eq!(p.timestamp.as_deref(), Some("2026-09-17T22:10:28+02:00"));
+        assert_eq!(p.level, "info");
+        assert_eq!(p.caller.as_deref(), Some("setup"));
+        assert_eq!(p.display, "webhooks enabled\t{\"enabled\":true}");
+    }
+
+    #[test]
+    fn parses_zap_console_line_without_logger() {
+        let p = parse_log_line(
+            "2026-09-17T22:10:28+02:00\tINFO\tStarting EventSource\t{\"kind\":\"Pod\"}",
+        );
+        assert!(p.caller.is_none());
+        assert_eq!(p.display, "Starting EventSource\t{\"kind\":\"Pod\"}");
     }
 
     #[test]

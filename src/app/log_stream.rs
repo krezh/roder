@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use leptos::prelude::*;
 
-use crate::app::util::format::log_level;
+use crate::app::util::format::parse_log_line;
 use crate::data;
 
 const MAX_LINES: usize = 1000;
@@ -94,7 +94,7 @@ fn log_line_matches(line: &str, text_filter_lower: &str, level_filter_lower: &st
         Some((pod, message)) => (Some(pod), message),
         None => (None, line),
     };
-    if !level_filter_lower.is_empty() && log_level(message) != level_filter_lower {
+    if !level_filter_lower.is_empty() && parse_log_line(message).level != level_filter_lower {
         return false;
     }
     text_filter_lower.is_empty()
@@ -102,6 +102,7 @@ fn log_line_matches(line: &str, text_filter_lower: &str, level_filter_lower: &st
         || message.to_lowercase().contains(text_filter_lower)
 }
 
+#[cfg(test)]
 pub(crate) fn extract_timestamp(line: &str) -> (Option<String>, String) {
     let trimmed = line.trim_start();
     let bytes = trimmed.as_bytes();

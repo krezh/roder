@@ -4,10 +4,11 @@
 
 use leptos::prelude::*;
 
-use crate::app::log_stream::{extract_timestamp, use_log_stream};
+use crate::app::log_stream::use_log_stream;
 use crate::app::state::LogPods;
 use crate::app::util::color::hue_of;
-use crate::app::util::format::{ansi_to_html, log_level, parse_log_line};
+use crate::app::util::format::{ansi_to_html, parse_log_line};
+use crate::app::util::json_fields::json_fields;
 
 #[component]
 pub(crate) fn MobileLogsView() -> impl IntoView {
@@ -109,14 +110,12 @@ fn MobileLogPane(
                     let (pod, message) = item.1.split_once(" │ ")
                         .map(|(pod, message)| (Some(pod.to_string()), message.to_string()))
                         .unwrap_or((None, item.1.to_string()));
-                    let level = log_level(&message);
                     let parsed = parse_log_line(&message);
+                    let level = parsed.level;
                     let caller = parsed.caller;
-                    let (timestamp, display) = if parsed.is_structured {
-                        (parsed.timestamp, parsed.display)
-                    } else {
-                        extract_timestamp(&parsed.display)
-                    };
+                    let timestamp = parsed.timestamp;
+                    let details = parsed.details;
+                    let display = parsed.display;
                     let html = ansi_to_html(&display);
                     let level_label = match level {
                         "error" => Some("ERR"), "warn" => Some("WRN"),
@@ -131,6 +130,9 @@ fn MobileLogPane(
                         {level_label.map(|label| view! { <span class=format!("mobile-log-level {level}")>{label}</span> })}
                         {caller.map(|caller| view! { <span class="mobile-log-caller">{caller}</span> })}
                         <span class="mobile-log-message" inner_html=html></span>
+                        {details.map(|details| view! {
+                            <details class="log-details"><summary>"Details"</summary>{json_fields(details)}</details>
+                        })}
                     </div> }
                 }
             </For>

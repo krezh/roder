@@ -206,6 +206,35 @@
   margin-right: 0.5em;
   opacity: 0.6;
 }
+.log-details {
+  display: inline-block;
+  margin-left: 0.55em;
+  color: var(--muted);
+  font-size: 0.85em;
+
+  summary {
+    cursor: pointer;
+    color: var(--accent);
+    user-select: none;
+  }
+
+  &[open] {
+    display: block;
+    margin: 0.3rem 0 0.55rem;
+  }
+
+  > .json-fields {
+    max-height: 22rem;
+    margin: 0.3rem 0 0;
+    overflow: auto;
+    padding: 0.55rem 0.65rem;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--fg);
+  }
+
+  .json-field-row { grid-template-columns: minmax(7rem, 28%) minmax(0, 1fr); }
+}
 .log-lvl {
   display: inline-block;
   font-size: 0.72em;

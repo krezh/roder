@@ -71,6 +71,7 @@ impl ResourceRef {
 enum RelationshipProvider {
     FluxKustomization,
     FluxHelmRelease,
+    FluxReferences,
     OwnedChildren,
     WorkloadPods,
     HpaScaleTarget,
@@ -83,6 +84,18 @@ enum RelationshipProvider {
     VolumeAttachments,
     RookStorageClass,
     RookCephCluster,
+    ObjectBucketClaim,
+    Certificate,
+    CertificateRequest,
+    CertManagerOrder,
+    ExternalSecret,
+    ClusterExternalSecret,
+    KopiurPolicy,
+    TupprUpgrade,
+    GatewayRoute,
+    EnvoyPolicy,
+    ReferenceGrant,
+    NetworkPolicyPods,
 }
 
 #[derive(Clone, Copy)]
@@ -101,10 +114,22 @@ const RELATIONSHIP_PROVIDERS: &[ProviderRegistration] = &[
         provider: RelationshipProvider::FluxKustomization,
     },
     ProviderRegistration {
+        group: "kustomize.toolkit.fluxcd.io",
+        version: None,
+        kind: "Kustomization",
+        provider: RelationshipProvider::FluxReferences,
+    },
+    ProviderRegistration {
         group: "helm.toolkit.fluxcd.io",
         version: None,
         kind: "HelmRelease",
         provider: RelationshipProvider::FluxHelmRelease,
+    },
+    ProviderRegistration {
+        group: "helm.toolkit.fluxcd.io",
+        version: None,
+        kind: "HelmRelease",
+        provider: RelationshipProvider::FluxReferences,
     },
     ProviderRegistration {
         group: "apps",
@@ -279,6 +304,132 @@ const RELATIONSHIP_PROVIDERS: &[ProviderRegistration] = &[
         version: None,
         kind: "CephCluster",
         provider: RelationshipProvider::RookCephCluster,
+    },
+    ProviderRegistration {
+        group: "objectbucket.io",
+        version: None,
+        kind: "ObjectBucketClaim",
+        provider: RelationshipProvider::ObjectBucketClaim,
+    },
+    ProviderRegistration {
+        group: "cert-manager.io",
+        version: None,
+        kind: "Certificate",
+        provider: RelationshipProvider::Certificate,
+    },
+    ProviderRegistration {
+        group: "cert-manager.io",
+        version: None,
+        kind: "CertificateRequest",
+        provider: RelationshipProvider::CertificateRequest,
+    },
+    ProviderRegistration {
+        group: "acme.cert-manager.io",
+        version: None,
+        kind: "Order",
+        provider: RelationshipProvider::CertManagerOrder,
+    },
+    ProviderRegistration {
+        group: "external-secrets.io",
+        version: None,
+        kind: "ExternalSecret",
+        provider: RelationshipProvider::ExternalSecret,
+    },
+    ProviderRegistration {
+        group: "external-secrets.io",
+        version: None,
+        kind: "ClusterExternalSecret",
+        provider: RelationshipProvider::ClusterExternalSecret,
+    },
+    ProviderRegistration {
+        group: "kopiur.home-operations.com",
+        version: None,
+        kind: "SnapshotPolicy",
+        provider: RelationshipProvider::KopiurPolicy,
+    },
+    ProviderRegistration {
+        group: "tuppr.home-operations.com",
+        version: None,
+        kind: "KubernetesUpgrade",
+        provider: RelationshipProvider::TupprUpgrade,
+    },
+    ProviderRegistration {
+        group: "tuppr.home-operations.com",
+        version: None,
+        kind: "TalosUpgrade",
+        provider: RelationshipProvider::TupprUpgrade,
+    },
+    ProviderRegistration {
+        group: "gateway.networking.k8s.io",
+        version: None,
+        kind: "HTTPRoute",
+        provider: RelationshipProvider::GatewayRoute,
+    },
+    ProviderRegistration {
+        group: "gateway.networking.k8s.io",
+        version: None,
+        kind: "GRPCRoute",
+        provider: RelationshipProvider::GatewayRoute,
+    },
+    ProviderRegistration {
+        group: "gateway.networking.k8s.io",
+        version: None,
+        kind: "TLSRoute",
+        provider: RelationshipProvider::GatewayRoute,
+    },
+    ProviderRegistration {
+        group: "gateway.networking.k8s.io",
+        version: None,
+        kind: "TCPRoute",
+        provider: RelationshipProvider::GatewayRoute,
+    },
+    ProviderRegistration {
+        group: "gateway.networking.k8s.io",
+        version: None,
+        kind: "UDPRoute",
+        provider: RelationshipProvider::GatewayRoute,
+    },
+    ProviderRegistration {
+        group: "gateway.networking.k8s.io",
+        version: None,
+        kind: "ReferenceGrant",
+        provider: RelationshipProvider::ReferenceGrant,
+    },
+    ProviderRegistration {
+        group: "networking.k8s.io",
+        version: Some("v1"),
+        kind: "NetworkPolicy",
+        provider: RelationshipProvider::NetworkPolicyPods,
+    },
+    ProviderRegistration {
+        group: "gateway.envoyproxy.io",
+        version: None,
+        kind: "BackendTrafficPolicy",
+        provider: RelationshipProvider::EnvoyPolicy,
+    },
+    ProviderRegistration {
+        group: "gateway.envoyproxy.io",
+        version: None,
+        kind: "ClientTrafficPolicy",
+        provider: RelationshipProvider::EnvoyPolicy,
+    },
+    ProviderRegistration {
+        group: "gateway.envoyproxy.io",
+        version: None,
+        kind: "SecurityPolicy",
+        provider: RelationshipProvider::EnvoyPolicy,
+    },
+    ProviderRegistration {
+        group: "gateway.envoyproxy.io",
+        version: None,
+        kind: "EnvoyPatchPolicy",
+        provider: RelationshipProvider::EnvoyPolicy,
+    },
+    ProviderRegistration {
+        group: "gateway.envoyproxy.io",
+        version: None,
+        kind: "EnvoyExtensionPolicy",
+        provider: RelationshipProvider::EnvoyPolicy,
     },
 ];
 
@@ -484,6 +635,18 @@ impl Backend {
                         Err(error) => errors.push(error),
                     }
                 }
+                RelationshipProvider::FluxReferences => {
+                    children.extend(
+                        flux_references(resource, data)
+                            .into_iter()
+                            .map(|reference| {
+                                self.resolve_named_reference(
+                                    reference,
+                                    ResourceTreeRelation::ReferencedResource,
+                                )
+                            }),
+                    );
+                }
                 RelationshipProvider::OwnedChildren => {
                     let Some((group, kind)) = owned_child_kind(&resource.group, &resource.kind)
                     else {
@@ -633,6 +796,156 @@ impl Backend {
                     children.append(&mut refs);
                     errors.append(&mut provider_errors);
                 }
+                RelationshipProvider::ObjectBucketClaim => {
+                    children.extend(
+                        object_bucket_claim_references(resource, data)
+                            .into_iter()
+                            .map(|reference| {
+                                self.resolve_named_reference(
+                                    reference,
+                                    ResourceTreeRelation::GeneratedResource,
+                                )
+                            }),
+                    );
+                }
+                RelationshipProvider::Certificate => {
+                    children.extend(certificate_references(resource, data).into_iter().map(
+                        |reference| {
+                            self.resolve_named_reference(
+                                reference,
+                                ResourceTreeRelation::ReferencedResource,
+                            )
+                        },
+                    ));
+                }
+                RelationshipProvider::CertificateRequest => {
+                    if let Some(reference) = issuer_reference(resource, data) {
+                        children.push(self.resolve_named_reference(
+                            reference,
+                            ResourceTreeRelation::ReferencedResource,
+                        ));
+                    }
+                    match with_api_permit(
+                        semaphore,
+                        self.list_owned_kind(resource, object, "acme.cert-manager.io", "Order"),
+                    )
+                    .await
+                    {
+                        Ok(mut refs) => children.append(&mut refs),
+                        Err(error) => errors.push(format!("owned Orders: {error}")),
+                    }
+                }
+                RelationshipProvider::CertManagerOrder => {
+                    match with_api_permit(
+                        semaphore,
+                        self.list_owned_kind(resource, object, "acme.cert-manager.io", "Challenge"),
+                    )
+                    .await
+                    {
+                        Ok(mut refs) => children.append(&mut refs),
+                        Err(error) => errors.push(format!("owned Challenges: {error}")),
+                    }
+                }
+                RelationshipProvider::ExternalSecret => {
+                    children.extend(external_secret_references(resource, data).into_iter().map(
+                        |(reference, relation)| self.resolve_named_reference(reference, relation),
+                    ));
+                }
+                RelationshipProvider::ClusterExternalSecret => {
+                    children.extend(
+                        cluster_external_secret_references(resource, data)
+                            .into_iter()
+                            .map(|reference| {
+                                self.resolve_named_reference(
+                                    reference,
+                                    ResourceTreeRelation::GeneratedResource,
+                                )
+                            }),
+                    );
+                    match with_api_permit(
+                        semaphore,
+                        self.list_owned_kind(
+                            resource,
+                            object,
+                            "external-secrets.io",
+                            "ExternalSecret",
+                        ),
+                    )
+                    .await
+                    {
+                        Ok(mut refs) => {
+                            for reference in &mut refs {
+                                reference.relation = Some(ResourceTreeRelation::GeneratedResource);
+                            }
+                            children.append(&mut refs);
+                        }
+                        Err(error) => {
+                            errors.push(format!("generated ExternalSecrets: {error}"));
+                        }
+                    }
+                }
+                RelationshipProvider::KopiurPolicy => {
+                    let (mut refs, mut provider_errors) = self
+                        .kopiur_policy_relationships(resource, object, data, semaphore)
+                        .await;
+                    children.append(&mut refs);
+                    errors.append(&mut provider_errors);
+                }
+                RelationshipProvider::TupprUpgrade => {
+                    let (mut refs, mut provider_errors) = self
+                        .tuppr_upgrade_relationships(resource, data, semaphore)
+                        .await;
+                    children.append(&mut refs);
+                    errors.append(&mut provider_errors);
+                }
+                RelationshipProvider::GatewayRoute => {
+                    children.extend(gateway_route_references(resource, data).into_iter().map(
+                        |reference| {
+                            self.resolve_named_reference(
+                                reference,
+                                ResourceTreeRelation::ReferencedResource,
+                            )
+                        },
+                    ));
+                }
+                RelationshipProvider::EnvoyPolicy => {
+                    children.extend(envoy_policy_references(resource, data).into_iter().map(
+                        |reference| {
+                            self.resolve_named_reference(
+                                reference,
+                                ResourceTreeRelation::ReferencedResource,
+                            )
+                        },
+                    ));
+                }
+                RelationshipProvider::ReferenceGrant => {
+                    let (mut refs, mut provider_errors) = self
+                        .reference_grant_relationships(resource, data, semaphore)
+                        .await;
+                    children.append(&mut refs);
+                    errors.append(&mut provider_errors);
+                }
+                RelationshipProvider::NetworkPolicyPods => {
+                    let selector = data.pointer("/spec/podSelector").unwrap_or(&Value::Null);
+                    match super::logs::label_selector(selector, true, "NetworkPolicy") {
+                        Ok(selector) => match with_api_permit(
+                            semaphore,
+                            self.list_selected(
+                                "",
+                                "Pod",
+                                resource.namespace.as_deref(),
+                                &selector,
+                                ResourceTreeRelation::SelectedPod,
+                            ),
+                        )
+                        .await
+                        {
+                            Ok(mut refs) => children.append(&mut refs),
+                            Err(error) => errors.push(format!("selected pods: {error}")),
+                        },
+                        Err(error) => errors.push(error),
+                    }
+                }
             }
         }
 
@@ -640,6 +953,16 @@ impl Backend {
     }
 
     async fn list_owned_children(
+        &self,
+        parent: &ResourceRef,
+        object: &DynamicObject,
+        group: &str,
+        kind: &str,
+    ) -> Result<Vec<ResourceRef>, K8sError> {
+        self.list_owned_kind(parent, object, group, kind).await
+    }
+
+    async fn list_owned_kind(
         &self,
         parent: &ResourceRef,
         object: &DynamicObject,
@@ -667,13 +990,17 @@ impl Backend {
                     .iter()
                     .any(|owner| owner.uid == uid)
             })
-            .filter_map(|child| child.metadata.name)
-            .map(|name| ResourceRef {
+            .filter_map(|child| {
+                let namespace =
+                    child_namespace(&child, parent.namespace.as_deref(), entry.kind.namespaced);
+                Some((child.metadata.name?, namespace))
+            })
+            .map(|(name, namespace)| ResourceRef {
                 group: entry.kind.group.clone(),
                 version: entry.kind.version.clone(),
                 kind: entry.kind.kind.clone(),
                 name,
-                namespace: parent.namespace.clone().filter(|_| entry.kind.namespaced),
+                namespace,
                 key: Some(entry.kind.key.clone()),
                 category: Some(entry.kind.category.clone()),
                 relation: Some(ResourceTreeRelation::OwnedResource),
@@ -701,15 +1028,16 @@ impl Backend {
         Ok(list
             .items
             .into_iter()
-            .filter_map(|object| object.metadata.name)
-            .map(|name| ResourceRef {
+            .filter_map(|object| {
+                let object_namespace = child_namespace(&object, namespace, entry.kind.namespaced);
+                Some((object.metadata.name?, object_namespace))
+            })
+            .map(|(name, object_namespace)| ResourceRef {
                 group: entry.kind.group.clone(),
                 version: entry.kind.version.clone(),
                 kind: entry.kind.kind.clone(),
                 name,
-                namespace: namespace
-                    .map(str::to_string)
-                    .filter(|_| entry.kind.namespaced),
+                namespace: object_namespace,
                 key: Some(entry.kind.key.clone()),
                 category: Some(entry.kind.category.clone()),
                 relation: Some(relation),
@@ -735,19 +1063,20 @@ impl Backend {
             .items
             .into_iter()
             .filter(matches)
-            .filter_map(|object| object.metadata.name)
-            .map(|name| ResourceRef {
+            .filter_map(|object| {
+                let object_namespace = child_namespace(&object, namespace, entry.kind.namespaced);
+                Some((object.metadata.name?, object_namespace))
+            })
+            .map(|(name, object_namespace)| ResourceRef {
                 group: entry.kind.group.clone(),
                 version: entry.kind.version.clone(),
                 kind: entry.kind.kind.clone(),
                 name,
-                namespace: namespace
-                    .map(str::to_string)
-                    .filter(|_| entry.kind.namespaced),
+                namespace: object_namespace,
                 key: Some(entry.kind.key.clone()),
                 category: Some(entry.kind.category.clone()),
                 relation: Some(relation),
-                expandable: false,
+                expandable: reference_is_expandable(Some(relation), group, kind),
             })
             .collect())
     }
@@ -994,6 +1323,158 @@ impl Backend {
         (children, errors)
     }
 
+    async fn kopiur_policy_relationships(
+        &self,
+        resource: &ResourceRef,
+        object: &DynamicObject,
+        data: &Value,
+        semaphore: &tokio::sync::Semaphore,
+    ) -> (Vec<ResourceRef>, Vec<String>) {
+        let mut children: Vec<_> = kopiur_repository_references(resource, data)
+            .into_iter()
+            .map(|reference| {
+                self.resolve_named_reference(reference, ResourceTreeRelation::ReferencedResource)
+            })
+            .collect();
+        let mut errors = Vec::new();
+        let labels = object.metadata.labels.clone().unwrap_or_default();
+        for kind in ["SnapshotSchedule", "Snapshot", "Restore"] {
+            let result = with_api_permit(
+                semaphore,
+                self.list_matching(
+                    "kopiur.home-operations.com",
+                    kind,
+                    resource.namespace.as_deref(),
+                    ResourceTreeRelation::GeneratedResource,
+                    |child| kopiur_child_matches_policy(kind, &resource.name, &labels, child),
+                ),
+            )
+            .await;
+            match result {
+                Ok(mut refs) => children.append(&mut refs),
+                Err(error) => errors.push(format!("{kind} resources: {error}")),
+            }
+        }
+        (children, errors)
+    }
+
+    async fn tuppr_upgrade_relationships(
+        &self,
+        resource: &ResourceRef,
+        data: &Value,
+        semaphore: &tokio::sync::Semaphore,
+    ) -> (Vec<ResourceRef>, Vec<String>) {
+        let mut children: Vec<_> = tuppr_node_names(&resource.kind, data)
+            .into_iter()
+            .map(|name| {
+                self.resolve_resource(
+                    String::new(),
+                    "v1".into(),
+                    "Node".into(),
+                    name,
+                    None,
+                    Some(ResourceTreeRelation::ClusterResource),
+                )
+            })
+            .collect();
+        let mut errors = Vec::new();
+        if resource.kind == "KubernetesUpgrade" {
+            match with_api_permit(
+                semaphore,
+                self.list_matching(
+                    "",
+                    "Node",
+                    None,
+                    ResourceTreeRelation::ClusterResource,
+                    |_| true,
+                ),
+            )
+            .await
+            {
+                Ok(mut refs) => children.append(&mut refs),
+                Err(error) => errors.push(format!("affected Nodes: {error}")),
+            }
+        } else if resource.kind == "TalosUpgrade" {
+            let selector = data.pointer("/spec/nodeSelector").unwrap_or(&Value::Null);
+            match super::logs::label_selector(selector, true, "Tuppr node") {
+                Ok(selector) => match with_api_permit(
+                    semaphore,
+                    self.list_selected(
+                        "",
+                        "Node",
+                        None,
+                        &selector,
+                        ResourceTreeRelation::ClusterResource,
+                    ),
+                )
+                .await
+                {
+                    Ok(mut refs) => children.append(&mut refs),
+                    Err(error) => errors.push(format!("affected Nodes: {error}")),
+                },
+                Err(error) => errors.push(error),
+            }
+        }
+        (children, errors)
+    }
+
+    async fn reference_grant_relationships(
+        &self,
+        resource: &ResourceRef,
+        data: &Value,
+        semaphore: &tokio::sync::Semaphore,
+    ) -> (Vec<ResourceRef>, Vec<String>) {
+        let mut children = Vec::new();
+        let mut errors = Vec::new();
+        let targets = reference_grant_targets(data);
+        for reference in reference_grant_named_targets(resource, data) {
+            children.push(
+                self.resolve_named_reference(reference, ResourceTreeRelation::ReferencedResource),
+            );
+        }
+        for (group, kind, namespace) in reference_grant_list_targets(resource, data) {
+            match with_api_permit(
+                semaphore,
+                self.list_matching(
+                    &group,
+                    &kind,
+                    namespace.as_deref(),
+                    ResourceTreeRelation::ReferencedResource,
+                    |_| true,
+                ),
+            )
+            .await
+            {
+                Ok(mut refs) => children.append(&mut refs),
+                Err(error) => errors.push(format!("permitted {kind} resources: {error}")),
+            }
+        }
+        for (group, kind, namespace) in reference_grant_sources(data) {
+            match with_api_permit(
+                semaphore,
+                self.list_matching(
+                    &group,
+                    &kind,
+                    namespace.as_deref(),
+                    ResourceTreeRelation::ReferencedResource,
+                    |source| {
+                        reference_grant_source_matches(
+                            source,
+                            resource.namespace.as_deref(),
+                            &targets,
+                        )
+                    },
+                ),
+            )
+            .await
+            {
+                Ok(mut refs) => children.append(&mut refs),
+                Err(error) => errors.push(format!("permitted {kind} sources: {error}")),
+            }
+        }
+        (children, errors)
+    }
+
     fn kustomization_children(&self, data: &Value) -> Result<Vec<ResourceRef>, String> {
         let entries = data
             .pointer("/status/inventory/entries")
@@ -1045,6 +1526,21 @@ impl Backend {
             relation,
             expandable,
         }
+    }
+
+    fn resolve_named_reference(
+        &self,
+        reference: NamedReference,
+        relation: ResourceTreeRelation,
+    ) -> ResourceRef {
+        self.resolve_resource(
+            reference.group,
+            String::new(),
+            reference.kind,
+            reference.name,
+            reference.namespace,
+            Some(relation),
+        )
     }
 
     fn catalog_entry(
@@ -1101,6 +1597,542 @@ fn split_api_version(api_version: &str) -> (String, String) {
     )
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct NamedReference {
+    group: String,
+    kind: String,
+    name: String,
+    namespace: Option<String>,
+}
+
+fn named_reference(
+    value: &Value,
+    default_group: &str,
+    default_kind: &str,
+    default_namespace: Option<&str>,
+) -> Option<NamedReference> {
+    let name = value
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|name| !name.is_empty())?;
+    Some(NamedReference {
+        group: value
+            .get("group")
+            .and_then(Value::as_str)
+            .unwrap_or(default_group)
+            .to_string(),
+        kind: value
+            .get("kind")
+            .and_then(Value::as_str)
+            .filter(|kind| !kind.is_empty())
+            .unwrap_or(default_kind)
+            .to_string(),
+        name: name.to_string(),
+        namespace: value
+            .get("namespace")
+            .and_then(Value::as_str)
+            .filter(|namespace| !namespace.is_empty())
+            .map(str::to_string)
+            .or_else(|| default_namespace.map(str::to_string)),
+    })
+}
+
+fn object_bucket_claim_references(resource: &ResourceRef, data: &Value) -> Vec<NamedReference> {
+    let mut references = ["Secret", "ConfigMap"]
+        .into_iter()
+        .map(|kind| NamedReference {
+            group: String::new(),
+            kind: kind.into(),
+            name: resource.name.clone(),
+            namespace: resource.namespace.clone(),
+        })
+        .collect::<Vec<_>>();
+    if let Some(name) = data
+        .pointer("/spec/objectBucketName")
+        .and_then(Value::as_str)
+        .filter(|name| !name.is_empty())
+    {
+        references.push(NamedReference {
+            group: "objectbucket.io".into(),
+            kind: "ObjectBucket".into(),
+            name: name.into(),
+            namespace: None,
+        });
+    }
+    references
+}
+
+fn issuer_reference(resource: &ResourceRef, data: &Value) -> Option<NamedReference> {
+    let mut reference = named_reference(
+        data.pointer("/spec/issuerRef")?,
+        "cert-manager.io",
+        "Issuer",
+        resource.namespace.as_deref(),
+    )?;
+    if reference.kind == "ClusterIssuer" {
+        reference.namespace = None;
+    }
+    Some(reference)
+}
+
+fn certificate_references(resource: &ResourceRef, data: &Value) -> Vec<NamedReference> {
+    let mut references = issuer_reference(resource, data)
+        .into_iter()
+        .collect::<Vec<_>>();
+    if let Some(name) = data
+        .pointer("/spec/secretName")
+        .and_then(Value::as_str)
+        .filter(|name| !name.is_empty())
+    {
+        references.push(NamedReference {
+            group: String::new(),
+            kind: "Secret".into(),
+            name: name.into(),
+            namespace: resource.namespace.clone(),
+        });
+    }
+    references
+}
+
+fn external_secret_references(
+    resource: &ResourceRef,
+    data: &Value,
+) -> Vec<(NamedReference, ResourceTreeRelation)> {
+    let mut references = Vec::new();
+    if let Some(mut store) = data.pointer("/spec/secretStoreRef").and_then(|value| {
+        named_reference(
+            value,
+            "external-secrets.io",
+            "SecretStore",
+            resource.namespace.as_deref(),
+        )
+    }) {
+        if store.kind == "ClusterSecretStore" {
+            store.namespace = None;
+        }
+        references.push((store, ResourceTreeRelation::ReferencedResource));
+    }
+    let target_name = data
+        .pointer("/spec/target/name")
+        .and_then(Value::as_str)
+        .filter(|name| !name.is_empty())
+        .unwrap_or(&resource.name);
+    references.push((
+        NamedReference {
+            group: String::new(),
+            kind: "Secret".into(),
+            name: target_name.into(),
+            namespace: resource.namespace.clone(),
+        },
+        ResourceTreeRelation::GeneratedResource,
+    ));
+    references
+}
+
+fn cluster_external_secret_references(resource: &ResourceRef, data: &Value) -> Vec<NamedReference> {
+    let name = data
+        .pointer("/status/externalSecretName")
+        .or_else(|| data.pointer("/spec/externalSecretName"))
+        .and_then(Value::as_str)
+        .filter(|name| !name.is_empty())
+        .unwrap_or(&resource.name);
+    data.pointer("/status/provisionedNamespaces")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter(|namespace| !namespace.is_empty())
+        .map(|namespace| NamedReference {
+            group: "external-secrets.io".into(),
+            kind: "ExternalSecret".into(),
+            name: name.into(),
+            namespace: Some(namespace.into()),
+        })
+        .collect()
+}
+
+fn flux_group(kind: &str) -> &'static str {
+    match kind {
+        "Kustomization" => "kustomize.toolkit.fluxcd.io",
+        "HelmRelease" => "helm.toolkit.fluxcd.io",
+        "ImageRepository" | "ImagePolicy" | "ImageUpdateAutomation" => "image.toolkit.fluxcd.io",
+        "Alert" | "Provider" | "Receiver" => "notification.toolkit.fluxcd.io",
+        _ => "source.toolkit.fluxcd.io",
+    }
+}
+
+fn flux_references(resource: &ResourceRef, data: &Value) -> Vec<NamedReference> {
+    let mut references = [
+        "/spec/sourceRef",
+        "/spec/chart/spec/sourceRef",
+        "/spec/chartRef",
+    ]
+    .into_iter()
+    .filter_map(|path| data.pointer(path))
+    .filter_map(|value| {
+        let kind = value.get("kind")?.as_str()?;
+        named_reference(value, flux_group(kind), kind, resource.namespace.as_deref())
+    })
+    .collect::<Vec<_>>();
+    references.extend(
+        data.pointer("/spec/dependsOn")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|value| {
+                named_reference(
+                    value,
+                    &resource.group,
+                    &resource.kind,
+                    resource.namespace.as_deref(),
+                )
+            }),
+    );
+    references
+}
+
+fn kopiur_repository_references(resource: &ResourceRef, data: &Value) -> Vec<NamedReference> {
+    data.pointer("/spec/repository")
+        .into_iter()
+        .chain(
+            data.pointer("/spec/repositories")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten(),
+        )
+        .filter_map(|value| {
+            let mut reference = named_reference(
+                value,
+                "kopiur.home-operations.com",
+                "Repository",
+                resource.namespace.as_deref(),
+            )?;
+            if reference.kind == "ClusterRepository" {
+                reference.namespace = None;
+            }
+            Some(reference)
+        })
+        .collect()
+}
+
+fn kopiur_child_matches_policy(
+    kind: &str,
+    policy_name: &str,
+    policy_labels: &std::collections::BTreeMap<String, String>,
+    child: &DynamicObject,
+) -> bool {
+    match kind {
+        "SnapshotSchedule" => {
+            child
+                .data
+                .pointer("/spec/policyRef/name")
+                .and_then(Value::as_str)
+                == Some(policy_name)
+                || child
+                    .data
+                    .pointer("/spec/policySelector")
+                    .is_some_and(|selector| label_selector_matches(selector, policy_labels))
+        }
+        "Snapshot" => {
+            child
+                .data
+                .pointer("/spec/policyRef/name")
+                .and_then(Value::as_str)
+                == Some(policy_name)
+                || child
+                    .metadata
+                    .labels
+                    .as_ref()
+                    .and_then(|labels| labels.get("kopiur.home-operations.com/config"))
+                    .is_some_and(|name| name == policy_name)
+        }
+        "Restore" => {
+            child
+                .data
+                .pointer("/spec/source/fromPolicy/name")
+                .and_then(Value::as_str)
+                == Some(policy_name)
+        }
+        _ => false,
+    }
+}
+
+fn label_selector_matches(
+    selector: &Value,
+    labels: &std::collections::BTreeMap<String, String>,
+) -> bool {
+    let labels_match = selector
+        .get("matchLabels")
+        .and_then(Value::as_object)
+        .is_none_or(|required| {
+            required.iter().all(|(key, value)| {
+                value
+                    .as_str()
+                    .is_some_and(|value| labels.get(key).is_some_and(|actual| actual == value))
+            })
+        });
+    labels_match
+        && selector
+            .get("matchExpressions")
+            .and_then(Value::as_array)
+            .is_none_or(|expressions| {
+                expressions.iter().all(|expression| {
+                    let Some(key) = expression.get("key").and_then(Value::as_str) else {
+                        return false;
+                    };
+                    let values = expression
+                        .get("values")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>();
+                    match expression.get("operator").and_then(Value::as_str) {
+                        Some("In") => labels
+                            .get(key)
+                            .is_some_and(|value| values.contains(&value.as_str())),
+                        Some("NotIn") => labels
+                            .get(key)
+                            .is_none_or(|value| !values.contains(&value.as_str())),
+                        Some("Exists") => labels.contains_key(key),
+                        Some("DoesNotExist") => !labels.contains_key(key),
+                        _ => false,
+                    }
+                })
+            })
+}
+
+fn tuppr_node_names(kind: &str, data: &Value) -> Vec<String> {
+    let mut names = Vec::new();
+    if kind == "KubernetesUpgrade" {
+        if let Some(name) = data
+            .pointer("/status/controllerNode")
+            .and_then(Value::as_str)
+        {
+            names.push(name.to_string());
+        }
+    } else {
+        for path in ["/status/currentNode"] {
+            if let Some(name) = data.pointer(path).and_then(Value::as_str) {
+                names.push(name.to_string());
+            }
+        }
+        for path in ["/status/currentNodes", "/status/completedNodes"] {
+            names.extend(
+                data.pointer(path)
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string),
+            );
+        }
+        for path in [
+            "/status/failedNodes",
+            "/status/prePulledNodes",
+            "/status/rebootingNodes",
+        ] {
+            names.extend(
+                data.pointer(path)
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|value| value.get("nodeName").and_then(Value::as_str))
+                    .map(str::to_string),
+            );
+        }
+    }
+    names.retain(|name| !name.is_empty());
+    names.sort();
+    names.dedup();
+    names
+}
+
+fn gateway_route_references(resource: &ResourceRef, data: &Value) -> Vec<NamedReference> {
+    let mut references = data
+        .pointer("/spec/parentRefs")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|value| {
+            named_reference(
+                value,
+                "gateway.networking.k8s.io",
+                "Gateway",
+                resource.namespace.as_deref(),
+            )
+        })
+        .collect::<Vec<_>>();
+    references.extend(
+        data.pointer("/spec/rules")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .flat_map(|rule| {
+                rule.get("backendRefs")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+            })
+            .filter_map(|value| {
+                named_reference(value, "", "Service", resource.namespace.as_deref())
+            }),
+    );
+    references
+}
+
+fn envoy_policy_references(resource: &ResourceRef, data: &Value) -> Vec<NamedReference> {
+    data.pointer("/spec/targetRef")
+        .into_iter()
+        .chain(
+            data.pointer("/spec/targetRefs")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten(),
+        )
+        .filter_map(|value| {
+            named_reference(
+                value,
+                "gateway.networking.k8s.io",
+                "Gateway",
+                resource.namespace.as_deref(),
+            )
+        })
+        .collect()
+}
+
+fn reference_grant_named_targets(resource: &ResourceRef, data: &Value) -> Vec<NamedReference> {
+    data.pointer("/spec/to")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|value| value.get("name").is_some())
+        .filter_map(|value| named_reference(value, "", "Service", resource.namespace.as_deref()))
+        .collect()
+}
+
+fn reference_grant_list_targets(
+    resource: &ResourceRef,
+    data: &Value,
+) -> Vec<(String, String, Option<String>)> {
+    data.pointer("/spec/to")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|value| value.get("name").is_none())
+        .filter_map(|value| {
+            Some((
+                value.get("group")?.as_str()?.to_string(),
+                value.get("kind")?.as_str()?.to_string(),
+                resource.namespace.clone(),
+            ))
+        })
+        .collect()
+}
+
+fn reference_grant_sources(data: &Value) -> Vec<(String, String, Option<String>)> {
+    data.pointer("/spec/from")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|value| {
+            Some((
+                value.get("group")?.as_str()?.to_string(),
+                value.get("kind")?.as_str()?.to_string(),
+                Some(value.get("namespace")?.as_str()?.to_string()),
+            ))
+        })
+        .collect()
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ReferenceGrantTarget {
+    group: String,
+    kind: String,
+    name: Option<String>,
+}
+
+fn reference_grant_targets(data: &Value) -> Vec<ReferenceGrantTarget> {
+    data.pointer("/spec/to")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|value| {
+            Some(ReferenceGrantTarget {
+                group: value.get("group")?.as_str()?.to_string(),
+                kind: value.get("kind")?.as_str()?.to_string(),
+                name: value
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            })
+        })
+        .collect()
+}
+
+fn reference_grant_source_matches(
+    source: &DynamicObject,
+    target_namespace: Option<&str>,
+    targets: &[ReferenceGrantTarget],
+) -> bool {
+    let Some(target_namespace) = target_namespace else {
+        return false;
+    };
+    source
+        .data
+        .get("spec")
+        .is_some_and(|spec| value_references_grant_target(spec, target_namespace, targets))
+}
+
+fn value_references_grant_target(
+    value: &Value,
+    target_namespace: &str,
+    targets: &[ReferenceGrantTarget],
+) -> bool {
+    match value {
+        Value::Array(values) => values
+            .iter()
+            .any(|value| value_references_grant_target(value, target_namespace, targets)),
+        Value::Object(object) => {
+            let matches = object.get("namespace").and_then(Value::as_str) == Some(target_namespace)
+                && object
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|name| {
+                        let group = object.get("group").and_then(Value::as_str).unwrap_or("");
+                        let kind = object
+                            .get("kind")
+                            .and_then(Value::as_str)
+                            .unwrap_or("Service");
+                        targets.iter().any(|target| {
+                            target.group == group
+                                && target.kind == kind
+                                && target.name.as_deref().is_none_or(|target| target == name)
+                        })
+                    });
+            matches
+                || object
+                    .values()
+                    .any(|value| value_references_grant_target(value, target_namespace, targets))
+        }
+        _ => false,
+    }
+}
+
+fn child_namespace(
+    object: &DynamicObject,
+    fallback: Option<&str>,
+    namespaced: bool,
+) -> Option<String> {
+    namespaced.then(|| {
+        object
+            .metadata
+            .namespace
+            .clone()
+            .or_else(|| fallback.map(str::to_string))
+    })?
+}
+
 fn relationship_providers(
     resource: &ResourceRef,
 ) -> impl Iterator<Item = RelationshipProvider> + '_ {
@@ -1135,6 +2167,13 @@ fn is_expandable_kind(group: &str, kind: &str) -> bool {
         || is_workload(group, kind)
         || (group == "batch" && kind == "CronJob")
         || (group.is_empty() && kind == "Service")
+        || (group == "acme.cert-manager.io" && kind == "Order")
+        || (group == "external-secrets.io" && kind == "ExternalSecret")
+        || (group == "gateway.networking.k8s.io"
+            && matches!(
+                kind,
+                "HTTPRoute" | "GRPCRoute" | "TLSRoute" | "TCPRoute" | "UDPRoute"
+            ))
 }
 
 fn reference_is_expandable(
@@ -1144,7 +2183,9 @@ fn reference_is_expandable(
 ) -> bool {
     relation == Some(ResourceTreeRelation::Owner)
         || is_flux_owner(group, kind)
-        || (relation == Some(ResourceTreeRelation::ScaleTarget) && is_expandable_kind(group, kind))
+        || (relation.is_some()
+            && relation != Some(ResourceTreeRelation::FluxInventory)
+            && is_expandable_kind(group, kind))
         || (relation == Some(ResourceTreeRelation::ReferencedResource)
             && group.is_empty()
             && matches!(kind, "PersistentVolumeClaim" | "PersistentVolume"))
@@ -1767,6 +2808,368 @@ mod tests {
         assert!(!volume_attachment_matches(
             &resource("Service", "worker-1"),
             &attachment
+        ));
+    }
+
+    fn test_resource(group: &str, kind: &str, namespace: Option<&str>) -> ResourceRef {
+        ResourceRef {
+            group: group.into(),
+            version: "v1alpha1".into(),
+            kind: kind.into(),
+            name: "resource".into(),
+            namespace: namespace.map(str::to_string),
+            key: None,
+            category: None,
+            relation: None,
+            expandable: true,
+        }
+    }
+
+    #[test]
+    fn relationship_registry_covers_operator_and_network_resources() {
+        let cases = [
+            (
+                "objectbucket.io",
+                "ObjectBucketClaim",
+                RelationshipProvider::ObjectBucketClaim,
+            ),
+            (
+                "cert-manager.io",
+                "Certificate",
+                RelationshipProvider::Certificate,
+            ),
+            (
+                "cert-manager.io",
+                "CertificateRequest",
+                RelationshipProvider::CertificateRequest,
+            ),
+            (
+                "acme.cert-manager.io",
+                "Order",
+                RelationshipProvider::CertManagerOrder,
+            ),
+            (
+                "external-secrets.io",
+                "ExternalSecret",
+                RelationshipProvider::ExternalSecret,
+            ),
+            (
+                "external-secrets.io",
+                "ClusterExternalSecret",
+                RelationshipProvider::ClusterExternalSecret,
+            ),
+            (
+                "kopiur.home-operations.com",
+                "SnapshotPolicy",
+                RelationshipProvider::KopiurPolicy,
+            ),
+            (
+                "tuppr.home-operations.com",
+                "KubernetesUpgrade",
+                RelationshipProvider::TupprUpgrade,
+            ),
+            (
+                "tuppr.home-operations.com",
+                "TalosUpgrade",
+                RelationshipProvider::TupprUpgrade,
+            ),
+            (
+                "gateway.networking.k8s.io",
+                "HTTPRoute",
+                RelationshipProvider::GatewayRoute,
+            ),
+            (
+                "gateway.networking.k8s.io",
+                "ReferenceGrant",
+                RelationshipProvider::ReferenceGrant,
+            ),
+            (
+                "gateway.envoyproxy.io",
+                "SecurityPolicy",
+                RelationshipProvider::EnvoyPolicy,
+            ),
+        ];
+        for (group, kind, provider) in cases {
+            assert!(
+                relationship_providers(&test_resource(group, kind, Some("app")))
+                    .any(|registered| registered == provider),
+                "{group}/{kind}"
+            );
+        }
+        let mut network_policy = test_resource("networking.k8s.io", "NetworkPolicy", Some("app"));
+        network_policy.version = "v1".into();
+        assert_eq!(
+            relationship_providers(&network_policy).collect::<Vec<_>>(),
+            [RelationshipProvider::NetworkPolicyPods]
+        );
+    }
+
+    #[test]
+    fn object_bucket_claim_links_generated_resources() {
+        let resource = test_resource("objectbucket.io", "ObjectBucketClaim", Some("storage"));
+        let references = object_bucket_claim_references(
+            &resource,
+            &json!({"spec": {"objectBucketName": "obc-storage-media"}}),
+        );
+        assert_eq!(references.len(), 3);
+        assert!(references.iter().any(|reference| reference.kind == "Secret"
+            && reference.name == "resource"
+            && reference.namespace.as_deref() == Some("storage")));
+        assert!(references
+            .iter()
+            .any(|reference| reference.kind == "ConfigMap" && reference.name == "resource"));
+        assert!(references
+            .iter()
+            .any(|reference| reference.kind == "ObjectBucket"
+                && reference.name == "obc-storage-media"
+                && reference.namespace.is_none()));
+    }
+
+    #[test]
+    fn certificates_link_secrets_and_default_or_cluster_issuers() {
+        let resource = test_resource("cert-manager.io", "Certificate", Some("app"));
+        let references = certificate_references(
+            &resource,
+            &json!({"spec": {"secretName": "api-tls", "issuerRef": {"name": "letsencrypt"}}}),
+        );
+        assert!(references
+            .iter()
+            .any(|reference| reference.kind == "Secret" && reference.name == "api-tls"));
+        assert!(references
+            .iter()
+            .any(|reference| reference.kind == "Issuer"
+                && reference.namespace.as_deref() == Some("app")));
+
+        let cluster = issuer_reference(
+            &resource,
+            &json!({"spec": {"issuerRef": {"name": "root", "kind": "ClusterIssuer"}}}),
+        )
+        .unwrap();
+        assert_eq!(cluster.namespace, None);
+        assert_eq!(cluster.group, "cert-manager.io");
+    }
+
+    #[test]
+    fn external_secrets_link_store_and_generated_secret() {
+        let resource = test_resource("external-secrets.io", "ExternalSecret", Some("app"));
+        let references = external_secret_references(
+            &resource,
+            &json!({"spec": {
+                "secretStoreRef": {"name": "vault", "kind": "ClusterSecretStore"},
+                "target": {"name": "database"}
+            }}),
+        );
+        assert!(references.iter().any(|(reference, relation)| reference.kind
+            == "ClusterSecretStore"
+            && reference.namespace.is_none()
+            && *relation == ResourceTreeRelation::ReferencedResource));
+        assert!(references
+            .iter()
+            .any(|(reference, relation)| reference.kind == "Secret"
+                && reference.name == "database"
+                && *relation == ResourceTreeRelation::GeneratedResource));
+
+        let cluster = test_resource("external-secrets.io", "ClusterExternalSecret", None);
+        let generated = cluster_external_secret_references(
+            &cluster,
+            &json!({"status": {"externalSecretName": "shared", "provisionedNamespaces": ["a", "b"]}}),
+        );
+        assert_eq!(generated.len(), 2);
+        assert!(generated
+            .iter()
+            .all(|reference| reference.kind == "ExternalSecret" && reference.name == "shared"));
+    }
+
+    #[test]
+    fn flux_links_sources_charts_and_dependencies() {
+        let resource = test_resource("helm.toolkit.fluxcd.io", "HelmRelease", Some("apps"));
+        let references = flux_references(
+            &resource,
+            &json!({"spec": {
+                "chartRef": {"kind": "OCIRepository", "name": "charts", "namespace": "flux-system"},
+                "dependsOn": [{"name": "database"}]
+            }}),
+        );
+        assert!(references
+            .iter()
+            .any(|reference| reference.group == "source.toolkit.fluxcd.io"
+                && reference.kind == "OCIRepository"
+                && reference.namespace.as_deref() == Some("flux-system")));
+        assert!(references
+            .iter()
+            .any(|reference| reference.group == "helm.toolkit.fluxcd.io"
+                && reference.kind == "HelmRelease"
+                && reference.name == "database"
+                && reference.namespace.as_deref() == Some("apps")));
+    }
+
+    #[test]
+    fn kopiur_policy_links_repositories_and_operational_children() {
+        let resource = test_resource(
+            "kopiur.home-operations.com",
+            "SnapshotPolicy",
+            Some("backup"),
+        );
+        let repositories = kopiur_repository_references(
+            &resource,
+            &json!({"spec": {"repositories": [
+                {"kind": "Repository", "name": "local"},
+                {"kind": "ClusterRepository", "name": "archive"}
+            ]}}),
+        );
+        assert_eq!(repositories[0].namespace.as_deref(), Some("backup"));
+        assert_eq!(repositories[1].namespace, None);
+
+        let labels = std::collections::BTreeMap::from([("backup".into(), "daily".into())]);
+        let schedule: DynamicObject = serde_json::from_value(json!({
+            "apiVersion": "kopiur.home-operations.com/v1alpha1", "kind": "SnapshotSchedule",
+            "metadata": {"name": "daily"},
+            "spec": {"policySelector": {"matchLabels": {"backup": "daily"}}}
+        }))
+        .unwrap();
+        assert!(kopiur_child_matches_policy(
+            "SnapshotSchedule",
+            "resource",
+            &labels,
+            &schedule
+        ));
+        let restore: DynamicObject = serde_json::from_value(json!({
+            "apiVersion": "kopiur.home-operations.com/v1alpha1", "kind": "Restore",
+            "metadata": {"name": "restore"},
+            "spec": {"source": {"fromPolicy": {"name": "resource"}}}
+        }))
+        .unwrap();
+        assert!(kopiur_child_matches_policy(
+            "Restore", "resource", &labels, &restore
+        ));
+    }
+
+    #[test]
+    fn tuppr_links_every_reported_node_without_duplicates() {
+        let names = tuppr_node_names(
+            "TalosUpgrade",
+            &json!({"status": {
+                "currentNode": "worker-1",
+                "currentNodes": ["worker-1", "worker-2"],
+                "completedNodes": ["worker-0"],
+                "failedNodes": [{"nodeName": "worker-3"}],
+                "rebootingNodes": [{"nodeName": "worker-4"}]
+            }}),
+        );
+        assert_eq!(
+            names,
+            ["worker-0", "worker-1", "worker-2", "worker-3", "worker-4"]
+        );
+        assert_eq!(
+            tuppr_node_names(
+                "KubernetesUpgrade",
+                &json!({"status": {"controllerNode": "control-1"}})
+            ),
+            ["control-1"]
+        );
+        assert!(tuppr_node_names(
+            "KubernetesUpgrade",
+            &json!({"status": {"controllerNode": ""}})
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn gateway_envoy_and_reference_grant_refs_apply_api_defaults() {
+        let route = test_resource("gateway.networking.k8s.io", "HTTPRoute", Some("app"));
+        let references = gateway_route_references(
+            &route,
+            &json!({"spec": {
+                "parentRefs": [{"name": "public"}],
+                "rules": [{"backendRefs": [
+                    {"name": "api"},
+                    {"group": "example.io", "kind": "Backend", "name": "external", "namespace": "shared"}
+                ]}]
+            }}),
+        );
+        assert!(references
+            .iter()
+            .any(|reference| reference.kind == "Gateway"
+                && reference.group == "gateway.networking.k8s.io"));
+        assert!(references
+            .iter()
+            .any(|reference| reference.kind == "Service"
+                && reference.group.is_empty()
+                && reference.namespace.as_deref() == Some("app")));
+        assert!(references
+            .iter()
+            .any(|reference| reference.kind == "Backend"
+                && reference.namespace.as_deref() == Some("shared")));
+
+        let policy = test_resource("gateway.envoyproxy.io", "SecurityPolicy", Some("app"));
+        let targets = envoy_policy_references(
+            &policy,
+            &json!({"spec": {"targetRefs": [
+                {"kind": "HTTPRoute", "name": "api"},
+                {"group": "", "kind": "Service", "name": "auth"}
+            ]}}),
+        );
+        assert_eq!(targets.len(), 2);
+        assert_eq!(targets[0].group, "gateway.networking.k8s.io");
+        assert!(targets[1].group.is_empty());
+
+        let grant = test_resource(
+            "gateway.networking.k8s.io",
+            "ReferenceGrant",
+            Some("shared"),
+        );
+        let data = json!({"spec": {
+            "from": [{"group": "gateway.networking.k8s.io", "kind": "HTTPRoute", "namespace": "app"}],
+            "to": [
+                {"group": "", "kind": "Service", "name": "api"},
+                {"group": "", "kind": "Secret"}
+            ]
+        }});
+        let named = reference_grant_named_targets(&grant, &data);
+        assert_eq!(named[0].namespace.as_deref(), Some("shared"));
+        let listed = reference_grant_list_targets(&grant, &data);
+        assert_eq!(
+            listed,
+            [(String::new(), "Secret".into(), Some("shared".into()))]
+        );
+        let sources = reference_grant_sources(&data);
+        assert_eq!(
+            sources,
+            [(
+                "gateway.networking.k8s.io".into(),
+                "HTTPRoute".into(),
+                Some("app".into())
+            )]
+        );
+
+        let matching_source: DynamicObject = serde_json::from_value(json!({
+            "apiVersion": "gateway.networking.k8s.io/v1",
+            "kind": "HTTPRoute",
+            "metadata": {"name": "app", "namespace": "app"},
+            "spec": {"rules": [{"backendRefs": [
+                {"name": "api", "namespace": "shared"}
+            ]}]}
+        }))
+        .unwrap();
+        let unrelated_source: DynamicObject = serde_json::from_value(json!({
+            "apiVersion": "gateway.networking.k8s.io/v1",
+            "kind": "HTTPRoute",
+            "metadata": {"name": "other", "namespace": "app"},
+            "spec": {"rules": [{"backendRefs": [
+                {"name": "other", "namespace": "elsewhere"}
+            ]}]}
+        }))
+        .unwrap();
+        let targets = reference_grant_targets(&data);
+        assert!(reference_grant_source_matches(
+            &matching_source,
+            Some("shared"),
+            &targets
+        ));
+        assert!(!reference_grant_source_matches(
+            &unrelated_source,
+            Some("shared"),
+            &targets
         ));
     }
 }

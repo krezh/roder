@@ -279,6 +279,14 @@ pub(super) fn workload_label_selector(data: &serde_json::Value) -> Result<String
         .get("spec")
         .and_then(|spec| spec.get("selector"))
         .ok_or_else(|| "workload has no label selector".to_string())?;
+    label_selector(selector, false, "workload")
+}
+
+pub(super) fn label_selector(
+    selector: &serde_json::Value,
+    allow_empty: bool,
+    subject: &str,
+) -> Result<String, String> {
     let mut requirements = Vec::new();
 
     if let Some(labels) = selector
@@ -288,7 +296,7 @@ pub(super) fn workload_label_selector(data: &serde_json::Value) -> Result<String
         for (key, value) in labels {
             let value = value
                 .as_str()
-                .ok_or_else(|| format!("workload selector label {key} is not a string"))?;
+                .ok_or_else(|| format!("{subject} selector label {key} is not a string"))?;
             requirements.push(format!("{key}={value}"));
         }
     }
@@ -301,12 +309,12 @@ pub(super) fn workload_label_selector(data: &serde_json::Value) -> Result<String
             let key = expression
                 .get("key")
                 .and_then(|value| value.as_str())
-                .ok_or_else(|| "workload selector expression is missing key".to_string())?;
+                .ok_or_else(|| format!("{subject} selector expression is missing key"))?;
             let operator = expression
                 .get("operator")
                 .and_then(|value| value.as_str())
                 .ok_or_else(|| {
-                    format!("workload selector expression for {key} is missing operator")
+                    format!("{subject} selector expression for {key} is missing operator")
                 })?;
             let values = expression
                 .get("values")
@@ -317,7 +325,7 @@ pub(super) fn workload_label_selector(data: &serde_json::Value) -> Result<String
                         .map(|value| {
                             value.as_str().ok_or_else(|| {
                                 format!(
-                                    "workload selector expression for {key} has a non-string value"
+                                    "{subject} selector expression for {key} has a non-string value"
                                 )
                             })
                         })
@@ -328,7 +336,7 @@ pub(super) fn workload_label_selector(data: &serde_json::Value) -> Result<String
             let requirement = match operator {
                 "In" | "NotIn" if values.is_empty() => {
                     return Err(format!(
-                        "workload selector expression {operator} for {key} has no values"
+                        "{subject} selector expression {operator} for {key} has no values"
                     ));
                 }
                 "In" => format!("{key} in ({})", values.join(",")),
@@ -337,7 +345,7 @@ pub(super) fn workload_label_selector(data: &serde_json::Value) -> Result<String
                 "DoesNotExist" => format!("!{key}"),
                 other => {
                     return Err(format!(
-                        "workload selector expression for {key} has unsupported operator {other}"
+                        "{subject} selector expression for {key} has unsupported operator {other}"
                     ));
                 }
             };
@@ -346,8 +354,8 @@ pub(super) fn workload_label_selector(data: &serde_json::Value) -> Result<String
     }
 
     requirements.sort();
-    if requirements.is_empty() {
-        return Err("workload label selector is empty".into());
+    if requirements.is_empty() && !allow_empty {
+        return Err(format!("{subject} label selector is empty"));
     }
     Ok(requirements.join(","))
 }
@@ -415,7 +423,7 @@ fn attempt_signature(terminated: &serde_json::Value) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{pod_container_names, workload_label_selector};
+    use super::{label_selector, pod_container_names, workload_label_selector};
     use serde_json::json;
 
     #[test]
@@ -456,6 +464,15 @@ mod tests {
             ]}}
         }))
         .is_err());
+    }
+
+    #[test]
+    fn empty_network_policy_selector_selects_the_namespace() {
+        assert_eq!(
+            label_selector(&json!({}), true, "NetworkPolicy").unwrap(),
+            ""
+        );
+        assert!(label_selector(&json!({}), false, "workload").is_err());
     }
 
     #[test]

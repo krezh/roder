@@ -1,20 +1,5 @@
 # TODO
 
-## Resource Relationships
-
-- Add ObjectBucketClaim to ObjectBucket, Secret, and ConfigMap relationships
-- Add cert-manager Certificate to target Secret and issuer relationships
-- Add cert-manager CertificateRequest to issuer, Order, and Challenge relationships
-- Add ExternalSecret to store and generated Secret relationships
-- Add ClusterExternalSecret to generated ExternalSecret relationships
-- Add Kopiur Policy to Schedule, Snapshot, Repository, and Restore relationships
-- Add Tuppr upgrades to affected Nodes
-- Add Flux sourceRef, chartRef, and dependsOn relationships
-- Add Gateway API Route to parent Gateway and backend Service relationships
-- Add Envoy policy to target Route, Gateway, or Service relationships
-- Add ReferenceGrant relationships for permitted cross-namespace references
-- Add NetworkPolicy to selected Pod relationships
-
 ## CloudNativePG
 
 - Add Database row projection and Applied health semantics

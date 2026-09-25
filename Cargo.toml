@@ -203,7 +203,7 @@ serial_test = "4"
 # Native Rust CDP browser driver (Playwright-compatible API) used by the
 # tests/browser_smoke.rs E2E check. Alpha, unpublished (no crates.io
 # release yet) — pinned to a specific commit rather than a branch.
-rustwright = { git = "https://github.com/Skyvern-AI/rustwright", rev = "dfb481b6ab641b013c6d35fb12ed223efc752f38" }
+rustwright = { git = "https://github.com/Skyvern-AI/rustwright", rev = "fca14389e99726bca3210190b905e32663395b5c" }
 
 [features]
 default = ["ssr"]

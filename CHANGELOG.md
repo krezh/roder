@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.1.50](https://github.com/krezh/roder/compare/0.1.49...0.1.50) (2026-09-25)
+
+
+### Features
+
+* **k8s:** expand resource relationships ([192350b](https://github.com/krezh/roder/commit/192350b2ad88c674fbd2f65a9169c4900fe53951))
+* **ui:** add pointer-aware card hover animation ([2259fc7](https://github.com/krezh/roder/commit/2259fc7a7fbabf095a7a1a121efb6e1aaac23d35))
+* **ui:** improve structured log parsing ([84dc973](https://github.com/krezh/roder/commit/84dc97333b8080b95a8adfa7100bda62db425ef9))
+* **ui:** stack toast notifications vertically with independent lifecycles ([eb5edcc](https://github.com/krezh/roder/commit/eb5edcc6f45075bba8732017b3390bbc69f505b5))
+
+
+### Bug Fixes
+
+* **cargo:** update rust crate hyper-rustls (0.27.9 ➔ 0.27.10) ([#256](https://github.com/krezh/roder/issues/256)) ([b08af7f](https://github.com/krezh/roder/commit/b08af7f933bba6158a5be731d0ea9e8a41e77a72))
+* **cargo:** update rust crate hyper-util (0.1.20 ➔ 0.1.21) ([#261](https://github.com/krezh/roder/issues/261)) ([2961a50](https://github.com/krezh/roder/commit/2961a508e66c9f90ff685ae4188140899e36d435))
+* **cargo:** update rust crate thiserror (2.0.20 ➔ 2.0.21) ([#260](https://github.com/krezh/roder/issues/260)) ([f781a6d](https://github.com/krezh/roder/commit/f781a6de93bfaee1cb070ba4a341e953f58d082f))
+* **cargo:** update rustwright digest (dfb481b ➔ fca1438) ([#263](https://github.com/krezh/roder/issues/263)) ([f764b4c](https://github.com/krezh/roder/commit/f764b4c44249daa5673da722d88e64f14c0f40de))
+* **cargo:** update wasm-bindgen ([#264](https://github.com/krezh/roder/issues/264)) ([547ae67](https://github.com/krezh/roder/commit/547ae67882a566802bc1047aab1281023ecaa06e))
+* **ui:** synchronize dashboard refresh state and catalog reactivity ([d0c8fdb](https://github.com/krezh/roder/commit/d0c8fdbdc62a7a3f07cc7f383986d0682c8886b3))
+* **ui:** synchronize refresh progress indicators ([29d195c](https://github.com/krezh/roder/commit/29d195c5bbf0c7d7bb446f020173e4709fc032a2))
+
+
+### Miscellaneous Chores
+
+* **cargo:** lock file maintenance cargo.lock ([#258](https://github.com/krezh/roder/issues/258)) ([ef86d6c](https://github.com/krezh/roder/commit/ef86d6c1d47b5ca81cc1fa1aa5dcbd959775f128))
+* **cargo:** lock file maintenance cargo.lock ([#259](https://github.com/krezh/roder/issues/259)) ([55f8199](https://github.com/krezh/roder/commit/55f81993bdde065450edb2f7cc16c4f82c216015))
+* **cargo:** lock file maintenance cargo.lock ([#262](https://github.com/krezh/roder/issues/262)) ([0e068e0](https://github.com/krezh/roder/commit/0e068e06b76e799c33fc86ec0a83ecd0e6ed5baf))
+* **cargo:** lock file maintenance cargo.lock ([#265](https://github.com/krezh/roder/issues/265)) ([bc7e830](https://github.com/krezh/roder/commit/bc7e830eb3f22197501ef62480febe62f653a0e4))
+
+
+### Code Refactoring
+
+* **ui:** modernize responsive interface ([f4b3675](https://github.com/krezh/roder/commit/f4b3675f2a4fad5ce587d1e3b58179487f37d369))
+
 ## [0.1.49](https://github.com/krezh/roder/compare/0.1.48...0.1.49) (2026-09-20)
 
 

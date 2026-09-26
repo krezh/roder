@@ -2593,9 +2593,9 @@ dependencies = [
 
 [[package]]
 name = "leptos_integration_utils"
-version = "0.8.8"
+version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c097f89cd9aa606297672f56fa5bdda09f01609a9f4eefaccdbb5ab5afea4279"
+checksum = "fd93f4fd62ee9845cc50b0925272bccce6fd18e8168c4ad8a4f50eef9a93f747"
 dependencies = [
  "futures",
  "hydration_context",
@@ -2988,7 +2988,7 @@ version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "51e219e79014df21a225b1860a479e2dcd7cbd9130f4defd4bd0e191ea31d67d"
 dependencies = [
- "base64 0.21.7",
+ "base64 0.22.1",
  "chrono",
  "getrandom 0.2.17",
  "http",
@@ -3447,7 +3447,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03da047801ff44bb6a4d407d4860c05fd70bb81714e6b2f3812603d5b145b042"
 dependencies = [
  "heck",
- "itertools 0.10.5",
+ "itertools 0.14.0",
  "log",
  "multimap",
  "petgraph",
@@ -3468,7 +3468,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -4466,7 +4466,7 @@ checksum = "7bd22781911de0ca6debda95f073c8f18bec65d1a94f1fa9573f3102e514cea4"
 dependencies = [
  "ahash",
  "annotate-snippets",
- "base64 0.21.7",
+ "base64 0.22.1",
  "encoding_rs_io",
  "getrandom 0.3.4",
  "granit-parser",
@@ -4585,9 +4585,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "3.23.0"
+version = "3.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "935177bb8c0cd8ca1a4e6d1a2ac8988bea69cab4f9d3a31311e012ad27868ea4"
+checksum = "df9adc193c780ef8f159aee8b61e2d5801aaa555e6eb0947fe45530ec506296f"
 dependencies = [
  "base64 0.23.1",
  "bs58",
@@ -4606,9 +4606,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with_macros"
-version = "3.23.0"
+version = "3.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d607aa01a3cb0ad757d6fd216136910db3c97b102fe686585689615a02dbcdc"
+checksum = "3e17bbc68e28663bbbb90df47e058aa7eda4fb445b89fe70457bb94fbccf6e49"
 dependencies = [
  "darling 0.24.1",
  "proc-macro2",
@@ -5875,7 +5875,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -1912,10 +1912,8 @@ fn tuppr_node_names(kind: &str, data: &Value) -> Vec<String> {
             names.push(name.to_string());
         }
     } else {
-        for path in ["/status/currentNode"] {
-            if let Some(name) = data.pointer(path).and_then(Value::as_str) {
-                names.push(name.to_string());
-            }
+        if let Some(name) = data.pointer("/status/currentNode").and_then(Value::as_str) {
+            names.push(name.to_string());
         }
         for path in ["/status/currentNodes", "/status/completedNodes"] {
             names.extend(
@@ -2362,7 +2360,7 @@ fn deduplicate_and_sort(resources: &mut Vec<ResourceRef>) {
 
 fn reserve_node_slots(count: &AtomicUsize, requested: usize) -> usize {
     let mut granted = 0;
-    let _ = count.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+    let _ = count.try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
         granted = requested.min(MAX_NODES.saturating_sub(current));
         Some(current + granted)
     });

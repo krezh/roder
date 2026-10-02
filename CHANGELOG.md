@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.1.51](https://github.com/krezh/roder/compare/0.1.50...0.1.51) (2026-10-02)
+
+
+### Features
+
+* **container:** update image ghcr.io/rust-lang/rust (1.98.1 ➔ 1.99.0) ([#279](https://github.com/krezh/roder/issues/279)) ([3635b52](https://github.com/krezh/roder/commit/3635b5297d1e7ce2769bad5ff184678b22801dc9))
+
+
+### Bug Fixes
+
+* **cargo:** update rust crate croner (4.0.0 ➔ 4.0.1) ([#280](https://github.com/krezh/roder/issues/280)) ([df183d6](https://github.com/krezh/roder/commit/df183d617c584b1b168ca38de256bdc0e96f84ad))
+* **cargo:** update rust crate tokio-rustls (0.26.5 ➔ 0.26.6) ([#270](https://github.com/krezh/roder/issues/270)) ([2b998b3](https://github.com/krezh/roder/commit/2b998b3ff683eb51903736f87712b163eb43edd0))
+* **cargo:** update rustwright digest (fca1438 ➔ b546625) ([#275](https://github.com/krezh/roder/issues/275)) ([4c7b621](https://github.com/krezh/roder/commit/4c7b621794592fe9036476b288835bd46577b321))
+* **container:** update image gcr.io/distroless/cc-debian13 (4594d59 ➔ 1597832) ([#276](https://github.com/krezh/roder/issues/276)) ([ab07965](https://github.com/krezh/roder/commit/ab07965be565b5781f0253c28a72f298b533d5cc))
+* **k8s:** resolve clippy warnings for rust 1.99 ([99c2393](https://github.com/krezh/roder/commit/99c2393041c45e2da55522c27480af94627c40d8))
+
+
+### Miscellaneous Chores
+
+* **cargo:** lock file maintenance cargo.lock ([#272](https://github.com/krezh/roder/issues/272)) ([3622e0c](https://github.com/krezh/roder/commit/3622e0c455d0e74dd0264f4ce59d0b25cff522fc))
+* **cargo:** lock file maintenance cargo.lock ([#273](https://github.com/krezh/roder/issues/273)) ([a03c8c9](https://github.com/krezh/roder/commit/a03c8c91d26f3d74267e5d6b59ed6d3c4dc03c63))
+* **cargo:** lock file maintenance cargo.lock ([#274](https://github.com/krezh/roder/issues/274)) ([ccdc8a5](https://github.com/krezh/roder/commit/ccdc8a5cbafe11e54b655f7c2b083aebcfdbd6f2))
+* **cargo:** lock file maintenance cargo.lock ([#278](https://github.com/krezh/roder/issues/278)) ([0bca3cf](https://github.com/krezh/roder/commit/0bca3cf83448e43a9ca43f45e2e5f4dd3fa69f88))
+
 ## [0.1.50](https://github.com/krezh/roder/compare/0.1.49...0.1.50) (2026-09-26)
 
 

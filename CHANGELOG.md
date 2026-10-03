@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.52](https://github.com/krezh/roder/compare/0.1.51...0.1.52) (2026-10-03)
+
+
+### Bug Fixes
+
+* **cargo:** update rust crate tokio (1.53.1 ➔ 1.53.2) ([#284](https://github.com/krezh/roder/issues/284)) ([175e7fd](https://github.com/krezh/roder/commit/175e7fd7ed46beb10be43f6bf4e3c3d9a1eaac55))
+* **container:** update image ghcr.io/rust-lang/rust (a8a5f0a ➔ 5d05167) ([#283](https://github.com/krezh/roder/issues/283)) ([ed9432c](https://github.com/krezh/roder/commit/ed9432c2972baaabe5839b45d8dc633953da92d1))
+
+
+### Miscellaneous Chores
+
+* **cargo:** lock file maintenance cargo.lock ([#281](https://github.com/krezh/roder/issues/281)) ([17f66a3](https://github.com/krezh/roder/commit/17f66a308b019d273f52ad1397e81c3480df7420))
+* **cargo:** lock file maintenance cargo.lock ([#285](https://github.com/krezh/roder/issues/285)) ([37a18ce](https://github.com/krezh/roder/commit/37a18cea6fdd5d0911c61e0f1fff4183e67d6f43))
+
 ## [0.1.51](https://github.com/krezh/roder/compare/0.1.50...0.1.51) (2026-10-02)
 
 

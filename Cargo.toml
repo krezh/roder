@@ -72,11 +72,6 @@ tokio-rustls = { version = "0.26", default-features = false, features = [
 bytes = "1"
 http-body-util = "0.1"
 
-# Upstream fix for Rust E0365 future-incompatibility warning. Remove once a
-# proc-macro-error2 release includes https://github.com/GnomedDev/proc-macro-error-2/pull/14.
-[patch.crates-io]
-proc-macro-error2 = { git = "https://github.com/fgardt/proc-macro-error-2", rev = "53ff94b61c678593158db1a3d50269c6f0de0db7" }
-
 [package]
 name = "roder"
 version = "0.1.51"

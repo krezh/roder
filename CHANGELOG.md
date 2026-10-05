@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.52](https://github.com/krezh/roder/compare/0.1.51...0.1.52) (2026-10-05)
+
+
+### Bug Fixes
+
+* **cargo:** update rust crate leptos (0.8.21 ➔ 0.8.22) ([#287](https://github.com/krezh/roder/issues/287)) ([88254c3](https://github.com/krezh/roder/commit/88254c3ccdf0bb7e96b0ce6e792c5e0402df200c))
+* **cargo:** update rust crate leptos_router (0.8.16 ➔ 0.8.17) ([#288](https://github.com/krezh/roder/issues/288)) ([f22b7b2](https://github.com/krezh/roder/commit/f22b7b2e91bd3ae59473f97247afb873f590d53c))
+* **cargo:** update rust crate tokio (1.53.1 ➔ 1.53.2) ([#284](https://github.com/krezh/roder/issues/284)) ([175e7fd](https://github.com/krezh/roder/commit/175e7fd7ed46beb10be43f6bf4e3c3d9a1eaac55))
+* **container:** update image ghcr.io/rust-lang/rust (5d05167 ➔ 3745c05) ([#286](https://github.com/krezh/roder/issues/286)) ([268e937](https://github.com/krezh/roder/commit/268e937488d67ea29a0f861cc440ad9eaa35660b))
+* **container:** update image ghcr.io/rust-lang/rust (a8a5f0a ➔ 5d05167) ([#283](https://github.com/krezh/roder/issues/283)) ([ed9432c](https://github.com/krezh/roder/commit/ed9432c2972baaabe5839b45d8dc633953da92d1))
+
+
+### Miscellaneous Chores
+
+* **cargo:** lock file maintenance cargo.lock ([#281](https://github.com/krezh/roder/issues/281)) ([17f66a3](https://github.com/krezh/roder/commit/17f66a308b019d273f52ad1397e81c3480df7420))
+* **cargo:** lock file maintenance cargo.lock ([#285](https://github.com/krezh/roder/issues/285)) ([37a18ce](https://github.com/krezh/roder/commit/37a18cea6fdd5d0911c61e0f1fff4183e67d6f43))
+
 ## [0.1.51](https://github.com/krezh/roder/compare/0.1.50...0.1.51) (2026-10-02)
 
 

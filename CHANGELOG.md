@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.1.53](https://github.com/krezh/roder/compare/0.1.52...0.1.53) (2026-10-09)
+
+
+### Features
+
+* **cargo:** update rust crate hyper (1.11.1 ➔ 1.12.0) ([#293](https://github.com/krezh/roder/issues/293)) ([42f7bed](https://github.com/krezh/roder/commit/42f7bede81932cfb45533107505abfcdea37b8bb))
+
+
+### Bug Fixes
+
+* **container:** update image ghcr.io/rust-lang/rust (3745c05 ➔ 6ff07ed) ([#295](https://github.com/krezh/roder/issues/295)) ([6f5fafe](https://github.com/krezh/roder/commit/6f5fafe60aa71887aa1035cb7ec9a3e683640b50))
+
+
+### Miscellaneous Chores
+
+* **cargo:** lock file maintenance cargo.lock ([#289](https://github.com/krezh/roder/issues/289)) ([e14a261](https://github.com/krezh/roder/commit/e14a261e2fde69f085396521cceb5545f486651f))
+* **cargo:** lock file maintenance cargo.lock ([#291](https://github.com/krezh/roder/issues/291)) ([1b0ea1b](https://github.com/krezh/roder/commit/1b0ea1bc8f4fb784c92cbbe16a4a6f5701de7cb5))
+* **cargo:** lock file maintenance cargo.lock ([#294](https://github.com/krezh/roder/issues/294)) ([b701c2e](https://github.com/krezh/roder/commit/b701c2ece35c1eddb7b6683849d7495d61a05c90))
+* **cargo:** lock file maintenance cargo.lock ([#296](https://github.com/krezh/roder/issues/296)) ([20d5f55](https://github.com/krezh/roder/commit/20d5f554dac6bb4fd66f8b76bca0112c392e959c))
+* **cargo:** lock file maintenance cargo.lock ([#297](https://github.com/krezh/roder/issues/297)) ([eb83d40](https://github.com/krezh/roder/commit/eb83d407d0e3f8e51d2257e95b5dc4bb780353a7))
+* **cargo:** lock file maintenance cargo.lock ([#299](https://github.com/krezh/roder/issues/299)) ([0e129ea](https://github.com/krezh/roder/commit/0e129ea0308f39898d8d9992b6d6821d9b8d2a32))
+
 ## [0.1.52](https://github.com/krezh/roder/compare/0.1.51...0.1.52) (2026-10-05)
 
 

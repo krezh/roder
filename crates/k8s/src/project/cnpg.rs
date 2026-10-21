@@ -80,14 +80,17 @@ fn scheduled_backup_cells_at(data: &Value, now: time::OffsetDateTime) -> (Vec<St
 pub(crate) fn pooler_cells(data: &Value) -> (Vec<String>, RowStatus) {
     let cluster = str_at(data, &["spec", "cluster", "name"]).unwrap_or_default();
     let type_ = str_at(data, &["spec", "type"]).unwrap_or_default();
-    let instances = int_at(data, &["status", "instances"])
-        .or_else(|| int_at(data, &["spec", "instances"]))
-        .unwrap_or(1);
+    let desired_instances = int_at(data, &["spec", "instances"]).unwrap_or(1);
+    let reported_instances = int_at(data, &["status", "instances"]);
+    let instances = reported_instances.unwrap_or(desired_instances);
     let phase = str_at(data, &["status", "phase"]).unwrap_or_default();
     let reason = str_at(data, &["status", "phaseReason"])
         .or_else(|| str_at(data, &["status", "error"]))
         .unwrap_or_default();
     let status = match phase.to_ascii_lowercase().as_str() {
+        "active" if reported_instances.is_some_and(|reported| reported < desired_instances) => {
+            RowStatus::Pending
+        }
         "active" => RowStatus::Ok,
         "paused" => RowStatus::Warn,
         "inactive" => RowStatus::Pending,
@@ -242,7 +245,7 @@ mod tests {
     }
 
     #[test]
-    fn active_pooler_uses_reported_instances() {
+    fn active_pooler_below_desired_instances_is_pending() {
         let data = json!({
             "spec": {"cluster": {"name": "app"}, "type": "rw", "instances": 3},
             "status": {"instances": 2, "phase": "active"}
@@ -250,6 +253,41 @@ mod tests {
         let (cells, status) = pooler_cells(&data);
 
         assert_eq!(cells, ["app", "rw", "2", "active", ""]);
+        assert_eq!(status, RowStatus::Pending);
+    }
+
+    #[test]
+    fn active_pooler_at_or_above_desired_instances_is_ok() {
+        for reported_instances in [3, 4] {
+            let data = json!({
+                "spec": {"instances": 3},
+                "status": {"instances": reported_instances, "phase": "active"}
+            });
+
+            assert_eq!(pooler_cells(&data).1, RowStatus::Ok);
+        }
+    }
+
+    #[test]
+    fn active_pooler_without_report_uses_desired_instances() {
+        let data = json!({
+            "spec": {"cluster": {"name": "app"}, "type": "rw", "instances": 3},
+            "status": {"phase": "active"}
+        });
+        let (cells, status) = pooler_cells(&data);
+
+        assert_eq!(cells, ["app", "rw", "3", "active", ""]);
         assert_eq!(status, RowStatus::Ok);
+    }
+
+    #[test]
+    fn active_pooler_with_reported_zero_uses_default_desired_instances() {
+        let data = json!({
+            "status": {"instances": 0, "phase": "active"}
+        });
+        let (cells, status) = pooler_cells(&data);
+
+        assert_eq!(cells, ["", "", "0", "active", ""]);
+        assert_eq!(status, RowStatus::Pending);
     }
 }

@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.1.54](https://github.com/krezh/roder/compare/0.1.53...0.1.54) (2026-10-23)
+
+
+### Features
+
+* **cargo:** update rust crate tokio (1.53.3 ➔ 1.54.0) ([#321](https://github.com/krezh/roder/issues/321)) ([9a6f3e5](https://github.com/krezh/roder/commit/9a6f3e5e0daa7998554a540f310d7c4d9dfa05ff))
+
+
+### Bug Fixes
+
+* **cargo:** update rust crate croner (4.0.1 ➔ 4.0.2) ([#328](https://github.com/krezh/roder/issues/328)) ([0f26cd2](https://github.com/krezh/roder/commit/0f26cd2bf6816a3c774a7dd0c93862f8e3f5b1ab))
+* **cargo:** update rust crate tokio (1.54.0 ➔ 1.54.1) ([#329](https://github.com/krezh/roder/issues/329)) ([000b5ec](https://github.com/krezh/roder/commit/000b5ec2f7fc6a4392ec4b9cd8f422e20e6ce106))
+* **container:** update image gcr.io/distroless/cc-debian13 (1597832 ➔ e530497) ([#324](https://github.com/krezh/roder/issues/324)) ([3035189](https://github.com/krezh/roder/commit/303518957eb2a7183401d6338977822a0ef32d6e))
+* **container:** update image gcr.io/distroless/cc-debian13 (e530497 ➔ b2e43dc) ([#327](https://github.com/krezh/roder/issues/327)) ([b84636c](https://github.com/krezh/roder/commit/b84636c18b29edb72fb4abb1eeb35428a1762250))
+* **container:** update image ghcr.io/rust-lang/rust (99bb0e9 ➔ 931c2c0) ([#333](https://github.com/krezh/roder/issues/333)) ([fabe074](https://github.com/krezh/roder/commit/fabe074cad426f16596534d6fb0aa83b75eadaa6))
+* **container:** update image ghcr.io/rust-lang/rust (e259494 ➔ 99bb0e9) ([#331](https://github.com/krezh/roder/issues/331)) ([59b2c8f](https://github.com/krezh/roder/commit/59b2c8f9b484ecade6e1cbebb76bab5f7f5c1cde))
+
+
+### Miscellaneous Chores
+
+* **cargo:** lock file maintenance cargo.lock ([#323](https://github.com/krezh/roder/issues/323)) ([0fbc09f](https://github.com/krezh/roder/commit/0fbc09fa25b02ff2b80c0b3ca146a073729b37dd))
+* **cargo:** lock file maintenance cargo.lock ([#326](https://github.com/krezh/roder/issues/326)) ([497b9bc](https://github.com/krezh/roder/commit/497b9bc82ad135cb6dff4e1eabc86ccae7b1da55))
+* **cargo:** lock file maintenance cargo.lock ([#330](https://github.com/krezh/roder/issues/330)) ([8db61e1](https://github.com/krezh/roder/commit/8db61e1b99d41e01fa97d76a6ae068b42068ceac))
+* **cargo:** lock file maintenance cargo.lock ([#332](https://github.com/krezh/roder/issues/332)) ([8749b93](https://github.com/krezh/roder/commit/8749b936eb1b6aec2a4f045ee53dfc779014d8d4))
+* **cargo:** lock file maintenance cargo.lock ([#336](https://github.com/krezh/roder/issues/336)) ([5c598f8](https://github.com/krezh/roder/commit/5c598f8544f07947268c1491f313eea21be2d00c))
+
 ## [0.1.53](https://github.com/krezh/roder/compare/0.1.52...0.1.53) (2026-10-18)
 
 

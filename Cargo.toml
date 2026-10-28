@@ -114,7 +114,7 @@ kube = { version = "4", default-features = false, features = [
   "client",
   "rustls-tls",
 ], optional = true }
-k8s-openapi = { version = "0.28", optional = true }
+k8s-openapi = { version = "0.29", optional = true }
 base64 = "0.23"
 rand = { version = "0.10", optional = true }
 aes-gcm = { version = "0.11", optional = true }

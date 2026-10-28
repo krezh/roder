@@ -52,8 +52,6 @@
     {
       matchPackageNames: ["kube", "k8s-openapi"],
       groupName: "kube",
-      groupSingleUpdates: true,
-      rangeStrategy: "bump",
       minimumGroupSize: 2,
       separateMajorMinor: false,
       automerge: true,

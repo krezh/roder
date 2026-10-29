@@ -4003,7 +4003,7 @@ dependencies = [
 
 [[package]]
 name = "roder"
-version = "0.1.53"
+version = "0.1.54"
 dependencies = [
  "aes-gcm",
  "axum",
@@ -4054,7 +4054,7 @@ dependencies = [
 
 [[package]]
 name = "roder-auth"
-version = "0.1.53"
+version = "0.1.54"
 dependencies = [
  "base64 0.23.1",
  "openidconnect",
@@ -4070,7 +4070,7 @@ dependencies = [
 
 [[package]]
 name = "roder-core"
-version = "0.1.53"
+version = "0.1.54"
 dependencies = [
  "serde",
  "serde_json",
@@ -4078,7 +4078,7 @@ dependencies = [
 
 [[package]]
 name = "roder-k8s"
-version = "0.1.53"
+version = "0.1.54"
 dependencies = [
  "arc-swap",
  "base64 0.23.1",
@@ -4105,7 +4105,7 @@ dependencies = [
 
 [[package]]
 name = "roder-mtls"
-version = "0.1.53"
+version = "0.1.54"
 dependencies = [
  "rcgen",
  "rustls",
@@ -4117,7 +4117,7 @@ dependencies = [
 
 [[package]]
 name = "roder-talos"
-version = "0.1.53"
+version = "0.1.54"
 dependencies = [
  "async-stream",
  "base64 0.23.1",
@@ -6154,7 +6154,7 @@ dependencies = [
 
 [[package]]
 name = "xterm-vendor"
-version = "0.1.53"
+version = "0.1.54"
 dependencies = [
  "flate2",
  "reqwest 0.13.5",

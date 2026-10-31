@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.1.55](https://github.com/krezh/roder/compare/0.1.54...0.1.55) (2026-10-31)
+
+
+### Features
+
+* **cargo:** update rust crate openidconnect (4.0.1 ➔ 4.1.0) ([#354](https://github.com/krezh/roder/issues/354)) ([7351751](https://github.com/krezh/roder/commit/735175192fc8afe8807b8b7c7aee37022a746236))
+
+
+### Bug Fixes
+
+* **cargo:** update rust crate leptos (0.8.22 ➔ 0.8.23) ([#353](https://github.com/krezh/roder/issues/353)) ([e647cb7](https://github.com/krezh/roder/commit/e647cb7b2837bae48ded06b7923f9df313b7858f))
+* **cargo:** update rust crate tonic-prost (0.14.8 ➔ 0.14.9) ([#348](https://github.com/krezh/roder/issues/348)) ([2159a70](https://github.com/krezh/roder/commit/2159a70769675aa8a3f4f9d02f2f758fcb7326bc))
+* **cargo:** update wasm-bindgen ([#351](https://github.com/krezh/roder/issues/351)) ([98932b0](https://github.com/krezh/roder/commit/98932b0c55052ced8e30c0876e63978820ad621f))
+
+
+### Miscellaneous Chores
+
+* **cargo:** lock file maintenance cargo.lock ([#350](https://github.com/krezh/roder/issues/350)) ([9465d03](https://github.com/krezh/roder/commit/9465d033b66b5ea99c6cf8552c325acd9c650563))
+* **cargo:** lock file maintenance cargo.lock ([#352](https://github.com/krezh/roder/issues/352)) ([4cbf5b9](https://github.com/krezh/roder/commit/4cbf5b90eaa6a8df7045945c029f43c18e96178c))
+
 ## [0.1.54](https://github.com/krezh/roder/compare/0.1.53...0.1.54) (2026-10-29)
 
 

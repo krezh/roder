@@ -78,7 +78,7 @@ k8s-openapi = { version = "0.28", default-features = false }
 
 [package]
 name = "roder"
-version = "0.1.54"
+version = "0.1.55"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

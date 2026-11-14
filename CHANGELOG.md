@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.1.56](https://github.com/krezh/roder/compare/0.1.55...0.1.56) (2026-11-14)
+
+
+### Features
+
+* **container:** update image ghcr.io/rust-lang/rust (1.99.1 ➔ 1.100.0) ([#390](https://github.com/krezh/roder/issues/390)) ([8c91030](https://github.com/krezh/roder/commit/8c91030af1c3e327ee81c88b7ecee2e88256d820))
+
+
+### Bug Fixes
+
+* **cargo:** update rust crate sonic-rs (0.5.10 ➔ 0.5.11) ([#391](https://github.com/krezh/roder/issues/391)) ([76efb74](https://github.com/krezh/roder/commit/76efb7467ff4dbf359617d087b3c34d207706d14))
+* **cargo:** update tokio-prost monorepo (0.14.5 ➔ 0.14.6) ([#387](https://github.com/krezh/roder/issues/387)) ([ca74c1f](https://github.com/krezh/roder/commit/ca74c1f0f2cbd3116afb2df16eea8e749770370f))
+* **container:** update image gcr.io/distroless/cc-debian13 (e1f5543 ➔ 809d04a) ([#388](https://github.com/krezh/roder/issues/388)) ([5f3d4db](https://github.com/krezh/roder/commit/5f3d4db2f7bc474622aaf0e251afc90341fb818c))
+
+
+### Miscellaneous Chores
+
+* **cargo:** lock file maintenance cargo.lock ([#385](https://github.com/krezh/roder/issues/385)) ([7460d9c](https://github.com/krezh/roder/commit/7460d9c887d0682274a245220ac5a76ccf215d08))
+* **cargo:** lock file maintenance cargo.lock ([#389](https://github.com/krezh/roder/issues/389)) ([7874c86](https://github.com/krezh/roder/commit/7874c86f9439d88b5012633cfb53a63765ccdb63))
+* **cargo:** lock file maintenance cargo.lock ([#392](https://github.com/krezh/roder/issues/392)) ([8645880](https://github.com/krezh/roder/commit/8645880b7f2c503567fba6d76c0bb0d5667d6181))
+
 ## [0.1.55](https://github.com/krezh/roder/compare/0.1.54...0.1.55) (2026-11-11)
 
 

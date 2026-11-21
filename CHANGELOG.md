@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.2.0](https://github.com/krezh/roder/compare/0.1.55...0.2.0) (2026-11-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **cargo:** Update Rust crate gloo-net (0.7.0 ➔ 0.8.0) ([#394](https://github.com/krezh/roder/issues/394))
+
+### Features
+
+* **cargo:** Update Rust crate gloo-net (0.7.0 ➔ 0.8.0) ([#394](https://github.com/krezh/roder/issues/394)) ([52edbf4](https://github.com/krezh/roder/commit/52edbf4848181ffa0379f4b7c231261c43626515))
+* **container:** update image ghcr.io/rust-lang/rust (1.99.1 ➔ 1.100.0) ([#390](https://github.com/krezh/roder/issues/390)) ([8c91030](https://github.com/krezh/roder/commit/8c91030af1c3e327ee81c88b7ecee2e88256d820))
+
+
+### Bug Fixes
+
+* **cargo:** update rust crate bytes (1.12.1 ➔ 1.12.2) ([#398](https://github.com/krezh/roder/issues/398)) ([a4c6499](https://github.com/krezh/roder/commit/a4c64991eff283a7eecd452ba8bfcc876e307995))
+* **cargo:** update rust crate rand (0.10.3 ➔ 0.10.4) ([#395](https://github.com/krezh/roder/issues/395)) ([48667af](https://github.com/krezh/roder/commit/48667af56667ab4834eb575a7b9251907ff09313))
+* **cargo:** update rust crate sonic-rs (0.5.10 ➔ 0.5.11) ([#391](https://github.com/krezh/roder/issues/391)) ([76efb74](https://github.com/krezh/roder/commit/76efb7467ff4dbf359617d087b3c34d207706d14))
+* **cargo:** update rust crate sonic-rs (0.5.11 ➔ 0.5.12) ([#403](https://github.com/krezh/roder/issues/403)) ([c514553](https://github.com/krezh/roder/commit/c5145535b0ba13c9dc1112a80bea1a08389c3574))
+* **cargo:** update tokio-prost monorepo (0.14.5 ➔ 0.14.6) ([#387](https://github.com/krezh/roder/issues/387)) ([ca74c1f](https://github.com/krezh/roder/commit/ca74c1f0f2cbd3116afb2df16eea8e749770370f))
+* **container:** update image gcr.io/distroless/cc-debian13 (e1f5543 ➔ 809d04a) ([#388](https://github.com/krezh/roder/issues/388)) ([5f3d4db](https://github.com/krezh/roder/commit/5f3d4db2f7bc474622aaf0e251afc90341fb818c))
+* **container:** update image ghcr.io/rust-lang/rust (0b0ea86 ➔ 223cc32) ([#400](https://github.com/krezh/roder/issues/400)) ([0216c68](https://github.com/krezh/roder/commit/0216c684b516781178ff5b7eea202abfa18e5225))
+
+
+### Miscellaneous Chores
+
+* **cargo:** lock file maintenance cargo.lock ([#385](https://github.com/krezh/roder/issues/385)) ([7460d9c](https://github.com/krezh/roder/commit/7460d9c887d0682274a245220ac5a76ccf215d08))
+* **cargo:** lock file maintenance cargo.lock ([#389](https://github.com/krezh/roder/issues/389)) ([7874c86](https://github.com/krezh/roder/commit/7874c86f9439d88b5012633cfb53a63765ccdb63))
+* **cargo:** lock file maintenance cargo.lock ([#392](https://github.com/krezh/roder/issues/392)) ([8645880](https://github.com/krezh/roder/commit/8645880b7f2c503567fba6d76c0bb0d5667d6181))
+* **cargo:** lock file maintenance cargo.lock ([#393](https://github.com/krezh/roder/issues/393)) ([4b65f1e](https://github.com/krezh/roder/commit/4b65f1eea0b902f40187ba4038825c64cd6a5f3f))
+* **cargo:** lock file maintenance cargo.lock ([#396](https://github.com/krezh/roder/issues/396)) ([b3a7b9b](https://github.com/krezh/roder/commit/b3a7b9bf1da6f558af3ef390108f817bf23e7474))
+* **cargo:** lock file maintenance cargo.lock ([#397](https://github.com/krezh/roder/issues/397)) ([b0d620d](https://github.com/krezh/roder/commit/b0d620d0556a4be930a6d87d7fc5037cedebff2e))
+* **cargo:** lock file maintenance cargo.lock ([#399](https://github.com/krezh/roder/issues/399)) ([c4a053a](https://github.com/krezh/roder/commit/c4a053ab5b882c56bc0cebee4ad7e37c1849b94b))
+* **cargo:** lock file maintenance cargo.lock ([#402](https://github.com/krezh/roder/issues/402)) ([e4f7a6d](https://github.com/krezh/roder/commit/e4f7a6d3b38b82e6fa7f12be6cc86993b9fd3551))
+* **cargo:** lock file maintenance cargo.lock ([#404](https://github.com/krezh/roder/issues/404)) ([173e3a1](https://github.com/krezh/roder/commit/173e3a1dea851be2ea153d454ef55c9aa788dea4))
+* **cargo:** lock file maintenance cargo.lock ([#405](https://github.com/krezh/roder/issues/405)) ([1ad143d](https://github.com/krezh/roder/commit/1ad143d376ad43833089109ced334b378092c389))
+
 ## [0.1.55](https://github.com/krezh/roder/compare/0.1.54...0.1.55) (2026-11-11)
 
 

@@ -2,8 +2,8 @@ apiVersion: v2
 name: roder
 description: An in-cluster Kubernetes web GUI (axum + kube-rs + Leptos)
 type: application
-version: 0.1.55
-appVersion: 0.1.55
+version: 0.2.0
+appVersion: 0.2.0
 home: https://github.com/krezh/roder
 sources:
   - https://github.com/krezh/roder
